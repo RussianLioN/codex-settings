@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Codex Batch Task",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "repo",
+    "base_sha",
+    "goal",
+    "constraints",
+    "validation_profile",
+    "validation_commands",
+    "risk_level",
+    "output_schema",
+    "owned_write_scope",
+    "allowed_read_scope",
+    "do_not_touch",
+    "done_criteria",
+    "expected_artifact",
+    "stop_condition"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "repo": {
+      "type": "string"
+    },
+    "base_sha": {
+      "type": "string"
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1
+    },
+    "constraints": {},
+    "validation_profile": {
+      "type": "string"
+    },
+    "validation_commands": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "risk_level": {
+      "type": "string"
+    },
+    "output_schema": {},
+    "owned_write_scope": {},
+    "allowed_read_scope": {},
+    "do_not_touch": {},
+    "done_criteria": {},
+    "expected_artifact": {},
+    "stop_condition": {}
+  }
+}
