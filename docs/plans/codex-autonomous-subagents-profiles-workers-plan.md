@@ -2,7 +2,8 @@
 
 ## Summary
 
-- Не менять глобальный `~/.codex/config.toml` на высокий fan-out. Оставить high-concurrency только в явных профилях.
+- Считать глобальный `agents.max_threads = 20` только потолком открытых agent threads, а не безопасным размером одной волны.
+- Использовать default wave size `6`; повышать его только после FD preflight и отдельного canary.
 - Использовать интерактивные subagents для read-heavy exploration, review, triage и параллельного анализа.
 - Использовать `codex exec --json` плюс внешнюю очередь и worktree-per-task для настоящей автономной batch-работы.
 - Использовать custom agents для ролей, profiles для режимов доступа, модели и concurrency, skills для повторяемых workflows, plugins для распространения skills, MCP и hooks.
@@ -98,8 +99,12 @@
   - wave 2: focused reviewers/test runners;
   - wave 3: один или несколько writers только при disjoint write scopes;
   - wave 4: independent reviewers.
-- Для read-heavy waves использовать `wide-readers`; начинать с 8, затем 12, затем 16 только после canary.
-- После каждой wave: wait for all, summarize, close completed agents, проверить `/agent`, `/status`, `/usage`.
+- Для read-heavy waves использовать `wide-readers`, но запускать не более 6 live agents одновременно; canary ladder `8 -> 12 -> 16` разрешен только при soft limit не ниже `4096` и успешном FD preflight.
+- Перед каждой wave закрыть completed/stale agents и запустить `$HOME/.local/bin/codex-highfd --fd-doctor --wave-size N`; agent shells не должны зависеть от interactive aliases.
+- После каждой wave: wait for all, collect results, немедленно вызвать `close_agent` для каждого завершенного thread, затем summarize и проверить `/agent`, `/status`, `/usage`.
+- При `Too many open files` / `EMFILE` прекратить новые spawn, собрать доступные ответы, закрыть открытые threads и отметить пропуски как environment limitation, а не как предметное доказательство.
+- При `agent thread limit reached` уменьшить live batch до фактической capacity и продолжить только оставшиеся assignments после освобождения завершенных threads.
+- Если terminal `codex exec` не предоставляет `close_agent`, разрешена только одна terminal operation; выход процесса после synthesis является session-exit cleanup.
 - Не делегировать tiny tasks, serial tasks, unclear product decisions, merge/release decisions.
 - Не поднимать `max_depth` выше 1.
 
@@ -140,6 +145,9 @@
 - Plugins использовать только когда workflow нужно распространять между проектами или вместе с MCP/hooks.
 - Установить и использовать Codex Security plugin для security scans, но не заменять им diff-focused review и acceptance tests.
 - MCP включать минимально; heavy/write-capable tools не наследовать в массовые read-only agents.
+- `node_repl` и bundled browser runtime должны ссылаться на один установленный desktop bundle. Для текущего macOS runtime это `/Applications/ChatGPT.app/Contents/Resources`; version и trusted browser-client SHA должны соответствовать установленному browser plugin.
+- Обычный интерактивный `codex` запускается через `~/.local/bin/codex-highfd`, который поднимает inherited soft FD limit до `4096` без изменения системного `launchctl` limit.
+- `scripts/codex_fd_doctor.sh` является обязательным preflight для subagent waves; `WARN` допускает только default wave size 6, `BLOCK` запрещает новые spawn.
 - Hooks добавить fail-closed для `PreToolUse`, `PermissionRequest`, `PostToolUse`, `SubagentStart`, `SubagentStop`, `Stop`.
 - Hooks должны блокировать или логировать: writes вне worktree, `.git`, `~/.codex`, `~/.ssh`, secrets, `git push`, `gh pr merge`, destructive shell, `curl | sh`, `sudo`, `ssh/scp/rsync`, side-effect MCP/app tools.
 
@@ -152,7 +160,7 @@
 5. Прогнать TOML parse и `codex --profile <name> --strict-config --version`.
 6. Прогнать `codex debug prompt-input -c agents.max_threads=16 -c agents.max_depth=1 "smoke"`.
 7. Прогнать negative tests для read-only agents.
-8. Canary: 6 -> 8 -> 12 -> 16 read-only agents; остановиться при stale threads, limit errors, rate-limit pressure, orphan processes.
+8. Canary: сначала 6 read-only agents; затем отдельно 8 -> 12 -> 16 только при `status=OK`. Остановиться при stale threads, limit errors, rate-limit pressure или orphan processes.
 9. Включить aliases только после smoke:
    - `codexs='codex --profile standard'`
    - `codexro='codex --profile safe-readonly'`
@@ -163,15 +171,18 @@
 ## Acceptance Criteria
 
 - Unlimited не используется; `0`, `-1`, `"unlimited"` не допускаются.
+- Base config допускает `agents.max_threads <= 20`, но default live wave всегда равен 6.
 - Все профили явно задают `sandbox_mode`, `approval_policy`, `agents.max_threads`, `agents.max_depth`.
 - `max_depth = 1` везде.
 - `wide-readers-16` используется только для read-only canary.
 - Completed agents явно закрываются после каждой wave.
+- `node_repl` проходит MCP initialize/tools smoke, а `codex doctor` не сообщает unresolvable MCP command.
+- `codex-highfd --self-test` показывает soft limit `4096`; FD doctor блокирует wide wave при soft limit `256`.
 - Write tasks не редактируют primary checkout параллельно.
 - Batch workers работают только через isolated worktrees и artifacts.
 - Supervisor, а не worker, публикует результат.
 - Hooks блокируют опасные команды и пишут audit log.
-- Rollback возвращает `max_threads <= 6`, отключает high-concurrency profile usage и закрывает active agents/worktrees.
+- Rollback отключает high-concurrency profile usage, возвращает runtime config/skills/aliases из timestamped backup и закрывает active agents/worktrees. Значение `max_threads` не меняется без отдельного решения.
 
 ## Rollback
 
@@ -179,6 +190,6 @@
 - Остановить активные subagent waves.
 - Закрыть completed/stale agents; при необходимости начать новую session.
 - Отключить aliases на `wide-readers-16`.
-- Восстановить config backup.
+- Восстановить config, plugin cache, aliases и runtime skills из одного timestamped backup set.
 - Удалить только проверенные task-owned worktrees после artifact collection.
 - Проверить новый session через `/status`, `/usage`, `/agent`.
