@@ -127,6 +127,12 @@ def evaluate(event: str, payload: dict[str, Any]) -> tuple[str, str, dict[str, A
     if is_side_effect_mcp_or_app(tool_name):
         return "block", f"side-effect capable MCP/app tool is blocked: {tool_name}", details
 
+    if is_apply_patch_tool(tool_name):
+        patch_decision = evaluate_patch(command)
+        if patch_decision:
+            return "block", patch_decision, details
+        return "allow", "apply_patch targets stay inside current worktree", details
+
     if command:
         shell_decision = evaluate_shell(command)
         if shell_decision:
@@ -136,6 +142,36 @@ def evaluate(event: str, payload: dict[str, Any]) -> tuple[str, str, dict[str, A
         return "block", "fail-closed event lacked tool or command identity", details
 
     return "allow", "policy allowed", details
+
+
+def is_apply_patch_tool(tool_name: str) -> bool:
+    return "apply_patch" in tool_name.lower()
+
+
+def evaluate_patch(patch: str) -> str | None:
+    if not patch:
+        return "apply_patch payload is empty"
+    targets = re.findall(
+        r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$",
+        patch,
+        re.MULTILINE,
+    )
+    if not targets:
+        return "apply_patch payload has no file headers"
+    root = worktree_root()
+    for target in targets:
+        candidate = Path(target.strip())
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+        try:
+            resolved = candidate.resolve(strict=False)
+        except OSError:
+            resolved = candidate.absolute()
+        if not is_relative_to(resolved, root):
+            return f"apply_patch target is outside current worktree: {resolved}"
+        if ".git" in resolved.parts:
+            return f"apply_patch target is inside protected Git metadata: {resolved}"
+    return None
 
 
 def evaluate_shell(command: str) -> str | None:
