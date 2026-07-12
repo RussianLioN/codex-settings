@@ -197,12 +197,30 @@ def check_hooks() -> None:
     assert HOOK_EVENTS <= configured, f"hooks missing events: {sorted(HOOK_EVENTS - configured)}"
     assert policy_path.exists(), f"missing hook policy: {policy_path}"
     assert HOOK_POLICY.read_bytes() == policy_path.read_bytes(), "installed hook policy differs from tracked source"
-    blocked = run_hook(policy_path, "PreToolUse", {"tool_name": "Bash", "tool_input": {"command": "git push origin HEAD"}})
-    assert blocked.returncode != 0, "hook did not block git push"
+    allowed_main_push = run_hook(
+        policy_path,
+        "PreToolUse",
+        {"tool_name": "Bash", "tool_input": {"command": "git push origin HEAD"}},
+    )
+    assert allowed_main_push.returncode == 0, "hook blocked an interactive main-session git push"
+    blocked = run_hook(
+        policy_path,
+        "PreToolUse",
+        {
+            "agent_type": "implementation-worker",
+            "tool_name": "Bash",
+            "tool_input": {"command": "git push origin HEAD"},
+        },
+    )
+    assert blocked.returncode != 0, "hook did not block an autonomous worker git push"
     blocked_push_with_option = run_hook(
         policy_path,
         "PreToolUse",
-        {"tool_name": "Bash", "tool_input": {"command": " ".join(("/usr/bin/git", "-C", ".", "push", "origin", "HEAD"))}},
+        {
+            "agent_type": "implementation-worker",
+            "tool_name": "Bash",
+            "tool_input": {"command": " ".join(("/usr/bin/git", "-C", ".", "push", "origin", "HEAD"))},
+        },
     )
     assert blocked_push_with_option.returncode != 0, "hook did not block a global-option VCS push"
     blocked_merge = run_hook(

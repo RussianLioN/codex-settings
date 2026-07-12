@@ -40,7 +40,6 @@ SECRET_ASSIGNMENT = re.compile(r"(?i)(api[_-]?key|secret|token|password|credenti
 SECRET_REFERENCE = re.compile(r"(?i)(cat|sed|awk|rg|grep|less|more)\s+.*(\.env|id_rsa|id_ed25519|auth\.json|credentials?)")
 COMMAND_PREFIX = r"(?:^|[\s;&|])(?:[^\s;&|]*/)?"
 DANGEROUS_SHELL = [
-    (re.compile(COMMAND_PREFIX + r"git\s+push(?:\s|$)"), "git push is outside autonomous worker scope"),
     (re.compile(COMMAND_PREFIX + r"gh\s+pr\s+merge(?:\s|$)"), "gh pr merge is outside autonomous worker scope"),
     (re.compile(COMMAND_PREFIX + r"git\s+reset\s+--hard(?:\s|$)"), "git reset --hard is destructive"),
     (re.compile(COMMAND_PREFIX + r"git\s+checkout\s+--(?:\s|$)"), "git checkout -- can discard changes"),
@@ -111,6 +110,9 @@ def evaluate(event: str, payload: dict[str, Any]) -> tuple[str, str, dict[str, A
         "tool": tool_name,
         "command_excerpt": redact(command)[:500] if command else "",
     }
+    autonomous_agent = bool(find_first(payload, ("agent_id", "agentId", "agent_type", "agentType")))
+    if autonomous_agent:
+        details["agent_type"] = str(find_first(payload, ("agent_type", "agentType")) or "unknown")
 
     if event in {"PostToolUse", "SubagentStop", "Stop"}:
         return "allow", "audit-only event", details
@@ -134,7 +136,7 @@ def evaluate(event: str, payload: dict[str, Any]) -> tuple[str, str, dict[str, A
         return "allow", "apply_patch targets stay inside current worktree", details
 
     if command:
-        shell_decision = evaluate_shell(command)
+        shell_decision = evaluate_shell(command, autonomous_agent=autonomous_agent)
         if shell_decision:
             return "block", shell_decision, details
 
@@ -174,9 +176,9 @@ def evaluate_patch(patch: str) -> str | None:
     return None
 
 
-def evaluate_shell(command: str) -> str | None:
+def evaluate_shell(command: str, *, autonomous_agent: bool = False) -> str | None:
     normalized = " ".join(command.split())
-    vcs_decision = dangerous_vcs_command(normalized)
+    vcs_decision = dangerous_vcs_command(normalized, autonomous_agent=autonomous_agent)
     if vcs_decision:
         return vcs_decision
     for pattern, reason in DANGEROUS_SHELL:
@@ -276,7 +278,7 @@ def command_arguments(tokens: list[str], start: int) -> list[str]:
     return arguments
 
 
-def dangerous_vcs_command(command: str) -> str | None:
+def dangerous_vcs_command(command: str, *, autonomous_agent: bool = False) -> str | None:
     try:
         tokens = shell_tokens(command)
     except ValueError:
@@ -289,7 +291,7 @@ def dangerous_vcs_command(command: str) -> str | None:
         if executable == "git":
             command_index, subcommand = find_subcommand(arguments, GIT_GLOBAL_VALUE_FLAGS, {"-C", "-c"})
             remainder = arguments[command_index + 1 :] if command_index is not None else []
-            if subcommand == "push":
+            if subcommand == "push" and autonomous_agent:
                 return "git " + "push is outside autonomous worker scope"
             if subcommand == "reset" and "--hard" in remainder:
                 return "git " + "reset --hard is destructive"
