@@ -149,7 +149,8 @@
 - Обычный интерактивный `codex` запускается через `~/.local/bin/codex-highfd`, который поднимает inherited soft FD limit до `4096` без изменения системного `launchctl` limit.
 - `scripts/codex_fd_doctor.sh` является обязательным preflight для subagent waves; `WARN` допускает только default wave size 6, `BLOCK` запрещает новые spawn.
 - Hooks добавить fail-closed для `PreToolUse`, `PermissionRequest`, `PostToolUse`, `SubagentStart`, `SubagentStop`, `Stop`.
-- Hooks должны блокировать или логировать: writes вне worktree, `.git`, `~/.codex`, `~/.ssh`, secrets, `git push`, `gh pr merge`, destructive shell, `curl | sh`, `sudo`, `ssh/scp/rsync`, side-effect MCP/app tools.
+- `SubagentStart` должен принимать фактические поля `agent_type`/`agentType` и разрешать только роли из утверждённого набора.
+- Hooks должны блокировать или логировать: writes вне worktree, `.git`, `~/.codex`, `~/.ssh`, secrets, destructive shell, `curl | sh`, `sudo`, `ssh/scp/rsync`, side-effect MCP/app tools. `git push` блокируется для автономных агентов, но разрешён supervisor только при явном запросе на публикацию; `gh pr merge` остаётся заблокированным для всех сессий.
 
 ## Rollout
 

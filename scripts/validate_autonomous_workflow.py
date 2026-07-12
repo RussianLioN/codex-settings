@@ -197,6 +197,30 @@ def check_hooks() -> None:
     assert HOOK_EVENTS <= configured, f"hooks missing events: {sorted(HOOK_EVENTS - configured)}"
     assert policy_path.exists(), f"missing hook policy: {policy_path}"
     assert HOOK_POLICY.read_bytes() == policy_path.read_bytes(), "installed hook policy differs from tracked source"
+    allowed_reviewer_start = run_hook(
+        policy_path,
+        "SubagentStart",
+        {"agent_id": "agent-reviewer", "agent_type": "reviewer"},
+    )
+    assert allowed_reviewer_start.returncode == 0, "hook blocked an approved reviewer SubagentStart payload"
+    allowed_worker_start = run_hook(
+        policy_path,
+        "SubagentStart",
+        {"agentId": "agent-worker", "agentType": "implementation-worker"},
+    )
+    assert allowed_worker_start.returncode == 0, "hook blocked an approved implementation-worker SubagentStart payload"
+    blocked_unknown_start = run_hook(
+        policy_path,
+        "SubagentStart",
+        {"agent_id": "agent-unknown", "agent_type": "unapproved-worker"},
+    )
+    assert blocked_unknown_start.returncode != 0, "hook allowed an unknown SubagentStart agent type"
+    blocked_missing_start = run_hook(
+        policy_path,
+        "SubagentStart",
+        {"agent_id": "agent-missing-type", "agent_type": ""},
+    )
+    assert blocked_missing_start.returncode != 0, "hook allowed a SubagentStart payload without an agent type"
     allowed_main_push = run_hook(
         policy_path,
         "PreToolUse",

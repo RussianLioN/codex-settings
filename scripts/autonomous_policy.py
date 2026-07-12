@@ -118,7 +118,10 @@ def evaluate(event: str, payload: dict[str, Any]) -> tuple[str, str, dict[str, A
         return "allow", "audit-only event", details
 
     if event == "SubagentStart":
-        agent_type = normalize_agent(tool_name or str(find_first(payload, ("type", "kind")) or ""))
+        raw_agent_type = find_first(payload, ("agent_type", "agentType"))
+        agent_type = normalize_agent(
+            str(raw_agent_type or tool_name or find_first(payload, ("type", "kind")) or "")
+        )
         details["agent_type"] = agent_type
         if not agent_type:
             return "block", "subagent start payload did not identify agent type", details
