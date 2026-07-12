@@ -264,6 +264,53 @@ def check_hooks() -> None:
         {"tool_name": "Bash", "tool_input": {"command": "".join(("git status ", "2>", "/dev/null"))}},
     )
     assert allowed_dev_null.returncode == 0, "hook blocked safe stderr redirection to the null device"
+    allowed_patch = "\n".join(
+        (
+            "*** Begin Patch",
+            "*** Update File: scripts/autonomous_policy.py",
+            "@@",
+            "-git status --short",
+            "+git push origin HEAD",
+            "*** End Patch",
+        )
+    )
+    allowed_patch_result = run_hook(
+        policy_path,
+        "PreToolUse",
+        {"tool_name": "apply_patch", "tool_input": {"command": allowed_patch}},
+    )
+    assert allowed_patch_result.returncode == 0, "hook treated in-worktree patch content as a shell command"
+    outside_patch = "\n".join(("*** Begin Patch", "*** Add File: /tmp/codex-outside", "+blocked", "*** End Patch"))
+    outside_patch_result = run_hook(
+        policy_path,
+        "PreToolUse",
+        {"tool_name": "apply_patch", "tool_input": {"command": outside_patch}},
+    )
+    assert outside_patch_result.returncode != 0, "hook allowed apply_patch outside the worktree"
+    git_metadata_patch = "\n".join(("*** Begin Patch", "*** Add File: .git/codex-test", "+blocked", "*** End Patch"))
+    git_metadata_result = run_hook(
+        policy_path,
+        "PreToolUse",
+        {"tool_name": "apply_patch", "tool_input": {"command": git_metadata_patch}},
+    )
+    assert git_metadata_result.returncode != 0, "hook allowed apply_patch inside Git metadata"
+    move_patch = "\n".join(
+        (
+            "*** Begin Patch",
+            "*** Update File: scripts/autonomous_policy.py",
+            "*** Move to: /tmp/codex-moved-policy.py",
+            "@@",
+            "-old",
+            "+new",
+            "*** End Patch",
+        )
+    )
+    move_patch_result = run_hook(
+        policy_path,
+        "PreToolUse",
+        {"tool_name": "apply_patch", "tool_input": {"command": move_patch}},
+    )
+    assert move_patch_result.returncode != 0, "hook allowed apply_patch move outside the worktree"
     allowed_copy = run_hook(
         policy_path,
         "PreToolUse",
