@@ -8,10 +8,12 @@ import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import tomllib
+from collections.abc import Iterable
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
@@ -31,6 +33,11 @@ CHATGPT_RESOURCES = Path("/Applications/ChatGPT.app/Contents/Resources")
 DEFAULT_WAVE_SIZE = 6
 MAX_BASE_THREADS = 20
 HIGH_FD_LIMIT = 4096
+EXPECTED_BASE_AGENT_LIMITS = {
+    "max_threads": MAX_BASE_THREADS,
+    "max_depth": 1,
+    "job_max_runtime_seconds": 1800,
+}
 PROFILES = {
     "small": ("gpt-5.4-mini", "medium", "workspace-write", "on-request", 2, 1, None),
     "standard": ("gpt-5.5", "high", "workspace-write", "on-request", 4, 1, None),
@@ -69,11 +76,31 @@ WRITER_FIELDS = {
     "expected artifact",
     "stop condition",
 }
+SUBAGENT_WAIT_POLICY_MARKERS = (
+    "wait_agent returns early on message or completion",
+    "timeout_ms = 60000",
+    "useful work before waiting",
+    "two empty waits -> list_agents once",
+    "third empty wait -> real progress check",
+    "reset empty-wait counter on message or completion",
+    "no interrupt_agent on timeout alone",
+    "progress checkpoint every 2-3 minutes",
+)
+CONSILIUM_BOUNDED_WAVE_MARKERS = (
+    "maximum live wave: 6",
+    "$HOME/.local/bin/codex-highfd --fd-doctor",
+    "close_agent",
+    "agent thread limit reached",
+    "session-exit cleanup",
+    "environment limitation",
+)
 
 
 def main() -> int:
     checks = [
         check_plan,
+        check_subagent_wait_policy,
+        check_subagent_wait_policy_regressions,
         check_base_config,
         check_mcp_runtime,
         check_profiles,
@@ -104,13 +131,195 @@ def check_plan() -> None:
     assert PLAN.exists(), f"missing plan: {PLAN}"
 
 
-def check_base_config() -> None:
-    config = load_toml(CODEX_HOME / "config.toml")
+def check_subagent_wait_policy() -> None:
+    consilium_root = CODEX_HOME / "plugins/cache/agents-skills/consilium"
+    consilium_skills = latest_numeric_version_path(
+        path for path in consilium_root.glob("*/skills") if path.is_dir()
+    )
+
+    policy_paths = [
+        PLAN,
+        CODEX_HOME / "AGENTS.md",
+        CODEX_HOME / "skills/parallel-review-wave/SKILL.md",
+        *(consilium_skills / name / "SKILL.md" for name in ("consilium", "consilium-lean", "expert-consilium")),
+    ]
+    failures: list[str] = []
+    for path in policy_paths:
+        if not path.is_file():
+            failures.append(f"missing policy carrier: {path}")
+            continue
+        text = path.read_text(encoding="utf-8")
+        failures.extend(f"{path} {failure}" for failure in markdown_policy_marker_failures(text))
+
+    config_path = CODEX_HOME / "config.toml"
+    if not config_path.is_file():
+        failures.append(f"missing base config: {config_path}")
+    else:
+        failures.extend(f"{config_path} {failure}" for failure in base_agent_limit_failures(load_toml(config_path)))
+
+    prompt_path = CODEX_HOME / "skills/parallel-review-wave/agents/openai.yaml"
+    if not prompt_path.is_file():
+        failures.append(f"missing skill invitation: {prompt_path}")
+    else:
+        try:
+            default_prompt = extract_interface_default_prompt(prompt_path.read_text(encoding="utf-8"))
+        except AssertionError as exc:
+            failures.append(f"{prompt_path} {exc}")
+        else:
+            if "$parallel-review-wave" not in default_prompt:
+                failures.append(f"{prompt_path} interface.default_prompt does not invoke $parallel-review-wave")
+
+    assert not failures, "subagent wait policy is incomplete:\n- " + "\n- ".join(failures)
+
+
+def numeric_version_key(path: Path) -> tuple[int, ...] | None:
+    parts = path.parent.name.split(".")
+    if not parts or not all(part.isdecimal() for part in parts):
+        return None
+    return tuple(int(part) for part in parts)
+
+
+def latest_numeric_version_path(paths: Iterable[Path]) -> Path:
+    candidates = [(key, path) for path in paths if (key := numeric_version_key(path)) is not None]
+    assert candidates, "installed Consilium runtime has no numeric version"
+    return max(candidates, key=lambda candidate: (candidate[0], candidate[1].parent.name))[1]
+
+
+def markdown_policy_marker_failures(text: str) -> list[str]:
+    failures: list[str] = []
+    uncommented = re.sub(r"<!--.*?(?:-->|$)", "", text, flags=re.DOTALL)
+    lines: list[str] = []
+    fence: str | None = None
+    for line in uncommented.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith(("```", "~~~")):
+            marker = stripped[:3]
+            fence = None if fence == marker else marker if fence is None else fence
+            continue
+        if fence is None:
+            lines.append(line)
+    for marker in SUBAGENT_WAIT_POLICY_MARKERS:
+        expected_format = policy_marker_format(marker)
+        containing_lines = {index for index, line in enumerate(lines) if marker in line}
+        formatted_lines = {
+            index
+            for index, line in enumerate(lines)
+            if line.lstrip().startswith("- ") and expected_format in line
+        }
+        negative = marker != "no interrupt_agent on timeout alone" and any(
+            re.search(r"\b(?:do\s+not|never|not|не|нельзя)\b", lines[index], flags=re.IGNORECASE)
+            for index in formatted_lines
+        )
+        if len(formatted_lines) != 1 or containing_lines != formatted_lines or negative:
+            failures.append(f"marker {marker!r} must appear only in one Markdown bullet as {expected_format}")
+    return failures
+
+
+def base_agent_limit_failures(config: dict[str, Any]) -> list[str]:
     agents = config.get("agents", {})
-    if agents:
-        threads = agents.get("max_threads", DEFAULT_WAVE_SIZE)
-        assert 1 <= threads <= MAX_BASE_THREADS, f"base config agents.max_threads must be in 1..{MAX_BASE_THREADS}"
-        assert agents.get("max_depth", 1) == 1, "base config agents.max_depth is not 1"
+    return [
+        f"agents.{setting} must be {expected}, got {agents.get(setting)!r}"
+        for setting, expected in EXPECTED_BASE_AGENT_LIMITS.items()
+        if type(agents.get(setting)) is not int or agents.get(setting) != expected
+    ]
+
+
+def extract_interface_default_prompt(text: str) -> str:
+    try:
+        import yaml
+    except ImportError as exc:
+        raise AssertionError("PyYAML is required to parse openai.yaml") from exc
+    try:
+        document = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise AssertionError("openai.yaml is not valid YAML") from exc
+    assert isinstance(document, dict), "openai.yaml must contain a mapping"
+    interface = document.get("interface")
+    assert isinstance(interface, dict), "openai.yaml must define an interface mapping"
+    prompt = interface.get("default_prompt")
+    assert isinstance(prompt, str), "interface.default_prompt must be a string"
+    return prompt
+
+
+def check_subagent_wait_policy_regressions() -> None:
+    for setting, wrong_value in (
+        ("max_threads", 19),
+        ("max_depth", 2),
+        ("job_max_runtime_seconds", 1799),
+        ("max_depth", True),
+        ("max_threads", 20.0),
+    ):
+        agents = dict(EXPECTED_BASE_AGENT_LIMITS)
+        agents[setting] = wrong_value
+        failures = base_agent_limit_failures({"agents": agents})
+        assert any(f"agents.{setting}" in failure for failure in failures), f"accepted wrong agents.{setting}"
+
+    canonical = "\n".join(
+        f"- Policy requirement {policy_marker_format(marker)}."
+        for marker in SUBAGENT_WAIT_POLICY_MARKERS
+    )
+    assert not markdown_policy_marker_failures(canonical), "rejected canonical Markdown policy"
+    bare = "\n".join(SUBAGENT_WAIT_POLICY_MARKERS)
+    comments = "\n".join(
+        f"<!-- {policy_marker_format(marker)} -->" for marker in SUBAGENT_WAIT_POLICY_MARKERS
+    )
+    assert markdown_policy_marker_failures(bare), "accepted bare policy markers"
+    assert markdown_policy_marker_failures(comments), "accepted comment-only policy markers"
+    assert markdown_policy_marker_failures(f"```markdown\n{canonical}\n```"), "accepted fenced policy markers"
+    assert markdown_policy_marker_failures(f"<!--\n{canonical}\n-->"), "accepted multiline-comment markers"
+    first_marker = SUBAGENT_WAIT_POLICY_MARKERS[0]
+    for negation in ("do not", "never", "not", "не", "нельзя"):
+        negative = canonical.replace(
+            f"- Policy requirement {policy_marker_format(first_marker)}.",
+            f"- {negation} follow this policy {policy_marker_format(first_marker)}.",
+        )
+        assert markdown_policy_marker_failures(negative), f"accepted negative policy bullet: {negation}"
+
+    yaml_prompts = (
+        "interface:\n  default_prompt: 'Use $parallel-review-wave for review.'\n",
+        "interface:\n  default_prompt: Use $parallel-review-wave for review.\n",
+        "interface:\n  default_prompt: |\n    Use $parallel-review-wave for review.\n",
+        'interface:\n  default_prompt: "Use $parallel-review-wave for review." # active\n',
+    )
+    for prompt in yaml_prompts:
+        assert "$parallel-review-wave" in extract_interface_default_prompt(prompt), "rejected valid YAML prompt"
+
+    commented_invocation = (
+        "# default_prompt: \"Use $parallel-review-wave to run a review.\"\n"
+        "interface:\n"
+        "  default_prompt: \"Run a bounded parallel review.\"\n"
+    )
+    assert "$parallel-review-wave" not in extract_interface_default_prompt(commented_invocation), (
+        "accepted comment-only skill invocation"
+    )
+    try:
+        extract_interface_default_prompt("interface:\n  default_prompt: 42\n")
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("accepted non-string interface.default_prompt")
+
+    versions = [Path("/cache/0.9.0/skills"), Path("/cache/0.10.0/skills"), Path("/cache/current/skills")]
+    assert latest_numeric_version_path(versions).parent.name == "0.10.0", "0.10.0 must follow 0.9.0"
+    try:
+        latest_numeric_version_path([Path("/cache/current/skills")])
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("accepted Consilium runtime without a numeric version")
+
+
+def policy_marker_format(marker: str) -> str:
+    if marker == "timeout_ms = 60000":
+        return f"`{marker}`"
+    return f"(`{marker}`)"
+
+
+def check_base_config() -> None:
+    config_path = CODEX_HOME / "config.toml"
+    config = load_toml(config_path)
+    limit_failures = base_agent_limit_failures(config)
+    assert not limit_failures, "; ".join(limit_failures)
     plugin = config.get("plugins", {}).get("codex-security@openai-curated", {})
     assert plugin.get("enabled") is True, "Codex Security plugin is not enabled"
 
@@ -415,20 +624,11 @@ def check_fd_guardrails() -> None:
 
 def check_consilium_runtime() -> None:
     root = CODEX_HOME / "plugins/cache/agents-skills/consilium"
-    versions = sorted(root.glob("*/skills"))
-    assert versions, "installed Consilium runtime is missing"
-    skills_root = versions[-1]
+    skills_root = latest_numeric_version_path(path for path in root.glob("*/skills") if path.is_dir())
     for name in ("consilium", "expert-consilium", "consilium-lean"):
         path = skills_root / name / "SKILL.md"
         text = path.read_text(encoding="utf-8")
-        for required in (
-            "maximum live wave: 6",
-            "$HOME/.local/bin/codex-highfd --fd-doctor",
-            "close_agent",
-            "agent thread limit reached",
-            "session-exit cleanup",
-            "environment limitation",
-        ):
+        for required in CONSILIUM_BOUNDED_WAVE_MARKERS:
             assert required in text, f"{path} missing bounded-wave marker: {required}"
 
 
