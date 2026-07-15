@@ -102,6 +102,14 @@
 - Для read-heavy waves использовать `wide-readers`, но запускать не более 6 live agents одновременно; canary ladder `8 -> 12 -> 16` разрешен только при soft limit не ниже `4096` и успешном FD preflight.
 - Перед каждой wave закрыть completed/stale agents и запустить `$HOME/.local/bin/codex-highfd --fd-doctor --wave-size N`; agent shells не должны зависеть от interactive aliases.
 - После каждой wave: wait for all, collect results, немедленно вызвать `close_agent` для каждого завершенного thread, затем summarize и проверить `/agent`, `/status`, `/usage`.
+- Обычное ожидание выполнять через `wait_agent` с `timeout_ms = 60000`; вызов возвращается раньше при сообщении или завершении (`wait_agent returns early on message or completion`).
+- Перед каждым ожиданием координатор выполняет доступную полезную работу: интеграцию уже полученных результатов, чтение доказательств или безопасную проверку состояния (`useful work before waiting`).
+- Пустым считается ожидание, завершившееся без сообщения или завершения агента. После двух последовательных пустых ожиданий один раз вызвать `list_agents` (`two empty waits -> list_agents once`).
+- После третьего последовательного пустого ожидания проверить реальный прогресс по доступным журналам, процессам и состоянию Git (`third empty wait -> real progress check`).
+- При сообщении или завершении агента сбросить счётчик пустых ожиданий (`reset empty-wait counter on message or completion`).
+- Не вызывать `interrupt_agent` только из-за истечения срока ожидания (`no interrupt_agent on timeout alone`).
+- Для длительной задачи требовать этапный отчёт либо отчёт каждые 2–3 минуты (`progress checkpoint every 2-3 minutes`).
+- Эта политика ожидания не требует изменения `agents.job_max_runtime_seconds`, `agents.max_threads` или `agents.max_depth`.
 - При `Too many open files` / `EMFILE` прекратить новые spawn, собрать доступные ответы, закрыть открытые threads и отметить пропуски как environment limitation, а не как предметное доказательство.
 - При `agent thread limit reached` уменьшить live batch до фактической capacity и продолжить только оставшиеся assignments после освобождения завершенных threads.
 - Если terminal `codex exec` не предоставляет `close_agent`, разрешена только одна terminal operation; выход процесса после synthesis является session-exit cleanup.
