@@ -27,6 +27,8 @@ RUNTIME_PLAN = HOME / "coding/projects/codex-settings/docs/plans/codex-autonomou
 FD_DOCTOR = REPO / "scripts/codex_fd_doctor.sh"
 HIGHFD_TEMPLATE = REPO / "scripts/codex-highfd"
 HOOK_POLICY = REPO / "scripts/autonomous_policy.py"
+DOCS_NAVIGATION_VALIDATOR = REPO / "scripts/validate_docs_navigation.py"
+DOCS_NAVIGATION_CONTRACTS = REPO / "scripts/docs_navigation_contracts.py"
 HIGHFD_WRAPPER = HOME / ".local/bin/codex-highfd"
 INSTALLED_FD_DOCTOR = HOME / ".local/libexec/codex_fd_doctor.sh"
 CHATGPT_RESOURCES = Path("/Applications/ChatGPT.app/Contents/Resources")
@@ -112,6 +114,7 @@ def main() -> int:
         check_consilium_runtime,
         check_aliases,
         check_rollback,
+        check_docs_navigation,
         check_repo_scripts,
     ]
     failures: list[str] = []
@@ -710,11 +713,41 @@ def check_runtime_rollback_apply(script: Path) -> None:
         assert consilium.read_text(encoding="utf-8") == "backup consilium skill\n"
 
 
+def check_docs_navigation() -> None:
+    module_name = "codex_docs_navigation_validator"
+    try:
+        spec = importlib.util.spec_from_file_location(
+            module_name,
+            DOCS_NAVIGATION_VALIDATOR,
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeError(
+                "could not create the documentation validator loader"
+            )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        issues = module.validate_repository(REPO)
+    except Exception as exc:
+        raise AssertionError(
+            "documentation navigation validation failed: "
+            f"{exc}"
+        ) from exc
+    finally:
+        sys.modules.pop(module_name, None)
+    assert not issues, (
+        "documentation navigation validation failed:\n- "
+        + "\n- ".join(issue.render() for issue in issues)
+    )
+
+
 def check_repo_scripts() -> None:
     for path in (
         REPO / "scripts/codex_batch_queue.py",
         REPO / "scripts/codex_autonomous_rollback.py",
         HOOK_POLICY,
+        DOCS_NAVIGATION_CONTRACTS,
+        DOCS_NAVIGATION_VALIDATOR,
         REPO / "scripts/validate_autonomous_workflow.py",
     ):
         assert path.exists(), f"missing script: {path}"
