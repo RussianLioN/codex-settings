@@ -9,7 +9,7 @@ import stat
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -54,6 +54,10 @@ class RouteNotStartable(StoreError):
     pass
 
 
+class LeaseForbidden(StoreError):
+    pass
+
+
 @dataclass(frozen=True)
 class RouteRecord:
     route_id: str
@@ -67,6 +71,44 @@ class RouteRecord:
     run_id: str | None
     plan_output: dict[str, Any]
     terminal_result: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class NodeRecord:
+    route_id: str
+    node_id: str
+    ordinal: int
+    role: str
+    mission: str
+    dependencies: tuple[str, ...]
+    context_refs: tuple[str, ...]
+    scope_id: str
+    artifact_profile_id: str
+    validation_profile_id: str
+    assessment: dict[str, Any]
+    risk_flags: tuple[str, ...]
+    selected_model: str
+    reasoning_effort: str
+    permission_profile_id: str
+    disposition: str
+    state: RouteState
+    result: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class ExecutionBundle:
+    route: RouteRecord
+    context: RequestContext
+    nodes: tuple[NodeRecord, ...]
+
+
+@dataclass(frozen=True)
+class ClaimedRoute:
+    route: RouteRecord
+    context: RequestContext
+    nodes: tuple[NodeRecord, ...]
+    lease_token: str
+    lease_expires_at: datetime
 
 
 class SmartStore:
@@ -291,9 +333,15 @@ class SmartStore:
                     """
                     insert into nodes (
                       route_id, node_id, ordinal, role, mission,
-                      dependencies_json, selected_model, reasoning_effort,
-                      permission_profile_id, disposition, state
-                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      dependencies_json, context_refs_json, scope_id,
+                      artifact_profile_id, validation_profile_id,
+                      assessment_json, risk_flags_json,
+                      selected_model, reasoning_effort,
+                      permission_profile_id, disposition, state,
+                      updated_at
+                    ) values (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
                     """,
                     (
                         route_id,
@@ -302,11 +350,18 @@ class SmartStore:
                         node["role"],
                         node["mission"],
                         _json(node["dependencyIds"]),
+                        _json(node["contextRefs"]),
+                        node["scopeId"],
+                        node["artifactProfileId"],
+                        node["validationProfileId"],
+                        _json(node["assessment"]),
+                        _json(node["riskFlags"]),
                         node["selectedModel"],
                         node["reasoningEffort"],
                         node["permissionProfileId"],
                         node["disposition"],
                         RouteState.PLANNED.value,
+                        _iso(now),
                     ),
                 )
             self._insert_event(
@@ -430,6 +485,19 @@ class SmartStore:
                 """,
                 (RouteState.QUEUED.value, run_id, _iso(now), route_id),
             )
+            connection.execute(
+                """
+                update nodes
+                set state = ?, updated_at = ?
+                where route_id = ? and disposition = ?
+                """,
+                (
+                    RouteState.QUEUED.value,
+                    _iso(now),
+                    route_id,
+                    "delegate",
+                ),
+            )
             self._insert_event(
                 connection,
                 route_id=route_id,
@@ -438,6 +506,553 @@ class SmartStore:
                 state=RouteState.QUEUED,
                 code="QUEUED",
                 message="",
+            )
+            updated = connection.execute(
+                "select * from routes where route_id = ?",
+                (route_id,),
+            ).fetchone()
+        return _route_record(updated)
+
+    def claim_next_route(
+        self,
+        *,
+        owner_id: str,
+        pid: int,
+        start_marker: str,
+        now: datetime,
+        lease_seconds: int,
+    ) -> ClaimedRoute | None:
+        if not owner_id or not start_marker or pid <= 0 or lease_seconds <= 0:
+            raise ValueError("route lease identity and duration are invalid")
+        now = _aware_utc(now)
+        expires_at = now + timedelta(seconds=lease_seconds)
+        lease_token = new_opaque_id("lease1")
+        with self._transaction() as connection:
+            row = connection.execute(
+                """
+                select * from routes
+                where state = ?
+                order by created_at, route_id
+                limit 1
+                """,
+                (RouteState.QUEUED.value,),
+            ).fetchone()
+            if row is None:
+                return None
+            before = RouteState(row["state"])
+            assert_transition(before, RouteState.LEASED)
+            route_id = str(row["route_id"])
+            connection.execute(
+                """
+                update routes set state = ?, updated_at = ?
+                where route_id = ? and state = ?
+                """,
+                (
+                    RouteState.LEASED.value,
+                    _iso(now),
+                    route_id,
+                    RouteState.QUEUED.value,
+                ),
+            )
+            connection.execute(
+                """
+                insert or replace into leases (
+                  route_id, node_id, owner_id, token_hash,
+                  pid, start_marker, expires_at, heartbeat_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    route_id,
+                    "",
+                    owner_id,
+                    sha256_text(lease_token),
+                    pid,
+                    start_marker,
+                    _iso(expires_at),
+                    _iso(now),
+                ),
+            )
+            self._insert_event(
+                connection,
+                route_id=route_id,
+                node_id="",
+                event="route_leased",
+                state=RouteState.LEASED,
+                code="LEASED",
+                message="",
+            )
+            updated = connection.execute(
+                "select * from routes where route_id = ?",
+                (route_id,),
+            ).fetchone()
+            node_rows = connection.execute(
+                """
+                select * from nodes
+                where route_id = ?
+                order by ordinal
+                """,
+                (route_id,),
+            ).fetchall()
+        return ClaimedRoute(
+            route=_route_record(updated),
+            context=RequestContext.from_wire(
+                json.loads(updated["context_json"])
+            ),
+            nodes=tuple(_node_record(node) for node in node_rows),
+            lease_token=lease_token,
+            lease_expires_at=expires_at,
+        )
+
+    def heartbeat_route_lease(
+        self,
+        *,
+        route_id: str,
+        owner_id: str,
+        lease_token: str,
+        now: datetime,
+        lease_seconds: int,
+    ) -> datetime:
+        if lease_seconds <= 0:
+            raise ValueError("lease_seconds must be positive")
+        now = _aware_utc(now)
+        expires_at = now + timedelta(seconds=lease_seconds)
+        with self._transaction() as connection:
+            row = connection.execute(
+                """
+                select owner_id, token_hash from leases
+                where route_id = ? and node_id = ''
+                """,
+                (route_id,),
+            ).fetchone()
+            if (
+                row is None
+                or row["owner_id"] != owner_id
+                or row["token_hash"] != sha256_text(lease_token)
+            ):
+                raise LeaseForbidden(
+                    "LEASE_FORBIDDEN",
+                    "route lease identity does not match",
+                )
+            connection.execute(
+                """
+                update leases
+                set expires_at = ?, heartbeat_at = ?
+                where route_id = ? and node_id = ''
+                """,
+                (_iso(expires_at), _iso(now), route_id),
+            )
+        return expires_at
+
+    def release_route_lease(
+        self,
+        *,
+        route_id: str,
+        owner_id: str,
+        lease_token: str,
+    ) -> None:
+        with self._transaction() as connection:
+            row = connection.execute(
+                """
+                select owner_id, token_hash from leases
+                where route_id = ? and node_id = ''
+                """,
+                (route_id,),
+            ).fetchone()
+            if row is None:
+                return
+            if (
+                row["owner_id"] != owner_id
+                or row["token_hash"] != sha256_text(lease_token)
+            ):
+                raise LeaseForbidden(
+                    "LEASE_FORBIDDEN",
+                    "route lease identity does not match",
+                )
+            connection.execute(
+                "delete from leases where route_id = ? and node_id = ''",
+                (route_id,),
+            )
+
+    def execution_bundle(self, route_id: str) -> ExecutionBundle:
+        with self._lock:
+            route = self._connection.execute(
+                "select * from routes where route_id = ?",
+                (route_id,),
+            ).fetchone()
+            nodes = self._connection.execute(
+                """
+                select * from nodes
+                where route_id = ?
+                order by ordinal
+                """,
+                (route_id,),
+            ).fetchall()
+        if route is None:
+            raise RouteNotFound("ROUTE_NOT_FOUND", "route does not exist")
+        return ExecutionBundle(
+            route=_route_record(route),
+            context=RequestContext.from_wire(json.loads(route["context_json"])),
+            nodes=tuple(_node_record(node) for node in nodes),
+        )
+
+    def route_state(self, route_id: str) -> RouteState:
+        with self._lock:
+            row = self._connection.execute(
+                "select state from routes where route_id = ?",
+                (route_id,),
+            ).fetchone()
+        if row is None:
+            raise RouteNotFound("ROUTE_NOT_FOUND", "route does not exist")
+        return RouteState(row["state"])
+
+    def transition_node(
+        self,
+        route_id: str,
+        node_id: str,
+        new_state: RouteState,
+        *,
+        event: str,
+        code: str,
+        message: str,
+    ) -> NodeRecord:
+        with self._transaction() as connection:
+            row = connection.execute(
+                """
+                select * from nodes
+                where route_id = ? and node_id = ?
+                """,
+                (route_id, node_id),
+            ).fetchone()
+            if row is None:
+                raise RouteNotFound(
+                    "NODE_NOT_FOUND",
+                    "route node does not exist",
+                )
+            before = RouteState(row["state"])
+            assert_transition(before, new_state)
+            now = _utc_now()
+            connection.execute(
+                """
+                update nodes set state = ?, updated_at = ?
+                where route_id = ? and node_id = ?
+                """,
+                (new_state.value, _iso(now), route_id, node_id),
+            )
+            self._insert_event(
+                connection,
+                route_id=route_id,
+                node_id=node_id,
+                event=event,
+                state=new_state,
+                code=code,
+                message=message,
+            )
+            updated = connection.execute(
+                """
+                select * from nodes
+                where route_id = ? and node_id = ?
+                """,
+                (route_id, node_id),
+            ).fetchone()
+        return _node_record(updated)
+
+    def complete_node(
+        self,
+        route_id: str,
+        node_id: str,
+        *,
+        result: dict[str, Any],
+    ) -> NodeRecord:
+        with self._transaction() as connection:
+            row = connection.execute(
+                """
+                select * from nodes
+                where route_id = ? and node_id = ?
+                """,
+                (route_id, node_id),
+            ).fetchone()
+            if row is None:
+                raise RouteNotFound(
+                    "NODE_NOT_FOUND",
+                    "route node does not exist",
+                )
+            before = RouteState(row["state"])
+            assert_transition(before, RouteState.SUCCEEDED)
+            now = _utc_now()
+            connection.execute(
+                """
+                update nodes
+                set state = ?, result_json = ?, updated_at = ?
+                where route_id = ? and node_id = ?
+                """,
+                (
+                    RouteState.SUCCEEDED.value,
+                    _json(result),
+                    _iso(now),
+                    route_id,
+                    node_id,
+                ),
+            )
+            self._insert_event(
+                connection,
+                route_id=route_id,
+                node_id=node_id,
+                event="node_succeeded",
+                state=RouteState.SUCCEEDED,
+                code="SUCCEEDED",
+                message="",
+            )
+            updated = connection.execute(
+                """
+                select * from nodes
+                where route_id = ? and node_id = ?
+                """,
+                (route_id, node_id),
+            ).fetchone()
+        return _node_record(updated)
+
+    def record_intent(
+        self,
+        *,
+        route_id: str,
+        node_id: str,
+        kind: str,
+        payload: dict[str, Any],
+    ) -> str:
+        if not kind:
+            raise ValueError("intent kind must be non-empty")
+        intent_id = new_opaque_id("intent1")
+        encoded = _json(payload)
+        with self._transaction() as connection:
+            connection.execute(
+                """
+                insert into intents (
+                  intent_id, route_id, node_id, kind,
+                  payload_hash, payload_json, state, created_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    intent_id,
+                    route_id,
+                    node_id,
+                    kind,
+                    sha256_text(encoded),
+                    encoded,
+                    "PENDING",
+                    _iso(_utc_now()),
+                ),
+            )
+        return intent_id
+
+    def complete_intent(self, intent_id: str) -> None:
+        with self._transaction() as connection:
+            cursor = connection.execute(
+                """
+                update intents
+                set state = 'COMPLETED', completed_at = ?
+                where intent_id = ? and state = 'PENDING'
+                """,
+                (_iso(_utc_now()), intent_id),
+            )
+            if cursor.rowcount != 1:
+                raise StoreError(
+                    "INTENT_NOT_PENDING",
+                    "intent does not exist or is already complete",
+                )
+
+    def pending_intents(self, route_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                select intent_id, node_id, kind, payload_hash,
+                       payload_json, created_at
+                from intents
+                where route_id = ? and state = 'PENDING'
+                order by created_at, intent_id
+                """,
+                (route_id,),
+            ).fetchall()
+        return [
+            {
+                "intentId": str(row["intent_id"]),
+                "nodeId": str(row["node_id"]),
+                "kind": str(row["kind"]),
+                "payloadHash": str(row["payload_hash"]),
+                "payload": json.loads(row["payload_json"]),
+                "createdAt": str(row["created_at"]),
+            }
+            for row in rows
+        ]
+
+    def begin_attempt(
+        self,
+        *,
+        route_id: str,
+        node_id: str,
+        model: str,
+        reasoning_effort: str,
+        permission_profile_id: str,
+        pid: int,
+        argv_fingerprint: str,
+        permission_probe_id: str,
+    ) -> str:
+        attempt_id = new_opaque_id("att1")
+        with self._transaction() as connection:
+            connection.execute(
+                """
+                insert into attempts (
+                  attempt_id, route_id, node_id, state,
+                  model, reasoning_effort, permission_profile_id,
+                  pid, argv_fingerprint, permission_probe_id,
+                  started_at
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    attempt_id,
+                    route_id,
+                    node_id,
+                    "RUNNING",
+                    model,
+                    reasoning_effort,
+                    permission_profile_id,
+                    pid,
+                    argv_fingerprint,
+                    permission_probe_id,
+                    _iso(_utc_now()),
+                ),
+            )
+            connection.execute(
+                """
+                update nodes
+                set attempt_count = attempt_count + 1, updated_at = ?
+                where route_id = ? and node_id = ?
+                """,
+                (_iso(_utc_now()), route_id, node_id),
+            )
+        return attempt_id
+
+    def complete_attempt(
+        self,
+        attempt_id: str,
+        *,
+        state: str,
+        result: dict[str, Any] | None,
+        attestation: dict[str, Any] | None,
+        argv_fingerprint: str | None = None,
+        permission_probe_id: str | None = None,
+        error_code: str = "",
+        error_message: str = "",
+    ) -> None:
+        if state not in {"SUCCEEDED", "FAILED", "CANCELLED", "QUARANTINED"}:
+            raise ValueError("attempt terminal state is invalid")
+        with self._transaction() as connection:
+            cursor = connection.execute(
+                """
+                update attempts
+                set state = ?, result_json = ?, attestation_json = ?,
+                    argv_fingerprint = coalesce(?, argv_fingerprint),
+                    permission_probe_id = coalesce(?, permission_probe_id),
+                    error_code = ?, error_message = ?, ended_at = ?
+                where attempt_id = ? and state = 'RUNNING'
+                """,
+                (
+                    state,
+                    None if result is None else _json(result),
+                    None if attestation is None else _json(attestation),
+                    argv_fingerprint,
+                    permission_probe_id,
+                    error_code,
+                    error_message[:1000],
+                    _iso(_utc_now()),
+                    attempt_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise StoreError(
+                    "ATTEMPT_NOT_RUNNING",
+                    "attempt does not exist or is already terminal",
+                )
+
+    def attempts_for_route(self, route_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                select * from attempts
+                where route_id = ?
+                order by started_at, attempt_id
+                """,
+                (route_id,),
+            ).fetchall()
+        return [
+            {
+                "attemptId": str(row["attempt_id"]),
+                "nodeId": str(row["node_id"]),
+                "state": str(row["state"]),
+                "model": str(row["model"]),
+                "reasoningEffort": str(row["reasoning_effort"]),
+                "permissionProfileId": str(row["permission_profile_id"]),
+                "pid": int(row["pid"]),
+                "argvFingerprint": str(row["argv_fingerprint"]),
+                "permissionProbeId": str(row["permission_probe_id"]),
+                "result": (
+                    None
+                    if row["result_json"] is None
+                    else json.loads(row["result_json"])
+                ),
+                "attestation": (
+                    None
+                    if row["attestation_json"] is None
+                    else json.loads(row["attestation_json"])
+                ),
+                "errorCode": str(row["error_code"] or ""),
+                "errorMessage": str(row["error_message"] or ""),
+            }
+            for row in rows
+        ]
+
+    def finish_route(
+        self,
+        route_id: str,
+        request_context: RequestContext,
+        new_state: RouteState,
+        *,
+        terminal_result: dict[str, Any],
+        event: str,
+        code: str,
+        message: str,
+    ) -> RouteRecord:
+        if not is_terminal(new_state):
+            raise ValueError("finish_route requires a terminal state")
+        with self._transaction() as connection:
+            row = self._route_row(connection, route_id, request_context)
+            before = RouteState(row["state"])
+            assert_transition(before, new_state)
+            now = _utc_now()
+            connection.execute(
+                """
+                update routes
+                set state = ?, terminal_result_json = ?, updated_at = ?
+                where route_id = ?
+                """,
+                (
+                    new_state.value,
+                    _json(terminal_result),
+                    _iso(now),
+                    route_id,
+                ),
+            )
+            self._insert_event(
+                connection,
+                route_id=route_id,
+                node_id="",
+                event=event,
+                state=new_state,
+                code=code,
+                message=message,
+            )
+            connection.execute(
+                "delete from leases where route_id = ?",
+                (route_id,),
             )
             updated = connection.execute(
                 "select * from routes where route_id = ?",
@@ -598,6 +1213,59 @@ class SmartStore:
                 recovered.append(route_id)
         return recovered
 
+    def requeue_recovering(self, route_id: str) -> RouteRecord:
+        with self._transaction() as connection:
+            row = connection.execute(
+                "select * from routes where route_id = ?",
+                (route_id,),
+            ).fetchone()
+            if row is None:
+                raise RouteNotFound(
+                    "ROUTE_NOT_FOUND",
+                    "route does not exist",
+                )
+            before = RouteState(row["state"])
+            assert_transition(before, RouteState.QUEUED)
+            now = _utc_now()
+            connection.execute(
+                """
+                update routes set state = ?, updated_at = ?
+                where route_id = ?
+                """,
+                (RouteState.QUEUED.value, _iso(now), route_id),
+            )
+            connection.execute(
+                """
+                update nodes
+                set state = ?, updated_at = ?
+                where route_id = ? and state in (?, ?, ?, ?, ?)
+                """,
+                (
+                    RouteState.QUEUED.value,
+                    _iso(now),
+                    route_id,
+                    RouteState.LEASED.value,
+                    RouteState.PREPARING.value,
+                    RouteState.RUNNING.value,
+                    RouteState.RETRYABLE.value,
+                    RouteState.RECOVERING.value,
+                ),
+            )
+            self._insert_event(
+                connection,
+                route_id=route_id,
+                node_id="",
+                event="route_requeued",
+                state=RouteState.QUEUED,
+                code="RECOVERED",
+                message="",
+            )
+            updated = connection.execute(
+                "select * from routes where route_id = ?",
+                (route_id,),
+            ).fetchone()
+        return _route_record(updated)
+
     def backup(self, destination: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         with self._lock, sqlite3.connect(destination) as target:
@@ -689,11 +1357,20 @@ class SmartStore:
                   role text not null,
                   mission text not null,
                   dependencies_json text not null,
+                  context_refs_json text not null,
+                  scope_id text not null,
+                  artifact_profile_id text not null,
+                  validation_profile_id text not null,
+                  assessment_json text not null,
+                  risk_flags_json text not null,
                   selected_model text not null,
                   reasoning_effort text not null,
                   permission_profile_id text not null,
                   disposition text not null,
                   state text not null,
+                  attempt_count integer not null default 0,
+                  result_json text,
+                  updated_at text not null,
                   primary key(route_id, node_id)
                 );
 
@@ -717,6 +1394,7 @@ class SmartStore:
                   node_id text not null,
                   kind text not null,
                   payload_hash text not null,
+                  payload_json text not null,
                   state text not null,
                   created_at text not null,
                   completed_at text
@@ -733,6 +1411,28 @@ class SmartStore:
                   heartbeat_at text not null,
                   primary key(route_id, node_id)
                 );
+
+                create table attempts (
+                  attempt_id text primary key,
+                  route_id text not null references routes(route_id) on delete cascade,
+                  node_id text not null,
+                  state text not null,
+                  model text not null,
+                  reasoning_effort text not null,
+                  permission_profile_id text not null,
+                  pid integer not null,
+                  argv_fingerprint text not null,
+                  permission_probe_id text not null,
+                  attestation_json text,
+                  result_json text,
+                  error_code text,
+                  error_message text,
+                  started_at text not null,
+                  ended_at text
+                );
+
+                create index attempts_route_started
+                  on attempts(route_id, started_at);
                 """
             )
             connection.execute(f"pragma user_version={SCHEMA_VERSION}")
@@ -826,6 +1526,30 @@ def _route_record(row: sqlite3.Row) -> RouteRecord:
     )
 
 
+def _node_record(row: sqlite3.Row) -> NodeRecord:
+    result = row["result_json"]
+    return NodeRecord(
+        route_id=str(row["route_id"]),
+        node_id=str(row["node_id"]),
+        ordinal=int(row["ordinal"]),
+        role=str(row["role"]),
+        mission=str(row["mission"]),
+        dependencies=tuple(json.loads(row["dependencies_json"])),
+        context_refs=tuple(json.loads(row["context_refs_json"])),
+        scope_id=str(row["scope_id"]),
+        artifact_profile_id=str(row["artifact_profile_id"]),
+        validation_profile_id=str(row["validation_profile_id"]),
+        assessment=json.loads(row["assessment_json"]),
+        risk_flags=tuple(json.loads(row["risk_flags_json"])),
+        selected_model=str(row["selected_model"]),
+        reasoning_effort=str(row["reasoning_effort"]),
+        permission_profile_id=str(row["permission_profile_id"]),
+        disposition=str(row["disposition"]),
+        state=RouteState(row["state"]),
+        result=None if result is None else json.loads(result),
+    )
+
+
 def _json(value: Any) -> str:
     return json.dumps(
         value,
@@ -846,3 +1570,9 @@ def _iso(value: datetime) -> str:
 def _parse(value: str) -> datetime:
     parsed = datetime.fromisoformat(value)
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
+def _aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("datetime must be timezone-aware")
+    return value.astimezone(timezone.utc)
