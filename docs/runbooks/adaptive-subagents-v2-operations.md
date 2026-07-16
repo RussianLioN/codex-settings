@@ -44,6 +44,121 @@
 служебный предел ожидания 420 секунд, чтобы ограниченно обработать до 20
 пограничных узлов волнами без разрыва MCP.
 
+## Машина состояний маршрута
+
+Диаграмма дословно отражает 21 значение `RouteState` и все 56 разрешённых
+переходов `ALLOWED_TRANSITIONS`. Каждая стрелка соответствует отдельному
+разрешённому переходу; подразумеваемых переходов нет.
+
+```mermaid
+stateDiagram-v2
+    PLANNED --> BLOCKED
+    PLANNED --> QUEUED
+    PLANNED --> CANCELLED
+    PLANNED --> FAILED
+    PLANNED --> STALE
+
+    BLOCKED --> QUEUED
+    BLOCKED --> CANCELLED
+    BLOCKED --> FAILED
+    BLOCKED --> STALE
+
+    QUEUED --> LEASED
+    QUEUED --> CANCELLING
+    QUEUED --> CANCELLED
+    QUEUED --> FAILED
+    QUEUED --> STALE
+
+    LEASED --> PREPARING
+    LEASED --> RECOVERING
+    LEASED --> CANCELLING
+    LEASED --> RETRYABLE
+    LEASED --> FAILED
+
+    PREPARING --> RUNNING
+    PREPARING --> RECOVERING
+    PREPARING --> CANCELLING
+    PREPARING --> RETRYABLE
+    PREPARING --> FAILED
+
+    RUNNING --> COLLECTING
+    RUNNING --> RECOVERING
+    RUNNING --> CANCELLING
+    RUNNING --> RETRYABLE
+    RUNNING --> FAILED
+
+    COLLECTING --> ATTESTING
+    COLLECTING --> RECOVERING
+    COLLECTING --> CANCELLING
+    COLLECTING --> FAILED
+
+    ATTESTING --> VALIDATING
+    ATTESTING --> QUARANTINED
+    ATTESTING --> FAILED
+
+    VALIDATING --> CANDIDATE_BUILDING
+    VALIDATING --> SUCCEEDED
+    VALIDATING --> QUARANTINED
+    VALIDATING --> FAILED
+
+    CANDIDATE_BUILDING --> CANDIDATE_READY
+    CANDIDATE_BUILDING --> QUARANTINED
+    CANDIDATE_BUILDING --> RECOVERING
+    CANDIDATE_BUILDING --> FAILED
+
+    RETRYABLE --> QUEUED
+    RETRYABLE --> CANCELLED
+    RETRYABLE --> FAILED
+
+    RECOVERING --> QUEUED
+    RECOVERING --> RETRYABLE
+    RECOVERING --> CANCELLING
+    RECOVERING --> FAILED
+
+    CANCELLING --> CANCELLED
+    CANCELLING --> FAILED
+
+    SPLIT --> QUEUED
+    SPLIT --> SKIPPED
+    SPLIT --> FAILED
+```
+
+Конечные состояния: `SUCCEEDED`, `CANDIDATE_READY`, `QUARANTINED`,
+`CANCELLED`, `FAILED`, `STALE` и `SKIPPED`. Состояние `SPLIT` имеет три
+исходящих перехода и не имеет входящих.
+
+## Совместимость и готовность реального маршрута
+
+Состояние установки `READY` подтверждает состав установленных файлов, хуки и
+доступность дымовой проверки. Оно не подтверждает, что произвольный исходный
+репозиторий можно передать контроллеру. Перед первым реальным маршрутом
+отдельно проверить:
+
+- платформа должна быть ровно `darwin-arm64`, а версия Codex — `0.144.4`;
+- аккаунт должен предоставлять требуемые каталогом модели и уровни
+  рассуждения;
+- `${CODEX_HOME:-$HOME/.codex}/auth.json` должен быть обычным файлом, а не
+  символической ссылкой, принадлежать текущему пользователю, иметь ровно одну
+  жёсткую ссылку, права `0600` и размер от 1 байта до 1 МиБ;
+- запуск выполняется из канонического корня Git на текущем `HEAD`;
+- рабочая копия должна быть полностью чистой, включая неотслеживаемые файлы и
+  состояние подмодулей;
+- у репозитория не должно быть других связанных или внешних рабочих копий
+  Git;
+- дерево Git может содержать только обычные файлы режимов `100644` и `100755`;
+  символические ссылки, подмодули, специальные записи, указатели и настройки
+  Git LFS запрещены;
+- в снимке допускается не более 20 000 файлов, 8 МиБ на один файл и 256 МиБ
+  суммарно; нужен хотя бы один зафиксированный обычный файл;
+- граф содержит не более 20 узлов, 60 рёбер, глубину не более 4 и не более
+  двух поколений разделения;
+- на этапе подготовки дочернего запуска должны оставаться как минимум 1 ГиБ
+  свободного места, 512 МиБ доступной памяти и 128 файловых дескрипторов.
+
+Контроллер и построитель снимка повторяют эти проверки и при расхождении
+отказывают безопасно. `doctor`, доверие к хукам и `status=READY` не заменяют
+эту проверку исходного репозитория.
+
 ## 1. Предварительная проверка
 
 Работать из корня этого репозитория. Убедиться, что существуют `CODEX_HOME`,
