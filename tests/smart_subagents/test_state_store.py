@@ -6,6 +6,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -83,7 +84,7 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(0o700, stat.S_IMODE(self.state_dir.stat().st_mode))
         self.assertEqual(os.getuid(), db_path.stat().st_uid)
 
-        with sqlite3.connect(db_path) as connection:
+        with closing(sqlite3.connect(db_path)) as connection:
             self.assertEqual("wal", connection.execute("pragma journal_mode").fetchone()[0])
             self.assertEqual(2, connection.execute("pragma synchronous").fetchone()[0])
             self.assertEqual(1, connection.execute("pragma user_version").fetchone()[0])
@@ -198,4 +199,3 @@ class StoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
