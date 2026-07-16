@@ -1,0 +1,19 @@
+{
+  "name": "codex-smart-subagents",
+  "version": "0.1.0",
+  "description": "Codex Smart Subagents plugin",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Smart Subagents",
+    "shortDescription": "Use Codex Smart Subagents in Codex.",
+    "longDescription": "Codex Smart Subagents adds a local Codex plugin scaffold.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Help me use Codex Smart Subagents."
+  },
+  "mcpServers": "./.mcp.json"
+}
