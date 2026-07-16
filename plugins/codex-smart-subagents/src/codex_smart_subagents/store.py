@@ -114,12 +114,13 @@ class SmartStore:
             connection.execute(
                 """
                 insert into turn_bindings
-                  (token_hash, context_hash, created_at, expires_at)
-                values (?, ?, ?, ?)
+                  (token_hash, context_hash, context_json, created_at, expires_at)
+                values (?, ?, ?, ?, ?)
                 """,
                 (
                     token_hash,
                     request_context.digest(),
+                    _json(request_context.to_wire()),
                     _iso(now),
                     _iso(expires_at),
                 ),
@@ -166,6 +167,37 @@ class SmartStore:
                 "update turn_bindings set consumed_at = ? where token_hash = ?",
                 (_iso(now), token_hash),
             )
+
+    def context_for_turn_binding(
+        self,
+        binding: str,
+        *,
+        shell_session_id: str,
+        codex_home_hash: str,
+    ) -> RequestContext:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                select context_json from turn_bindings
+                where token_hash = ?
+                """,
+                (sha256_text(binding),),
+            ).fetchone()
+        if row is None:
+            raise TurnBindingError(
+                "TURN_BINDING_INVALID",
+                "turn binding does not exist",
+            )
+        context = RequestContext.from_wire(json.loads(row["context_json"]))
+        if (
+            context.shell_session_id != shell_session_id
+            or sha256_text(context.codex_home) != codex_home_hash
+        ):
+            raise TurnBindingError(
+                "TURN_BINDING_FORBIDDEN",
+                "turn binding belongs to another controller session",
+            )
+        return context
 
     def find_route_by_request_key(
         self,
@@ -220,13 +252,14 @@ class SmartStore:
                 """
                 insert into routes (
                   route_id, request_key, request_hash, context_hash,
+                  context_json,
                   shell_session_id, session_id, turn_id,
                   codex_home_hash, repo_root_hash, base_sha,
                   worktree_fingerprint, catalog_generation, algorithm_version,
                   disposition, startable, state, expires_at,
                   plan_output_json, created_at, updated_at
                 ) values (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 (
@@ -234,6 +267,7 @@ class SmartStore:
                     request_key,
                     request_hash,
                     context_hash,
+                    _json(request_context.to_wire()),
                     request_context.shell_session_id,
                     request_context.session_id,
                     request_context.turn_id,
@@ -304,6 +338,33 @@ class SmartStore:
                 "route belongs to another context",
             )
         return _route_record(row)
+
+    def context_for_route(
+        self,
+        route_id: str,
+        *,
+        shell_session_id: str,
+        codex_home_hash: str,
+    ) -> RequestContext:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                select context_json, shell_session_id, codex_home_hash
+                from routes where route_id = ?
+                """,
+                (route_id,),
+            ).fetchone()
+        if row is None:
+            raise RouteNotFound("ROUTE_NOT_FOUND", "route does not exist")
+        if (
+            row["shell_session_id"] != shell_session_id
+            or row["codex_home_hash"] != codex_home_hash
+        ):
+            raise RouteForbidden(
+                "ROUTE_FORBIDDEN",
+                "route belongs to another controller session",
+            )
+        return RequestContext.from_wire(json.loads(row["context_json"]))
 
     def transition_route(
         self,
@@ -587,6 +648,7 @@ class SmartStore:
                 create table turn_bindings (
                   token_hash text primary key,
                   context_hash text not null,
+                  context_json text not null,
                   created_at text not null,
                   expires_at text not null,
                   consumed_at text
@@ -597,6 +659,7 @@ class SmartStore:
                   request_key text not null,
                   request_hash text not null,
                   context_hash text not null,
+                  context_json text not null,
                   shell_session_id text not null,
                   session_id text not null,
                   turn_id text not null,
