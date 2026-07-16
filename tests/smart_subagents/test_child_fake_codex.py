@@ -15,6 +15,7 @@ def main() -> int:
     prompt = sys.stdin.read()
     probe = Path.cwd() / "umask-probe"
     probe.write_text("private\n", encoding="utf-8")
+    auth_file = Path(os.environ["CODEX_HOME"]) / "auth.json"
     invocation = {
         "argv": sys.argv[1:],
         "environment": dict(os.environ),
@@ -23,6 +24,16 @@ def main() -> int:
         "processGroup": os.getpgrp(),
         "session": os.getsid(0),
         "umaskProbeMode": probe.stat().st_mode & 0o777,
+        "authContents": (
+            auth_file.read_text(encoding="utf-8")
+            if auth_file.is_file()
+            else None
+        ),
+        "authMode": (
+            auth_file.stat().st_mode & 0o777
+            if auth_file.is_file()
+            else None
+        ),
     }
     (Path.cwd() / "fake-codex-invocation.json").write_text(
         json.dumps(invocation, sort_keys=True),

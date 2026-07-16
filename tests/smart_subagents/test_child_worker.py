@@ -203,6 +203,38 @@ class ChildWorkerTests(unittest.TestCase):
                 prompt=f"Прочитай {self.repository.resolve()} напрямую.",
             )
 
+    def test_runner_factory_is_bound_to_the_materialized_snapshot(self) -> None:
+        calls = []
+
+        def factory(profile, snapshot, work_request, runtime):
+            calls.append((profile, snapshot, work_request, runtime))
+            return self.worker.child_runner
+
+        worker = ChildWorker(
+            snapshot_builder=self.worker.snapshot_builder,
+            child_runner_factory=factory,
+        )
+
+        result = worker.run(self.request())
+
+        self.assertTrue(result.child.succeeded)
+        self.assertEqual(1, len(calls))
+        profile, snapshot, work_request, runtime = calls[0]
+        self.assertEqual(result.snapshot, snapshot)
+        self.assertEqual(result.runtime, runtime)
+        self.assertEqual(result.snapshot.root, profile.snapshot_root)
+        self.assertEqual(self.repository.resolve(), work_request.repository)
+
+    def test_worker_requires_exactly_one_runner_strategy(self) -> None:
+        with self.assertRaises(ValueError):
+            ChildWorker(snapshot_builder=self.worker.snapshot_builder)
+        with self.assertRaises(ValueError):
+            ChildWorker(
+                snapshot_builder=self.worker.snapshot_builder,
+                child_runner=self.worker.child_runner,
+                child_runner_factory=lambda *_args: self.worker.child_runner,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

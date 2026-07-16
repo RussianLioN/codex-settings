@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 from typing import Any
+from urllib.parse import urlsplit
 
 from .permissions import CanaryRequest, PermissionGate
 
@@ -51,6 +52,8 @@ MODEL_EFFORTS = {
 
 _PROFILE_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_HEADER_NAME = re.compile(r"[A-Za-z][A-Za-z0-9-]{0,63}")
+_MAX_AUTH_BYTES = 1024 * 1024
 
 
 @dataclass
@@ -102,6 +105,35 @@ class ChildRuntimeLayout:
             codex_home=children["codex-home"],
             work_dir=children["work"],
         )
+
+
+@dataclass(frozen=True)
+class ChildTelemetryConfig:
+    endpoint: str
+    header_name: str
+    token: str
+
+    def __post_init__(self) -> None:
+        parsed = urlsplit(self.endpoint)
+        if (
+            parsed.scheme != "http"
+            or parsed.hostname != "127.0.0.1"
+            or parsed.port is None
+            or not 0 < parsed.port <= 65535
+            or not parsed.path.startswith("/")
+            or parsed.path == "/"
+            or parsed.query
+            or parsed.fragment
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise ValueError(
+                "telemetry endpoint must be a private loopback HTTP URL"
+            )
+        if _HEADER_NAME.fullmatch(self.header_name) is None:
+            raise ValueError("telemetry header name is unsafe")
+        if not isinstance(self.token, str) or not 8 <= len(self.token) <= 256:
+            raise ValueError("telemetry token length is invalid")
 
 
 @dataclass(frozen=True)
@@ -177,6 +209,8 @@ class ChildRunRequest:
     prompt: str
     timeout_seconds: float
     max_output_bytes: int
+    auth_file: Path | None = None
+    telemetry: ChildTelemetryConfig | None = None
 
     def __post_init__(self) -> None:
         if self.codex_version != SUPPORTED_CODEX_VERSION:
@@ -212,6 +246,7 @@ class ChildRunResult:
     stderr: str
     stdout_sha256: str
     probe_id: str
+    argv_fingerprint: str
 
     @property
     def succeeded(self) -> bool:
@@ -270,6 +305,21 @@ def build_codex_exec_argv(request: ChildRunRequest) -> tuple[str, ...]:
         arguments.extend(("-c", override))
     for feature in FEATURES_DISABLED_FOR_CHILDREN:
         arguments.extend(("--disable", feature))
+    if request.telemetry is not None:
+        arguments.extend(
+            (
+                "-c",
+                'otel.environment="adaptive-child"',
+                "-c",
+                "otel.log_user_prompt=false",
+                "-c",
+                'otel.metrics_exporter="none"',
+                "-c",
+                'otel.trace_exporter="none"',
+                "-c",
+                _otel_exporter_override(request.telemetry),
+            )
+        )
     return tuple(arguments)
 
 
@@ -305,45 +355,61 @@ class ChildRunner:
             )
         _assert_empty_workdir(request.runtime.work_dir)
 
-        environment = _child_environment(
-            request.runtime,
-            request.permission_profile.snapshot_root,
+        staged_auth = (
+            _stage_auth_file(request.auth_file, request.runtime.codex_home)
+            if request.auth_file is not None
+            else None
         )
         try:
-            process = subprocess.Popen(
-                argv,
-                cwd=request.runtime.work_dir,
-                env=environment,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                shell=False,
-                close_fds=True,
-                start_new_session=True,
-                restore_signals=True,
-                umask=0o077,
+            environment = _child_environment(
+                request.runtime,
+                request.permission_profile.snapshot_root,
+                request.telemetry,
             )
-        except OSError as exc:
-            raise ChildLaunchError("CHILD_SPAWN_FAILED", str(exc)) from exc
+            try:
+                process = subprocess.Popen(
+                    argv,
+                    cwd=request.runtime.work_dir,
+                    env=environment,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    shell=False,
+                    close_fds=True,
+                    start_new_session=True,
+                    restore_signals=True,
+                    umask=0o077,
+                )
+            except OSError as exc:
+                raise ChildLaunchError("CHILD_SPAWN_FAILED", str(exc)) from exc
 
-        stdout, stderr, terminal_reason = _collect_bounded_output(
-            process,
-            prompt=request.prompt.encode("utf-8"),
-            timeout_seconds=float(request.timeout_seconds),
-            max_output_bytes=request.max_output_bytes,
-            cancellation=cancellation,
-        )
-        if terminal_reason is not None:
-            raise ChildLaunchError(terminal_reason, _reason_message(terminal_reason))
+            stdout, stderr, terminal_reason = _collect_bounded_output(
+                process,
+                prompt=request.prompt.encode("utf-8"),
+                timeout_seconds=float(request.timeout_seconds),
+                max_output_bytes=request.max_output_bytes,
+                cancellation=cancellation,
+            )
+            if terminal_reason is not None:
+                raise ChildLaunchError(
+                    terminal_reason,
+                    _reason_message(terminal_reason),
+                )
 
-        events = _parse_jsonl(stdout)
-        return ChildRunResult(
-            exit_code=int(process.returncode),
-            events=events,
-            stderr=stderr.decode("utf-8", errors="replace"),
-            stdout_sha256=hashlib.sha256(stdout).hexdigest(),
-            probe_id=evidence.probe_id,
-        )
+            events = _parse_jsonl(stdout)
+            return ChildRunResult(
+                exit_code=int(process.returncode),
+                events=events,
+                stderr=stderr.decode("utf-8", errors="replace"),
+                stdout_sha256=hashlib.sha256(stdout).hexdigest(),
+                probe_id=evidence.probe_id,
+                argv_fingerprint=hashlib.sha256(
+                    "\0".join(argv).encode("utf-8")
+                ).hexdigest(),
+            )
+        finally:
+            if staged_auth is not None:
+                _remove_staged_auth(staged_auth)
 
 
 def _collect_bounded_output(
@@ -503,8 +569,9 @@ def _parse_jsonl(output: bytes) -> tuple[dict[str, Any], ...]:
 def _child_environment(
     runtime: ChildRuntimeLayout,
     snapshot_root: Path,
+    telemetry: ChildTelemetryConfig | None,
 ) -> dict[str, str]:
-    return {
+    environment = {
         "CODEX_ADAPTIVE_CHILD": "1",
         "CODEX_ADAPTIVE_SNAPSHOT_ROOT": os.fspath(snapshot_root),
         "CODEX_HOME": os.fspath(runtime.codex_home),
@@ -515,6 +582,96 @@ def _child_environment(
         "PATH": FIXED_PATH,
         "TMPDIR": os.fspath(runtime.tmpdir),
     }
+    if telemetry is not None:
+        environment["CODEX_ADAPTIVE_OTEL_TOKEN"] = telemetry.token
+    return environment
+
+
+def _otel_exporter_override(telemetry: ChildTelemetryConfig) -> str:
+    return (
+        "otel.exporter={ otlp-http = { endpoint="
+        f"{json.dumps(telemetry.endpoint)}, protocol=\"json\", headers={{ "
+        f"{json.dumps(telemetry.header_name)}="
+        '"${CODEX_ADAPTIVE_OTEL_TOKEN}" } } }'
+    )
+
+
+def _stage_auth_file(source: Path, codex_home: Path) -> Path:
+    if not source.is_absolute() or source.is_symlink():
+        raise ChildLaunchError(
+            "UNSAFE_AUTH_FILE",
+            "authentication file must be an absolute non-symlink path",
+        )
+    source_flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        source_flags |= os.O_NOFOLLOW
+    try:
+        source_fd = os.open(source, source_flags)
+    except OSError as exc:
+        raise ChildLaunchError("UNSAFE_AUTH_FILE", str(exc)) from exc
+    destination = codex_home / "auth.json"
+    try:
+        metadata = os.fstat(source_fd)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or not 0 < metadata.st_size <= _MAX_AUTH_BYTES
+        ):
+            raise ChildLaunchError(
+                "UNSAFE_AUTH_FILE",
+                "authentication file must be private, owned, and bounded",
+            )
+        destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            destination_flags |= os.O_NOFOLLOW
+        destination_fd = os.open(destination, destination_flags, 0o600)
+        try:
+            remaining = metadata.st_size
+            while remaining:
+                chunk = os.read(source_fd, min(remaining, READ_CHUNK))
+                if not chunk:
+                    raise ChildLaunchError(
+                        "UNSAFE_AUTH_FILE",
+                        "authentication file changed while being staged",
+                    )
+                view = memoryview(chunk)
+                while view:
+                    view = view[os.write(destination_fd, view) :]
+                remaining -= len(chunk)
+            if os.read(source_fd, 1):
+                raise ChildLaunchError(
+                    "UNSAFE_AUTH_FILE",
+                    "authentication file grew while being staged",
+                )
+            os.fsync(destination_fd)
+        except BaseException:
+            os.close(destination_fd)
+            destination.unlink(missing_ok=True)
+            raise
+        else:
+            os.close(destination_fd)
+    finally:
+        os.close(source_fd)
+    return destination
+
+
+def _remove_staged_auth(path: Path) -> None:
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or metadata.st_nlink != 1
+    ):
+        raise ChildLaunchError(
+            "AUTH_CLEANUP_FAILED",
+            "staged authentication path changed during execution",
+        )
+    path.unlink()
 
 
 def _shell_environment_override(request: ChildRunRequest) -> str:

@@ -34,6 +34,14 @@ LIMIT_KEYS = {
     "max_edges",
     "max_depth",
     "max_split_generation",
+    "snapshot_max_files",
+    "snapshot_max_file_bytes",
+    "snapshot_max_total_bytes",
+    "child_timeout_seconds",
+    "child_max_output_bytes",
+    "min_free_disk_bytes",
+    "min_available_memory_bytes",
+    "min_available_fds",
 }
 PROFILE_KEYS = {"permission_profile", "writer", "network"}
 RETENTION_KEYS = {"success_days", "failure_days"}
@@ -145,6 +153,10 @@ def _validate_catalog(data: dict[str, Any]) -> None:
         raise CatalogError("heartbeat_seconds must be below lease_seconds")
     if limits["lease_seconds"] >= limits["recover_after_seconds"]:
         raise CatalogError("lease_seconds must be below recover_after_seconds")
+    if limits["root_processes"] > limits["global_processes"]:
+        raise CatalogError("root_processes must not exceed global_processes")
+    if limits["sol_processes"] > limits["root_processes"]:
+        raise CatalogError("sol_processes must not exceed root_processes")
 
     profiles = _mapping(data["profiles"], "profiles")
     if set(profiles) != {"reader", "writer"}:

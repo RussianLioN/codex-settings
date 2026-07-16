@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -24,6 +25,7 @@ from codex_smart_subagents.child_runner import (  # noqa: E402
     ChildRunRequest,
     ChildRunner,
     ChildRuntimeLayout,
+    ChildTelemetryConfig,
     PermissionProfileDefinition,
     build_codex_exec_argv,
 )
@@ -249,6 +251,69 @@ class ChildRunnerTests(unittest.TestCase):
         self.assertFalse(marker.exists())
         self.assertEqual(1, len(self.canary.calls))
         self.assertEqual(self.profile.sha256, self.canary.calls[0].profile_sha256)
+
+    def test_stages_auth_and_otel_without_exposing_token_in_argv(self) -> None:
+        source_auth = self.base / "source-auth.json"
+        source_auth.write_text('{"token":"test-only"}\n', encoding="utf-8")
+        source_auth.chmod(0o600)
+        telemetry = ChildTelemetryConfig(
+            endpoint="http://127.0.0.1:4318/random/v1/logs",
+            header_name="X-Codex-Attestation-Token",
+            token="test-otel-token",
+        )
+        request = self.request(
+            auth_file=source_auth,
+            telemetry=telemetry,
+        )
+
+        argv = build_codex_exec_argv(request)
+        self.assertNotIn(telemetry.token, "\0".join(argv))
+        self.assertIn(
+            (
+                'otel.exporter={ otlp-http = { endpoint='
+                '"http://127.0.0.1:4318/random/v1/logs", protocol="json", '
+                'headers={ "X-Codex-Attestation-Token"='
+                '"${CODEX_ADAPTIVE_OTEL_TOKEN}" } } }'
+            ),
+            argv,
+        )
+
+        result = self.runner.run(request)
+
+        self.assertTrue(result.succeeded)
+        self.assertEqual(
+            hashlib.sha256("\0".join(argv).encode("utf-8")).hexdigest(),
+            result.argv_fingerprint,
+        )
+        invocation = json.loads(
+            (self.layout.work_dir / "fake-codex-invocation.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            telemetry.token,
+            invocation["environment"]["CODEX_ADAPTIVE_OTEL_TOKEN"],
+        )
+        self.assertEqual(
+            '{"token":"test-only"}\n',
+            invocation["authContents"],
+        )
+        self.assertEqual(0o600, invocation["authMode"])
+        self.assertFalse((self.layout.codex_home / "auth.json").exists())
+
+    def test_rejects_unsafe_auth_and_non_loopback_telemetry(self) -> None:
+        source_auth = self.base / "source-auth.json"
+        source_auth.write_text("{}\n", encoding="utf-8")
+        source_auth.chmod(0o644)
+        with self.assertRaisesRegex(ChildLaunchError, "UNSAFE_AUTH_FILE"):
+            self.runner.run(self.request(auth_file=source_auth))
+
+        with self.assertRaises(ValueError):
+            ChildTelemetryConfig(
+                endpoint="https://collector.example.com/v1/logs",
+                header_name="X-Codex-Attestation-Token",
+                token="token",
+            )
 
     def test_runtime_directories_are_private_and_separate(self) -> None:
         paths = (

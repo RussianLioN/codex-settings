@@ -31,6 +31,12 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(6, catalog.limits["root_processes"])
         self.assertEqual(2, catalog.limits["sol_processes"])
         self.assertEqual(100, catalog.limits["queue_nodes"])
+        self.assertEqual(
+            (REPO / ".codex" / "adaptive-subagents.toml").read_bytes(),
+            (
+                PLUGIN_ROOT / "config" / "adaptive-subagents.toml"
+            ).read_bytes(),
+        )
 
     def test_opaque_ids_are_hash_derived_and_do_not_leak_paths(self) -> None:
         catalog = Catalog.load(REPO / ".codex" / "adaptive-subagents.toml")
@@ -87,4 +93,3 @@ class SchemaExportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
