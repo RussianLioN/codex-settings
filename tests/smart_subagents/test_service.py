@@ -129,6 +129,34 @@ class ServiceTests(unittest.TestCase):
             )
         self.assertEqual("ROUTE_NOT_STARTABLE", caught.exception.code)
 
+    def test_mixed_direct_and_delegate_graph_is_not_startable(self) -> None:
+        payload = valid_plan()
+        direct = payload["nodes"][0]
+        direct["clientNodeId"] = "reader_direct"
+        direct["assessment"]["delegation"] = {
+            "q": {"min": 0, "max": 0},
+            "p": {"min": 0, "max": 0},
+            "v": {"min": 0, "max": 0},
+            "o": {"min": 2, "max": 2},
+        }
+        delegated = copy.deepcopy(payload["nodes"][0])
+        delegated["clientNodeId"] = "reader_delegate"
+        delegated["assessment"]["delegation"] = {
+            "q": {"min": 2, "max": 2},
+            "p": {"min": 2, "max": 2},
+            "v": {"min": 2, "max": 2},
+            "o": {"min": 0, "max": 0},
+        }
+        payload["nodes"] = [direct, delegated]
+        payload["turnBinding"] = self.store.issue_turn_binding(context())
+        payload["requestKey"] = "mixed-disposition"
+        payload["catalogGeneration"] = self.catalog.generation
+
+        plan = self.service.smart_plan(payload, context())
+
+        self.assertEqual("direct", plan["overallDisposition"])
+        self.assertFalse(plan["startable"])
+
     def _bound_plan(self) -> dict[str, object]:
         payload = valid_plan()
         payload["turnBinding"] = self.store.issue_turn_binding(context())

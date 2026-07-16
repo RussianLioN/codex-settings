@@ -130,7 +130,7 @@ class SmartService:
         }
         if "clarify" in dispositions:
             overall = "clarify"
-        elif "delegate" in dispositions:
+        elif dispositions == {"delegate"}:
             overall = "delegate"
         else:
             overall = "direct"
