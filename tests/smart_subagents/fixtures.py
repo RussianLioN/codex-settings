@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from typing import Any
 
-def valid_plan() -> dict[str, object]:
-    return {
+
+def valid_plan(catalog: Any | None = None) -> dict[str, object]:
+    plan: dict[str, object] = {
         "schemaVersion": "1",
         "turnBinding": "tb1_" + "A" * 43,
         "requestKey": "request-0001",
@@ -42,4 +44,15 @@ def valid_plan() -> dict[str, object]:
             }
         ],
     }
-
+    if catalog is not None:
+        node = plan["nodes"][0]  # type: ignore[index]
+        node["scopeId"] = catalog.opaque_id("scope", "default")
+        node["artifactProfileId"] = catalog.opaque_id(
+            "artifact",
+            "report",
+        )
+        node["validationProfileId"] = catalog.opaque_id(
+            "validation",
+            "none",
+        )
+    return plan

@@ -41,7 +41,7 @@ def context() -> RequestContext:
 
 
 def three_node_plan(catalog: Catalog, store: SmartStore) -> dict[str, object]:
-    template = valid_plan()["nodes"][0]
+    template = valid_plan(catalog)["nodes"][0]
     first = copy.deepcopy(template)
     first["clientNodeId"] = "reader_a"
     first["mission"] = "Проверить область A."
@@ -53,7 +53,10 @@ def three_node_plan(catalog: Catalog, store: SmartStore) -> dict[str, object]:
     writer["mission"] = "Собрать проверенный кандидат."
     writer["role"] = "implementer"
     writer["dependencyIds"] = ["reader_a", "reader_b"]
-    writer["artifactProfileId"] = "artifact_candidate"
+    writer["artifactProfileId"] = catalog.opaque_id(
+        "artifact",
+        "candidate",
+    )
     writer["riskFlags"] = ["writer_final_validation"]
     writer["assessment"]["delegation"] = {
         "q": {"min": 2, "max": 2},
@@ -71,9 +74,16 @@ def three_node_plan(catalog: Catalog, store: SmartStore) -> dict[str, object]:
 
 
 class FakeNodeExecutor:
-    def __init__(self, store: SmartStore, *, fail_node: str = "") -> None:
+    def __init__(
+        self,
+        store: SmartStore,
+        *,
+        fail_node: str = "",
+        writer_validation_state: str = "passed",
+    ) -> None:
         self.store = store
         self.fail_node = fail_node
+        self.writer_validation_state = writer_validation_state
         self.lock = threading.Lock()
         self.active = 0
         self.max_active = 0
@@ -112,7 +122,11 @@ class FakeNodeExecutor:
             return NodeExecutionOutcome(
                 summary=summary,
                 fingerprint=hashlib.sha256(summary.encode()).hexdigest(),
-                validation_state="passed",
+                validation_state=(
+                    self.writer_validation_state
+                    if request.node.role == "implementer"
+                    else "passed"
+                ),
                 artifact_id=artifact_id,
                 attestation={
                     "observedModel": request.node.selected_model,
@@ -120,6 +134,12 @@ class FakeNodeExecutor:
                 },
                 permission_probe_id="pc1_" + "A" * 43,
                 argv_fingerprint="c" * 64,
+                usage={
+                    "inputTokens": 10,
+                    "cachedInputTokens": 2,
+                    "outputTokens": 5,
+                    "reasoningOutputTokens": 1,
+                },
             )
         finally:
             with self.lock:
@@ -183,7 +203,62 @@ class ExecutionEngineTests(unittest.TestCase):
             executor.started.index("reader_b"),
         )
         self.assertEqual([], self.store.pending_intents(route_id))
-        self.assertEqual(3, len(self.store.attempts_for_route(route_id)))
+        attempts = self.store.attempts_for_route(route_id)
+        self.assertEqual(3, len(attempts))
+        self.assertEqual(
+            {
+                "inputTokens": 10,
+                "cachedInputTokens": 2,
+                "outputTokens": 5,
+                "reasoningOutputTokens": 1,
+            },
+            attempts[0]["result"]["usage"],
+        )
+        self.assertEqual(
+            {
+                "inputTokens": 30,
+                "cachedInputTokens": 6,
+                "outputTokens": 15,
+                "reasoningOutputTokens": 3,
+            },
+            route.terminal_result["usage"],
+        )
+        waited = self.service.smart_wait(
+            {
+                "schemaVersion": "1",
+                "routeId": route_id,
+                "afterSequence": 0,
+                "timeoutSeconds": 0,
+            },
+            context(),
+        )
+        self.assertEqual("TERMINAL", waited["code"])
+        self.assertEqual(
+            route.terminal_result["usage"],
+            waited["terminalResult"]["usage"],
+        )
+
+    def test_outcome_rejects_unbounded_or_unknown_usage(self) -> None:
+        common = {
+            "summary": "Готово.",
+            "fingerprint": "a" * 64,
+            "validation_state": "passed",
+            "artifact_id": "",
+            "attestation": {},
+            "permission_probe_id": "pc1_" + "A" * 43,
+            "argv_fingerprint": "b" * 64,
+        }
+
+        with self.assertRaisesRegex(ValueError, "usage"):
+            NodeExecutionOutcome(
+                **common,
+                usage={"privatePromptTokens": 1},
+            )
+        with self.assertRaisesRegex(ValueError, "usage"):
+            NodeExecutionOutcome(
+                **common,
+                usage={"inputTokens": -1},
+            )
 
     def test_node_failure_fails_route_without_starting_dependents(self) -> None:
         route_id = self.start_route()
@@ -205,6 +280,55 @@ class ExecutionEngineTests(unittest.TestCase):
         self.assertEqual("failed", route.terminal_result["validationState"])
         attempts = self.store.attempts_for_route(route_id)
         self.assertIn("FAILED", {attempt["state"] for attempt in attempts})
+
+    def test_failed_writer_validation_keeps_artifact_quarantined(self) -> None:
+        route_id = self.start_route()
+        executor = FakeNodeExecutor(
+            self.store,
+            writer_validation_state="failed",
+        )
+        engine = ExecutionEngine(
+            self.store,
+            executor,
+            max_workers=2,
+            max_sol_workers=1,
+            lease_seconds=45,
+            heartbeat_seconds=1,
+        )
+
+        self.assertTrue(engine.run_once())
+
+        route = self.store.execution_bundle(route_id).route
+        self.assertEqual(RouteState.QUARANTINED, route.state)
+        self.assertEqual("art1_" + "A" * 43, route.terminal_result["artifactId"])
+        self.assertEqual("failed", route.terminal_result["validationState"])
+
+    def test_unavailable_writer_validation_keeps_artifact_quarantined(
+        self,
+    ) -> None:
+        route_id = self.start_route()
+        executor = FakeNodeExecutor(
+            self.store,
+            writer_validation_state="quarantined",
+        )
+        engine = ExecutionEngine(
+            self.store,
+            executor,
+            max_workers=2,
+            max_sol_workers=1,
+            lease_seconds=45,
+            heartbeat_seconds=1,
+        )
+
+        self.assertTrue(engine.run_once())
+
+        route = self.store.execution_bundle(route_id).route
+        self.assertEqual(RouteState.QUARANTINED, route.state)
+        self.assertEqual("art1_" + "A" * 43, route.terminal_result["artifactId"])
+        self.assertEqual(
+            "quarantined",
+            route.terminal_result["validationState"],
+        )
 
     def test_empty_queue_returns_without_work(self) -> None:
         engine = ExecutionEngine(

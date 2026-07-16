@@ -7,13 +7,23 @@ import os
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from .identity import RequestContext, canonical_sha256, new_opaque_id
 from .state import RouteState
 from .store import ClaimedRoute, NodeRecord, SmartStore
+
+
+TOKEN_USAGE_FIELDS = {
+    "input_tokens": "inputTokens",
+    "cached_input_tokens": "cachedInputTokens",
+    "output_tokens": "outputTokens",
+    "reasoning_output_tokens": "reasoningOutputTokens",
+}
+TOKEN_USAGE_KEYS = frozenset(TOKEN_USAGE_FIELDS.values())
+MAX_TOKEN_COUNT = 10**12
 
 
 @dataclass
@@ -34,6 +44,7 @@ class NodeExecutionOutcome:
     attestation: dict[str, Any]
     permission_probe_id: str
     argv_fingerprint: str
+    usage: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if len(self.summary) > 4000:
@@ -56,6 +67,68 @@ class NodeExecutionOutcome:
             raise ValueError("permission_probe_id is required")
         if len(self.artifact_id) > 80:
             raise ValueError("artifact_id exceeds the limit")
+        if (
+            not isinstance(self.usage, dict)
+            or not set(self.usage) <= TOKEN_USAGE_KEYS
+        ):
+            raise ValueError("usage contains unsupported fields")
+        for value in self.usage.values():
+            if (
+                type(value) is not int
+                or value < 0
+                or value > MAX_TOKEN_COUNT
+            ):
+                raise ValueError("usage contains an invalid token count")
+        object.__setattr__(
+            self,
+            "usage",
+            {
+                key: self.usage[key]
+                for key in sorted(self.usage)
+            },
+        )
+
+
+def extract_token_usage(events: object) -> dict[str, int]:
+    """Return only bounded token counters from the final completed turn."""
+
+    if not isinstance(events, (list, tuple)):
+        return {}
+    completed = next(
+        (
+            event
+            for event in reversed(events)
+            if isinstance(event, dict)
+            and event.get("type") == "turn.completed"
+        ),
+        None,
+    )
+    if completed is None:
+        return {}
+    raw = completed.get("usage")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise NodeExecutionError(
+            "CHILD_USAGE_INVALID",
+            "child token usage is not an object",
+        )
+    usage: dict[str, int] = {}
+    for source, target in TOKEN_USAGE_FIELDS.items():
+        value = raw.get(source)
+        if value is None:
+            continue
+        if (
+            type(value) is not int
+            or value < 0
+            or value > MAX_TOKEN_COUNT
+        ):
+            raise NodeExecutionError(
+                "CHILD_USAGE_INVALID",
+                "child token usage contains an invalid counter",
+            )
+        usage[target] = value
+    return usage
 
 
 @dataclass(frozen=True)
@@ -220,7 +293,11 @@ class ExecutionEngine:
                     code="CANDIDATE_BUILDING",
                     message="",
                 )
-                terminal_state = RouteState.CANDIDATE_READY
+                terminal_state = (
+                    RouteState.CANDIDATE_READY
+                    if writer.validation_state == "passed"
+                    else RouteState.QUARANTINED
+                )
                 artifact_id = writer.artifact_id
                 validation_state = writer.validation_state
             else:
@@ -254,6 +331,14 @@ class ExecutionEngine:
                 outcome.summary
                 for _node_id, outcome in sorted(outcomes.items())
             )[:4000]
+            usage = {
+                key: sum(
+                    outcome.usage.get(key, 0)
+                    for outcome in outcomes.values()
+                )
+                for key in sorted(TOKEN_USAGE_KEYS)
+                if any(key in outcome.usage for outcome in outcomes.values())
+            }
             self.store.finish_route(
                 route_id,
                 context,
@@ -263,6 +348,7 @@ class ExecutionEngine:
                     "fingerprint": aggregate,
                     "summary": summary,
                     "validationState": validation_state,
+                    "usage": usage,
                 },
                 event=terminal_state.value.lower(),
                 code=terminal_state.value,
@@ -469,6 +555,7 @@ class ExecutionEngine:
                 "fingerprint": outcome.fingerprint,
                 "validationState": outcome.validation_state,
                 "artifactId": outcome.artifact_id,
+                "usage": outcome.usage,
             },
             attestation=outcome.attestation,
             argv_fingerprint=outcome.argv_fingerprint,
@@ -495,6 +582,7 @@ class ExecutionEngine:
                 "fingerprint": outcome.fingerprint,
                 "validationState": outcome.validation_state,
                 "artifactId": outcome.artifact_id,
+                "usage": outcome.usage,
             },
         )
         return outcome

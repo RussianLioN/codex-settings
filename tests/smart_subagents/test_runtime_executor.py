@@ -109,6 +109,12 @@ def child_events(
             "type": "turn.completed",
             "model": model,
             "reasoning_effort": effort,
+            "usage": {
+                "input_tokens": 10,
+                "cached_input_tokens": 0,
+                "output_tokens": 5,
+                "reasoning_output_tokens": 1,
+            },
         },
     )
 
@@ -156,10 +162,11 @@ class FakeReceiver:
             else [
                 {
                     "event.name": "codex.conversation_starts",
+                    "app.version": "0.144.4",
                     "service.version": "0.144.4",
                     "model": "gpt-5.6-terra",
-                    "model_reasoning_effort": "high",
-                    "conversation_id": "thread-123",
+                    "reasoning_effort": "high",
+                    "conversation.id": "thread-123",
                 }
             ]
         )
@@ -352,6 +359,15 @@ class RuntimeNodeExecutorTests(unittest.TestCase):
         self.assertEqual(64, len(outcome.argv_fingerprint))
         self.assertEqual("gpt-5.6-terra", outcome.attestation["observedModel"])
         self.assertEqual("high", outcome.attestation["observedEffort"])
+        self.assertEqual(
+            {
+                "inputTokens": 10,
+                "cachedInputTokens": 0,
+                "outputTokens": 5,
+                "reasoningOutputTokens": 1,
+            },
+            outcome.usage,
+        )
         self.assertTrue(receiver.entered)
         self.assertTrue(receiver.exited)
         self.assertEqual(1, len(worker.requests))

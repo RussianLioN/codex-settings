@@ -110,7 +110,7 @@ class ControllerTests(unittest.TestCase):
             "issue_turn_binding",
             {"context": context().to_wire()},
         )["turnBinding"]
-        payload = valid_plan()
+        payload = valid_plan(self.catalog)
         payload["turnBinding"] = binding
         payload["catalogGeneration"] = self.catalog.generation
 

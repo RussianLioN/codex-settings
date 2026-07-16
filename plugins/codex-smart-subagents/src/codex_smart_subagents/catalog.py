@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,13 @@ LIMIT_KEYS = {
     "min_free_disk_bytes",
     "min_available_memory_bytes",
     "min_available_fds",
+    "validation_timeout_seconds",
+    "validation_max_output_bytes",
+    "validation_max_address_space_bytes",
+    "validation_max_processes",
+    "validation_max_file_bytes",
+    "validation_max_open_files",
+    "validation_max_growth_bytes",
 }
 PROFILE_KEYS = {"permission_profile", "writer", "network"}
 RETENTION_KEYS = {"success_days", "failure_days"}
@@ -197,10 +205,12 @@ def _validate_catalog(data: dict[str, Any]) -> None:
                 not isinstance(command, list)
                 or not command
                 or not all(isinstance(part, str) and part for part in command)
+                or not os.path.isabs(command[0])
+                or any("\0" in part for part in command)
             ):
                 raise CatalogError(
                     f"validation.{name}.commands[{index}] "
-                    "must be a non-empty argv array"
+                    "must be a safe absolute argv array"
                 )
 
 

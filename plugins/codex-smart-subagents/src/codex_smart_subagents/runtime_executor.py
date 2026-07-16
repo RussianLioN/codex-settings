@@ -17,12 +17,14 @@ from .child_runner import (
     MAX_SCHEMA_BYTES,
     MODEL_EFFORTS,
     SUPPORTED_CODEX_VERSION,
+    ChildResourceLimits,
     ChildTelemetryConfig,
 )
 from .execution import (
     NodeExecutionError,
     NodeExecutionOutcome,
     NodeExecutionRequest,
+    extract_token_usage,
 )
 from .identity import canonical_sha256
 from .telemetry import OTelReceiver, RunAttestation, attest_run
@@ -132,6 +134,7 @@ class RuntimeExecutorConfig:
     output_schema: Path
     timeout_seconds: float
     max_output_bytes: int
+    resource_limits: ChildResourceLimits = ChildResourceLimits()
     auth_file: Path | None = None
 
     def __post_init__(self) -> None:
@@ -165,6 +168,8 @@ class RuntimeExecutorConfig:
             or not 1024 <= self.max_output_bytes <= 64 * 1024 * 1024
         ):
             raise ValueError("max_output_bytes is outside the supported range")
+        if not isinstance(self.resource_limits, ChildResourceLimits):
+            raise ValueError("resource_limits must be ChildResourceLimits")
 
         auth_file = self.auth_file
         if auth_file is not None:
@@ -247,6 +252,7 @@ class RuntimeNodeExecutor:
                     prompt=prompt,
                     timeout_seconds=self.config.timeout_seconds,
                     max_output_bytes=self.config.max_output_bytes,
+                    resource_limits=self.config.resource_limits,
                     auth_file=self.config.auth_file,
                     telemetry=telemetry,
                 )
@@ -468,6 +474,7 @@ class RuntimeNodeExecutor:
             attestation=attestation_payload,
             permission_probe_id=permission_probe_id,
             argv_fingerprint=argv_fingerprint,
+            usage=extract_token_usage(jsonl_events),
         )
 
 

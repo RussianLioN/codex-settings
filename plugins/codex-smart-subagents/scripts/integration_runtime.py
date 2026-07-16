@@ -10,6 +10,7 @@ import re
 import secrets
 import stat
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -36,6 +37,11 @@ CHILD_MARKERS = (
     "CODEX_ADAPTIVE_CHILD",
     "CODEX_SMART_SUBAGENT_CHILD",
 )
+HOOK_TOTAL_BUDGET_SECONDS = 1.75
+HOOK_CONTROLLER_TIMEOUT_SECONDS = 0.3
+MCP_PLAN_TIMEOUT_SECONDS = 420.0
+MCP_SHORT_TIMEOUT_SECONDS = 10.0
+MCP_WAIT_GRACE_SECONDS = 5.0
 
 
 class IntegrationError(RuntimeError):
@@ -269,16 +275,64 @@ def controller_client(config: IntegrationConfig) -> ControllerClient:
         socket_path=config.paths.socket_path,
         codex_home_hash=config.codex_home_hash,
         shell_session_id=config.shell_session_id,
-        timeout=1.5,
+        timeout=HOOK_CONTROLLER_TIMEOUT_SECONDS,
     )
+
+
+class MCPControllerClient:
+    """Choose a bounded controller timeout for each public MCP method."""
+
+    def __init__(
+        self,
+        config: IntegrationConfig,
+        *,
+        client_factory: Callable[..., ControllerClient] = ControllerClient,
+    ) -> None:
+        self.config = config
+        self.client_factory = client_factory
+
+    def call(
+        self,
+        method: str,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        timeout = MCP_SHORT_TIMEOUT_SECONDS
+        if method == "smart_plan":
+            timeout = MCP_PLAN_TIMEOUT_SECONDS
+        elif method == "smart_wait":
+            requested = params.get("timeoutSeconds")
+            if (
+                type(requested) is not int
+                or not 0 <= requested <= 60
+            ):
+                raise IntegrationError(
+                    "timeoutSeconds должен быть целым числом от 0 до 60"
+                )
+            timeout = requested + MCP_WAIT_GRACE_SECONDS
+        client = self.client_factory(
+            socket_path=self.config.paths.socket_path,
+            codex_home_hash=self.config.codex_home_hash,
+            shell_session_id=self.config.shell_session_id,
+            timeout=timeout,
+        )
+        return client.call(method, params)
+
+
+def mcp_controller_client(config: IntegrationConfig) -> MCPControllerClient:
+    return MCPControllerClient(config)
 
 
 def request_context(
     payload: dict[str, Any],
     config: IntegrationConfig,
+    *,
+    deadline: float | None = None,
 ) -> RequestContext:
     _validate_hook_payload(payload, "UserPromptSubmit")
-    repo_root, base_sha, fingerprint = _git_identity(payload["cwd"])
+    repo_root, base_sha, fingerprint = _git_identity(
+        payload["cwd"],
+        deadline=deadline,
+    )
     return RequestContext(
         shell_session_id=config.shell_session_id,
         session_id=payload["session_id"],
@@ -359,14 +413,32 @@ def _validate_hook_payload(payload: dict[str, Any], event: str) -> None:
         raise IntegrationError("cwd события должен быть существующим каталогом")
 
 
-def _git_identity(cwd: str) -> tuple[str, str, str]:
+def _git_identity(
+    cwd: str,
+    *,
+    deadline: float | None = None,
+) -> tuple[str, str, str]:
+    deadline = (
+        time.monotonic() + HOOK_TOTAL_BUDGET_SECONDS
+        if deadline is None
+        else deadline
+    )
     git = _git_binary()
-    repo_root = _run_git(git, cwd, "rev-parse", "--show-toplevel").decode(
-        "utf-8"
-    ).strip()
-    base_sha = _run_git(git, repo_root, "rev-parse", "HEAD").decode(
-        "ascii"
-    ).strip()
+    identity = _run_git(
+        git,
+        cwd,
+        "rev-parse",
+        "--show-toplevel",
+        "HEAD",
+        timeout_seconds=_budgeted_timeout(
+            deadline,
+            reserve_seconds=1.25,
+            maximum_seconds=0.4,
+        ),
+    ).decode("utf-8").splitlines()
+    if len(identity) != 2:
+        raise IntegrationError("Git вернул неполную идентичность")
+    repo_root, base_sha = identity
     status_bytes = _run_git(
         git,
         repo_root,
@@ -374,6 +446,11 @@ def _git_identity(cwd: str) -> tuple[str, str, str]:
         "--porcelain=v2",
         "-z",
         "--untracked-files=all",
+        timeout_seconds=_budgeted_timeout(
+            deadline,
+            reserve_seconds=0.65,
+            maximum_seconds=0.65,
+        ),
     )
     if not re.fullmatch(r"[0-9a-f]{40,64}", base_sha):
         raise IntegrationError("HEAD репозитория имеет неверный формат")
@@ -392,7 +469,12 @@ def _git_binary() -> str:
     raise IntegrationError("доверенный исполняемый файл Git не найден")
 
 
-def _run_git(git: str, cwd: str, *args: str) -> bytes:
+def _run_git(
+    git: str,
+    cwd: str,
+    *args: str,
+    timeout_seconds: float = 1.2,
+) -> bytes:
     try:
         result = subprocess.run(
             [
@@ -411,7 +493,7 @@ def _run_git(git: str, cwd: str, *args: str) -> bytes:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             check=True,
-            timeout=1.2,
+            timeout=timeout_seconds,
             env={
                 "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
                 "LC_ALL": "C",
@@ -425,3 +507,15 @@ def _run_git(git: str, cwd: str, *args: str) -> bytes:
     except (OSError, subprocess.SubprocessError) as exc:
         raise IntegrationError("не удалось определить состояние Git") from exc
     return result.stdout
+
+
+def _budgeted_timeout(
+    deadline: float,
+    *,
+    reserve_seconds: float,
+    maximum_seconds: float,
+) -> float:
+    remaining = deadline - time.monotonic() - reserve_seconds
+    if remaining <= 0.05:
+        raise IntegrationError("бюджет времени события исчерпан")
+    return min(maximum_seconds, remaining)

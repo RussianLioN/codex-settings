@@ -19,12 +19,11 @@ _SAFE_FIELDS = frozenset(
     {
         "event.name",
         "name",
+        "app.version",
         "service.version",
         "model",
-        "model_reasoning_effort",
         "reasoning_effort",
-        "conversation_id",
-        "thread_id",
+        "conversation.id",
         "sandbox_policy",
         "approval_policy",
     }
@@ -195,16 +194,13 @@ def attest_run(
             "codex.conversation_starts telemetry is missing",
         )
 
-    cli_version = _one_required(starts, "service.version")
+    cli_version = _one_required_alias(
+        starts,
+        ("app.version", "service.version"),
+    )
     observed_model = _one_required(starts, "model")
-    observed_effort = _one_required_alias(
-        starts,
-        ("model_reasoning_effort", "reasoning_effort"),
-    )
-    conversation_id = _one_required_alias(
-        starts,
-        ("conversation_id", "thread_id"),
-    )
+    observed_effort = _one_required(starts, "reasoning_effort")
+    conversation_id = _one_required(starts, "conversation.id")
     jsonl_thread = _jsonl_thread_id(jsonl_events)
 
     if cli_version != expected_cli_version:

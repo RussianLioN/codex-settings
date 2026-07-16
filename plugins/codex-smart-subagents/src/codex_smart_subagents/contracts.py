@@ -31,13 +31,17 @@ def _strict_object(
     properties: dict[str, Any],
     *,
     required: list[str] | None = None,
+    description: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    schema = {
         "type": "object",
         "properties": properties,
         "required": required if required is not None else list(properties),
         "additionalProperties": False,
     }
+    if description is not None:
+        schema["description"] = description
+    return schema
 
 
 def _string(
@@ -46,6 +50,7 @@ def _string(
     maximum: int = 4096,
     pattern: str | None = None,
     enum: list[str] | None = None,
+    description: str | None = None,
 ) -> dict[str, Any]:
     schema: dict[str, Any] = {
         "type": "string",
@@ -56,11 +61,25 @@ def _string(
         schema["pattern"] = pattern
     if enum is not None:
         schema["enum"] = enum
+    if description is not None:
+        schema["description"] = description
     return schema
 
 
-def _integer(minimum: int, maximum: int) -> dict[str, Any]:
-    return {"type": "integer", "minimum": minimum, "maximum": maximum}
+def _integer(
+    minimum: int,
+    maximum: int,
+    *,
+    description: str | None = None,
+) -> dict[str, Any]:
+    schema: dict[str, Any] = {
+        "type": "integer",
+        "minimum": minimum,
+        "maximum": maximum,
+    }
+    if description is not None:
+        schema["description"] = description
+    return schema
 
 
 def _array(
@@ -69,6 +88,7 @@ def _array(
     minimum: int = 0,
     maximum: int,
     unique: bool = False,
+    description: str | None = None,
 ) -> dict[str, Any]:
     schema: dict[str, Any] = {
         "type": "array",
@@ -78,43 +98,124 @@ def _array(
     }
     if unique:
         schema["uniqueItems"] = True
+    if description is not None:
+        schema["description"] = description
     return schema
 
 
-INTERVAL_SCHEMA = _strict_object(
-    {"min": _integer(0, 2), "max": _integer(0, 2)}
-)
+SCORE_SCALE = "Шкала: 0 — низко, 1 — средне, 2 — высоко."
+
+
+def _interval_schema(description: str) -> dict[str, Any]:
+    return _strict_object(
+        {
+            "min": _integer(
+                0,
+                2,
+                description="Нижняя граница оценки. " + SCORE_SCALE,
+            ),
+            "max": _integer(
+                0,
+                2,
+                description="Верхняя граница оценки. " + SCORE_SCALE,
+            ),
+        },
+        description=(
+            description
+            + " Задай интервал min..max; min не больше max. "
+            + SCORE_SCALE
+        ),
+    )
+
+
 DELEGATION_SCHEMA = _strict_object(
     {
-        "q": INTERVAL_SCHEMA,
-        "p": INTERVAL_SCHEMA,
-        "v": INTERVAL_SCHEMA,
-        "o": INTERVAL_SCHEMA,
-    }
+        "q": _interval_schema(
+            "Ожидаемый прирост качества от отдельного дочернего агента."
+        ),
+        "p": _interval_schema(
+            "Польза независимого или параллельного выполнения."
+        ),
+        "v": _interval_schema(
+            "Проверяемость результата объективными доказательствами."
+        ),
+        "o": _interval_schema(
+            "Накладные расходы, задержка и цена координации."
+        ),
+    },
+    description=(
+        "Факторы решения о передаче задачи. Используй интервалы, когда "
+        "оценка неопределённа."
+    ),
 )
 COMPLEXITY_SCHEMA = _strict_object(
     {
-        "ambiguity": _integer(0, 2),
-        "dependencyDepth": _integer(0, 2),
-        "breadth": _integer(0, 2),
-        "novelty": _integer(0, 2),
-        "harm": _integer(0, 2),
-        "crossDomain": _integer(0, 2),
-    }
+        "ambiguity": _integer(
+            0,
+            2,
+            description="Неопределённость требований и вариантов. " + SCORE_SCALE,
+        ),
+        "dependencyDepth": _integer(
+            0,
+            2,
+            description="Глубина зависимых шагов и состояний. " + SCORE_SCALE,
+        ),
+        "breadth": _integer(
+            0,
+            2,
+            description="Ширина затрагиваемых частей и файлов. " + SCORE_SCALE,
+        ),
+        "novelty": _integer(
+            0,
+            2,
+            description="Новизна решения и нехватка известных образцов. " + SCORE_SCALE,
+        ),
+        "harm": _integer(
+            0,
+            2,
+            description="Возможный ущерб от ошибочного решения. " + SCORE_SCALE,
+        ),
+        "crossDomain": _integer(
+            0,
+            2,
+            description="Число и различие предметных областей. " + SCORE_SCALE,
+        ),
+    },
+    description="Факторы выбора уровня модели. " + SCORE_SCALE,
 )
 REASONING_SCHEMA = _strict_object(
     {
-        "evidence": _integer(0, 2),
-        "verification": _integer(0, 2),
-        "harm": _integer(0, 2),
-    }
+        "evidence": _integer(
+            0,
+            2,
+            description=(
+                "Объём, разрозненность и противоречивость доказательств. "
+                + SCORE_SCALE
+            ),
+        ),
+        "verification": _integer(
+            0,
+            2,
+            description="Трудность проверки вывода и результата. " + SCORE_SCALE,
+        ),
+        "harm": _integer(
+            0,
+            2,
+            description="Цена ошибки рассуждения. " + SCORE_SCALE,
+        ),
+    },
+    description="Факторы выбора глубины рассуждения. " + SCORE_SCALE,
 )
 ASSESSMENT_SCHEMA = _strict_object(
     {
         "delegation": DELEGATION_SCHEMA,
         "complexity": COMPLEXITY_SCHEMA,
         "reasoning": REASONING_SCHEMA,
-    }
+    },
+    description=(
+        "Независимая оценка узла по определениям факторов; модель и уровень "
+        "рассуждения не задавай — их выбирает контроллер."
+    ),
 )
 NODE_SCHEMA = _strict_object(
     {
@@ -130,11 +231,19 @@ NODE_SCHEMA = _strict_object(
                 "validator",
                 "risk_auditor",
             ],
+            description=(
+                "Назначение узла: исследование, диагностика, реализация, "
+                "проверка или аудит риска."
+            ),
         ),
         "dependencyIds": _array(
             _string(minimum=1, maximum=64, pattern=OPAQUE_ID_PATTERN),
             maximum=20,
             unique=True,
+            description=(
+                "Идентификаторы узлов, результаты которых нужны до запуска "
+                "этого узла."
+            ),
         ),
         "contextRefs": _array(
             _string(minimum=1, maximum=128, pattern=OPAQUE_ID_PATTERN),
@@ -166,7 +275,25 @@ NODE_SCHEMA = _strict_object(
             maximum=7,
             unique=True,
         ),
-    }
+        "hardBan": _string(enum=["direct", "clarify"]),
+        "clarificationQuestion": _string(minimum=1, maximum=500),
+    },
+    required=[
+        "clientNodeId",
+        "mission",
+        "role",
+        "dependencyIds",
+        "contextRefs",
+        "scopeId",
+        "artifactProfileId",
+        "validationProfileId",
+        "assessment",
+        "riskFlags",
+    ],
+    description=(
+        "Один ограниченный узел графа. Допустим не более чем один implementer; "
+        "он обязан быть конечным узлом и транзитивно зависеть от всех остальных."
+    ),
 )
 LINEAGE_SCHEMA = _strict_object(
     {
@@ -255,6 +382,15 @@ EVENT_SCHEMA = _strict_object(
         "message": _string(minimum=0, maximum=1000),
     }
 )
+TOKEN_USAGE_SCHEMA = _strict_object(
+    {
+        "inputTokens": _integer(0, 10**12),
+        "cachedInputTokens": _integer(0, 10**12),
+        "outputTokens": _integer(0, 10**12),
+        "reasoningOutputTokens": _integer(0, 10**12),
+    },
+    required=[],
+)
 TERMINAL_RESULT_SCHEMA = _strict_object(
     {
         "artifactId": _string(minimum=3, maximum=80),
@@ -265,7 +401,14 @@ TERMINAL_RESULT_SCHEMA = _strict_object(
         "validationState": _string(
             enum=["not_applicable", "passed", "failed", "quarantined"]
         ),
-    }
+        "usage": TOKEN_USAGE_SCHEMA,
+    },
+    required=[
+        "artifactId",
+        "fingerprint",
+        "summary",
+        "validationState",
+    ],
 )
 PLAN_OUTPUT_SCHEMA = _strict_object(
     {
@@ -347,8 +490,11 @@ TOOL_SCHEMAS: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
 
 TOOL_DESCRIPTIONS = {
     "smart_plan": (
-        "Validate a bounded task graph and deterministically choose direct work, "
-        "clarification, or isolated Codex subagents."
+        "Проверь ограниченный ациклический граф и детерминированно выбери "
+        "direct, clarification или изолированных дочерних агентов. Оцени "
+        "факторы строго по описаниям схемы 0/1/2. Не более 20 узлов, 60 связей "
+        "и глубины 4; не более одного implementer, он конечный и зависит от "
+        "всех остальных; поколение разбиения 0..2."
     ),
     "smart_start": "Idempotently start a previously planned route.",
     "smart_wait": "Wait up to 60 seconds for route events or terminal state.",

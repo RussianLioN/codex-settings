@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import AbstractSet
+from typing import AbstractSet, Mapping
 
 
 LUNA = "gpt-5.6-luna"
 TERRA = "gpt-5.6-terra"
 SOL = "gpt-5.6-sol"
 MODEL_ORDER = (LUNA, TERRA, SOL)
+EFFORT_ORDER = ("low", "medium", "high", "xhigh", "max")
 
 
 class Disposition(StrEnum):
@@ -273,8 +274,46 @@ def normalize_model_effort(model: str, effort: str) -> tuple[str, str]:
     return promotions.get((model, effort), (model, effort))
 
 
+def select_available_model_effort(
+    complexity: ComplexityFactors,
+    reasoning: ReasoningFactors,
+    *,
+    risk_flags: AbstractSet[str] = frozenset(),
+    available_efforts: Mapping[str, AbstractSet[str]],
+) -> tuple[str, str]:
+    """Choose an account-visible pair without lowering model or reasoning."""
+
+    available_models = {
+        model
+        for model, efforts in available_efforts.items()
+        if model in MODEL_ORDER and efforts
+    }
+    selected_model = select_model(
+        complexity,
+        risk_flags=risk_flags,
+        available=available_models,
+    )
+    selected_effort = select_reasoning_effort(reasoning)
+    selected_model, selected_effort = normalize_model_effort(
+        selected_model,
+        selected_effort,
+    )
+    model_floor = MODEL_ORDER.index(selected_model)
+    effort_floor = EFFORT_ORDER.index(selected_effort)
+    for model in MODEL_ORDER[model_floor:]:
+        supported = available_efforts.get(model, frozenset())
+        for effort in EFFORT_ORDER[effort_floor:]:
+            normalized = normalize_model_effort(model, effort)
+            if normalized != (model, effort):
+                continue
+            if effort in supported:
+                return model, effort
+    raise ModelUnavailable(
+        "no account-visible model and reasoning pair satisfies the route"
+    )
+
+
 def _validate_factors(values: dict[str, int]) -> None:
     for name, value in values.items():
         if type(value) is not int or value not in range(3):
             raise ValueError(f"{name} must be an integer in 0..2")
-

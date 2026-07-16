@@ -12,6 +12,7 @@ from .child_runner import (
     ChildRunRequest,
     ChildRunResult,
     ChildRunner,
+    ChildResourceLimits,
     ChildRuntimeLayout,
     ChildTelemetryConfig,
     PermissionProfileDefinition,
@@ -48,6 +49,7 @@ class ChildWorkRequest:
     prompt: str
     timeout_seconds: float
     max_output_bytes: int
+    resource_limits: ChildResourceLimits = ChildResourceLimits()
     auth_file: Path | None = None
     telemetry: ChildTelemetryConfig | None = None
 
@@ -141,6 +143,7 @@ class ChildWorker:
             prompt=request.prompt,
             timeout_seconds=request.timeout_seconds,
             max_output_bytes=request.max_output_bytes,
+            resource_limits=request.resource_limits,
             auth_file=request.auth_file,
             telemetry=request.telemetry,
         )

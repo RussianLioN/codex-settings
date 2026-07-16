@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Исполнимый административный интерфейс умных субагентов."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+SOURCE = PLUGIN_ROOT / "src"
+if str(SOURCE) not in sys.path:
+    sys.path.insert(0, str(SOURCE))
+
+from codex_smart_subagents.admin import main  # noqa: E402
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Event
 from typing import Any
+from urllib.parse import quote
 from urllib.parse import urlsplit
 
 from .permissions import CanaryRequest, PermissionGate
@@ -52,7 +53,12 @@ MODEL_EFFORTS = {
 
 _PROFILE_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_ARG0_SESSION = re.compile(r"codex-arg0[A-Za-z0-9]{6}")
+_ARG0_ALIASES = frozenset(
+    ("apply_patch", "applypatch", "codex-execve-wrapper")
+)
 _HEADER_NAME = re.compile(r"[A-Za-z][A-Za-z0-9-]{0,63}")
+_OTEL_TOKEN = re.compile(r"[\x21-\x7e]{8,256}")
 _MAX_AUTH_BYTES = 1024 * 1024
 
 
@@ -71,6 +77,7 @@ class ChildRuntimeLayout:
     home: Path
     tmpdir: Path
     codex_home: Path
+    sqlite_home: Path
     work_dir: Path
 
     @classmethod
@@ -90,7 +97,13 @@ class ChildRuntimeLayout:
         target.chmod(0o700)
         children = {}
         try:
-            for name in ("home", "tmp", "codex-home", "work"):
+            for name in (
+                "home",
+                "tmp",
+                "codex-home",
+                "sqlite-home",
+                "work",
+            ):
                 path = target / name
                 path.mkdir(mode=0o700)
                 path.chmod(0o700)
@@ -103,6 +116,7 @@ class ChildRuntimeLayout:
             home=children["home"],
             tmpdir=children["tmp"],
             codex_home=children["codex-home"],
+            sqlite_home=children["sqlite-home"],
             work_dir=children["work"],
         )
 
@@ -132,8 +146,28 @@ class ChildTelemetryConfig:
             )
         if _HEADER_NAME.fullmatch(self.header_name) is None:
             raise ValueError("telemetry header name is unsafe")
-        if not isinstance(self.token, str) or not 8 <= len(self.token) <= 256:
-            raise ValueError("telemetry token length is invalid")
+        if (
+            not isinstance(self.token, str)
+            or _OTEL_TOKEN.fullmatch(self.token) is None
+        ):
+            raise ValueError("telemetry token is not bounded printable ASCII")
+
+
+@dataclass(frozen=True)
+class ChildResourceLimits:
+    max_memory_bytes: int = 2 * 1024 * 1024 * 1024
+    max_processes: int = 64
+    max_growth_bytes: int = 256 * 1024 * 1024
+
+    def __post_init__(self) -> None:
+        for name in (
+            "max_memory_bytes",
+            "max_processes",
+            "max_growth_bytes",
+        ):
+            value = getattr(self, name)
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
 
 
 @dataclass(frozen=True)
@@ -141,6 +175,7 @@ class PermissionProfileDefinition:
     name: str
     description: str
     snapshot_root: Path
+    writable_root: Path | None = None
 
     def __post_init__(self) -> None:
         if _PROFILE_NAME.fullmatch(self.name) is None:
@@ -154,6 +189,18 @@ class PermissionProfileDefinition:
         )
         _validate_read_only_tree(snapshot)
         object.__setattr__(self, "snapshot_root", snapshot)
+        writable = self.writable_root
+        if writable is not None:
+            writable = _plain_directory(
+                writable,
+                code="UNSAFE_WRITABLE_ROOT",
+            )
+            _validate_workdir(writable, allow_populated=True)
+            if writable == snapshot:
+                raise ValueError(
+                    "writable root must be separate from the snapshot"
+                )
+            object.__setattr__(self, "writable_root", writable)
 
     @classmethod
     def reader(
@@ -168,14 +215,37 @@ class PermissionProfileDefinition:
             snapshot_root=snapshot_root,
         )
 
+    @classmethod
+    def writer(
+        cls,
+        *,
+        name: str,
+        snapshot_root: Path,
+        writable_root: Path,
+    ) -> "PermissionProfileDefinition":
+        return cls(
+            name=name,
+            description="Adaptive child writer",
+            snapshot_root=snapshot_root,
+            writable_root=writable_root,
+        )
+
     @property
     def config_overrides(self) -> tuple[str, ...]:
         quoted_path = json.dumps(os.fspath(self.snapshot_root))
+        writable = (
+            ""
+            if self.writable_root is None
+            else (
+                ","
+                f"{json.dumps(os.fspath(self.writable_root))}=\"write\""
+            )
+        )
         filesystem = (
             f"permissions.{self.name}.filesystem="
             '{":root"="deny",":minimal"="read",":tmpdir"="write",'
             '":workspace_roots"={"."="write"},'
-            f"{quoted_path}=\"read\"}}"
+            f"{quoted_path}=\"read\"{writable}}}"
         )
         return (
             f"permissions.{self.name}.description={json.dumps(self.description)}",
@@ -209,6 +279,7 @@ class ChildRunRequest:
     prompt: str
     timeout_seconds: float
     max_output_bytes: int
+    resource_limits: ChildResourceLimits = ChildResourceLimits()
     auth_file: Path | None = None
     telemetry: ChildTelemetryConfig | None = None
 
@@ -222,6 +293,14 @@ class ChildRunRequest:
             raise ValueError("reasoning effort is invalid for the selected model")
         if _SHA256.fullmatch(self.managed_config_sha256) is None:
             raise ValueError("managed_config_sha256 must be a lowercase SHA-256")
+        writable = self.permission_profile.writable_root
+        if writable is not None and (
+            writable == self.runtime.work_dir
+            or writable.parent != self.runtime.root
+        ):
+            raise ValueError(
+                "writer root must be a separate direct child of the runtime"
+            )
         if not isinstance(self.prompt, str) or not self.prompt:
             raise ValueError("child prompt must be non-empty")
         if len(self.prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
@@ -261,7 +340,15 @@ def build_codex_exec_argv(request: ChildRunRequest) -> tuple[str, ...]:
     executable = _safe_executable(request.codex_executable)
     schema = _safe_schema(request.output_schema)
     _validate_runtime(request.runtime)
-    _assert_empty_workdir(request.runtime.work_dir)
+    _validate_workdir(
+        request.runtime.work_dir,
+        allow_populated=False,
+    )
+    if request.permission_profile.writable_root is not None:
+        _validate_workdir(
+            request.permission_profile.writable_root,
+            allow_populated=True,
+        )
     profile = request.permission_profile
     arguments: list[str] = [
         os.fspath(executable),
@@ -353,7 +440,15 @@ class ChildRunner:
                 "CHILD_CANCELLED",
                 "child launch was cancelled after permission verification",
             )
-        _assert_empty_workdir(request.runtime.work_dir)
+        _validate_workdir(
+            request.runtime.work_dir,
+            allow_populated=False,
+        )
+        if request.permission_profile.writable_root is not None:
+            _validate_workdir(
+                request.permission_profile.writable_root,
+                allow_populated=True,
+            )
 
         staged_auth = (
             _stage_auth_file(request.auth_file, request.runtime.codex_home)
@@ -365,6 +460,12 @@ class ChildRunner:
                 request.runtime,
                 request.permission_profile.snapshot_root,
                 request.telemetry,
+                request.permission_profile.writable_root,
+            )
+            codex_target = Path(argv[0])
+            baseline_bytes = _runtime_tree_usage(
+                request.runtime.root,
+                allowed_arg0_target=codex_target,
             )
             try:
                 process = subprocess.Popen(
@@ -388,6 +489,12 @@ class ChildRunner:
                 prompt=request.prompt.encode("utf-8"),
                 timeout_seconds=float(request.timeout_seconds),
                 max_output_bytes=request.max_output_bytes,
+                max_memory_bytes=request.resource_limits.max_memory_bytes,
+                max_processes=request.resource_limits.max_processes,
+                max_growth_bytes=request.resource_limits.max_growth_bytes,
+                growth_root=request.runtime.root,
+                baseline_bytes=baseline_bytes,
+                allowed_arg0_target=codex_target,
                 cancellation=cancellation,
             )
             if terminal_reason is not None:
@@ -418,6 +525,12 @@ def _collect_bounded_output(
     prompt: bytes,
     timeout_seconds: float,
     max_output_bytes: int,
+    max_memory_bytes: int,
+    max_processes: int,
+    max_growth_bytes: int,
+    growth_root: Path,
+    baseline_bytes: int,
+    allowed_arg0_target: Path,
     cancellation: Event,
 ) -> tuple[bytes, bytes, str | None]:
     assert process.stdout is not None
@@ -443,12 +556,48 @@ def _collect_bounded_output(
     total_stored = 0
     prompt_offset = 0
     stdin_open = True
+    next_resource_check = 0.0
     while selector.get_map() or process.poll() is None:
         if reason is None and cancellation.is_set():
             reason = "CHILD_CANCELLED"
             _close_stdin(selector, process, stdin_fd)
             stdin_open = False
             _terminate_process_group(process)
+        now = time.monotonic()
+        if reason is None and now >= next_resource_check:
+            next_resource_check = now + 0.2
+            try:
+                growth = (
+                    _runtime_tree_usage(
+                        growth_root,
+                        allowed_arg0_target=allowed_arg0_target,
+                    )
+                    - baseline_bytes
+                )
+                process_count, memory_bytes = _process_group_usage(
+                    process.pid
+                )
+            except ChildLaunchError as exc:
+                reason = (
+                    exc.code
+                    if exc.code
+                    in {"CHILD_DISK_LIMIT", "CHILD_RESOURCE_PROBE_FAILED"}
+                    else "CHILD_RESOURCE_PROBE_FAILED"
+                )
+                _close_stdin(selector, process, stdin_fd)
+                stdin_open = False
+                _terminate_process_group(process)
+            else:
+                if growth > max_growth_bytes:
+                    reason = "CHILD_DISK_LIMIT"
+                elif process_count > max_processes:
+                    reason = "CHILD_PROCESS_LIMIT"
+                elif memory_bytes > max_memory_bytes:
+                    reason = "CHILD_MEMORY_LIMIT"
+                if reason is not None:
+                    _close_stdin(selector, process, stdin_fd)
+                    stdin_open = False
+                    _terminate_process_group(process)
         if reason is None and time.monotonic() >= deadline:
             reason = "CHILD_TIMEOUT"
             _close_stdin(selector, process, stdin_fd)
@@ -503,6 +652,174 @@ def _collect_bounded_output(
     if not process.stdin.closed:
         process.stdin.close()
     return stdout, stderr, reason
+
+
+def _process_group_usage(process_group: int) -> tuple[int, int]:
+    try:
+        result = subprocess.run(
+            ["/bin/ps", "-axo", "pgid=,rss="],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=2,
+            env={
+                "LANG": "C",
+                "LC_ALL": "C",
+                "PATH": FIXED_PATH,
+            },
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ChildLaunchError(
+            "CHILD_RESOURCE_PROBE_FAILED",
+            "child process resources could not be measured",
+        ) from exc
+    if result.returncode != 0:
+        raise ChildLaunchError(
+            "CHILD_RESOURCE_PROBE_FAILED",
+            "child process resources could not be measured",
+        )
+    process_count = 0
+    total_kib = 0
+    try:
+        for raw_line in result.stdout.splitlines():
+            raw_group, raw_rss = raw_line.split()
+            if int(raw_group) == process_group:
+                process_count += 1
+                total_kib += int(raw_rss)
+    except (IndexError, ValueError) as exc:
+        raise ChildLaunchError(
+            "CHILD_RESOURCE_PROBE_FAILED",
+            "child process resource output is malformed",
+        ) from exc
+    return process_count, total_kib * 1024
+
+
+def _runtime_tree_usage(
+    root: Path,
+    *,
+    allowed_arg0_target: Path | None = None,
+) -> int:
+    total = 0
+    entries = 0
+    for current, directories, files in os.walk(root, followlinks=False):
+        current_path = Path(current)
+        for name in directories:
+            entries += 1
+            try:
+                metadata = (current_path / name).lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(
+                metadata.st_mode
+            ):
+                raise ChildLaunchError(
+                    "CHILD_RESOURCE_PROBE_FAILED",
+                    "child runtime contains an unsafe directory entry",
+                )
+        for name in files:
+            entries += 1
+            path = current_path / name
+            try:
+                metadata = path.lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISLNK(metadata.st_mode):
+                if not _is_allowed_arg0_alias(
+                    root,
+                    path,
+                    metadata,
+                    allowed_target=allowed_arg0_target,
+                ):
+                    raise ChildLaunchError(
+                        "CHILD_RESOURCE_PROBE_FAILED",
+                        "child runtime contains an unsafe symbolic link",
+                    )
+                total += metadata.st_size
+                continue
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                raise ChildLaunchError(
+                    "CHILD_RESOURCE_PROBE_FAILED",
+                    "child runtime contains an unsafe file entry",
+                )
+            total += metadata.st_size
+        if entries > 200_000:
+            raise ChildLaunchError(
+                "CHILD_DISK_LIMIT",
+                "child runtime contains too many entries",
+            )
+    return total
+
+
+def _is_allowed_arg0_alias(
+    root: Path,
+    path: Path,
+    metadata: os.stat_result,
+    *,
+    allowed_target: Path | None,
+) -> bool:
+    if (
+        allowed_target is None
+        or not allowed_target.is_absolute()
+        or metadata.st_uid != os.getuid()
+        or metadata.st_nlink != 1
+    ):
+        return False
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return False
+    parts = relative.parts
+    if (
+        len(parts) != 5
+        or parts[:3] != ("codex-home", "tmp", "arg0")
+        or _ARG0_SESSION.fullmatch(parts[3]) is None
+        or parts[4] not in _ARG0_ALIASES
+    ):
+        return False
+    session = root.joinpath(*parts[:4])
+    for parent in (
+        root,
+        root / "codex-home",
+        root / "codex-home" / "tmp",
+        root / "codex-home" / "tmp" / "arg0",
+        session,
+    ):
+        try:
+            parent_metadata = parent.lstat()
+        except OSError:
+            return False
+        if (
+            not stat.S_ISDIR(parent_metadata.st_mode)
+            or parent_metadata.st_uid != os.getuid()
+            or stat.S_IMODE(parent_metadata.st_mode) & 0o077
+        ):
+            return False
+    lock = session / ".lock"
+    try:
+        lock_metadata = lock.lstat()
+        raw_target = os.readlink(path)
+        target_metadata = allowed_target.lstat()
+        observed_target_metadata = path.stat()
+    except OSError:
+        return False
+    if (
+        not stat.S_ISREG(lock_metadata.st_mode)
+        or lock_metadata.st_uid != os.getuid()
+        or lock_metadata.st_nlink != 1
+        or stat.S_IMODE(lock_metadata.st_mode) & 0o077
+        or not stat.S_ISREG(target_metadata.st_mode)
+        or target_metadata.st_uid != os.getuid()
+        or not Path(raw_target).is_absolute()
+        or Path(raw_target) != allowed_target
+        or (
+            observed_target_metadata.st_dev,
+            observed_target_metadata.st_ino,
+        )
+        != (target_metadata.st_dev, target_metadata.st_ino)
+    ):
+        return False
+    return True
 
 
 def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
@@ -570,11 +887,13 @@ def _child_environment(
     runtime: ChildRuntimeLayout,
     snapshot_root: Path,
     telemetry: ChildTelemetryConfig | None,
+    writable_root: Path | None,
 ) -> dict[str, str]:
     environment = {
         "CODEX_ADAPTIVE_CHILD": "1",
         "CODEX_ADAPTIVE_SNAPSHOT_ROOT": os.fspath(snapshot_root),
         "CODEX_HOME": os.fspath(runtime.codex_home),
+        "CODEX_SQLITE_HOME": os.fspath(runtime.sqlite_home),
         "HOME": os.fspath(runtime.home),
         "LANG": "C",
         "LC_ALL": "C",
@@ -582,17 +901,22 @@ def _child_environment(
         "PATH": FIXED_PATH,
         "TMPDIR": os.fspath(runtime.tmpdir),
     }
+    if writable_root is not None:
+        environment["CODEX_ADAPTIVE_WORKSPACE_ROOT"] = os.fspath(
+            writable_root
+        )
     if telemetry is not None:
-        environment["CODEX_ADAPTIVE_OTEL_TOKEN"] = telemetry.token
+        environment["OTEL_EXPORTER_OTLP_LOGS_HEADERS"] = (
+            f"{telemetry.header_name}={quote(telemetry.token, safe='')}"
+        )
     return environment
 
 
 def _otel_exporter_override(telemetry: ChildTelemetryConfig) -> str:
     return (
         "otel.exporter={ otlp-http = { endpoint="
-        f"{json.dumps(telemetry.endpoint)}, protocol=\"json\", headers={{ "
-        f"{json.dumps(telemetry.header_name)}="
-        '"${CODEX_ADAPTIVE_OTEL_TOKEN}" } } }'
+        f"{json.dumps(telemetry.endpoint)}, protocol=\"json\", "
+        "headers={} } }"
     )
 
 
@@ -675,15 +999,26 @@ def _remove_staged_auth(path: Path) -> None:
 
 
 def _shell_environment_override(request: ChildRunRequest) -> str:
-    values = (
+    values = [
         ("HOME", os.fspath(request.runtime.home)),
         ("TMPDIR", os.fspath(request.runtime.tmpdir)),
         ("PATH", FIXED_PATH),
         (
+            "CODEX_SQLITE_HOME",
+            os.fspath(request.runtime.sqlite_home),
+        ),
+        (
             "CODEX_ADAPTIVE_SNAPSHOT_ROOT",
             os.fspath(request.permission_profile.snapshot_root),
         ),
-    )
+    ]
+    if request.permission_profile.writable_root is not None:
+        values.append(
+            (
+                "CODEX_ADAPTIVE_WORKSPACE_ROOT",
+                os.fspath(request.permission_profile.writable_root),
+            )
+        )
     encoded = ",".join(
         f"{name}={json.dumps(value)}" for name, value in values
     )
@@ -741,7 +1076,13 @@ def _safe_schema(path: Path) -> Path:
 
 def _validate_runtime(runtime: ChildRuntimeLayout) -> None:
     root = _plain_directory(runtime.root, code="UNSAFE_RUNTIME_ROOT")
-    expected = (runtime.home, runtime.tmpdir, runtime.codex_home, runtime.work_dir)
+    expected = (
+        runtime.home,
+        runtime.tmpdir,
+        runtime.codex_home,
+        runtime.sqlite_home,
+        runtime.work_dir,
+    )
     resolved = tuple(
         _plain_directory(path, code="UNSAFE_RUNTIME_ROOT") for path in expected
     )
@@ -758,17 +1099,59 @@ def _validate_runtime(runtime: ChildRuntimeLayout) -> None:
             )
 
 
-def _assert_empty_workdir(work_dir: Path) -> None:
+def _validate_workdir(work_dir: Path, *, allow_populated: bool) -> None:
     try:
         next(work_dir.iterdir())
     except StopIteration:
         return
     except OSError as exc:
         raise ChildLaunchError("UNSAFE_RUNTIME_ROOT", str(exc)) from exc
-    raise ChildLaunchError(
-        "WORKDIR_NOT_EMPTY",
-        "child Codex must start from an empty working directory",
-    )
+    if not allow_populated:
+        raise ChildLaunchError(
+            "WORKDIR_NOT_EMPTY",
+            "reader Codex must start from an empty working directory",
+        )
+    count = 0
+    for current, directories, files in os.walk(
+        work_dir,
+        followlinks=False,
+    ):
+        current_path = Path(current)
+        for name in directories:
+            count += 1
+            path = current_path / name
+            metadata = path.lstat()
+            if (
+                stat.S_ISLNK(metadata.st_mode)
+                or not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or stat.S_IMODE(metadata.st_mode) != 0o700
+                or name.casefold() == ".git"
+            ):
+                raise ChildLaunchError(
+                    "WORKDIR_UNSAFE",
+                    "writer workspace contains an unsafe directory",
+                )
+        for name in files:
+            count += 1
+            path = current_path / name
+            metadata = path.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or metadata.st_nlink != 1
+                or stat.S_IMODE(metadata.st_mode) not in {0o600, 0o700}
+                or name.casefold() == ".git"
+            ):
+                raise ChildLaunchError(
+                    "WORKDIR_UNSAFE",
+                    "writer workspace contains an unsafe file",
+                )
+        if count > 100_000:
+            raise ChildLaunchError(
+                "WORKDIR_UNSAFE",
+                "writer workspace exceeds the validation entry limit",
+            )
 
 
 def _plain_directory(
@@ -871,4 +1254,10 @@ def _reason_message(code: str) -> str:
         "CHILD_CANCELLED": "child process group was cancelled",
         "CHILD_TIMEOUT": "child process exceeded its time limit",
         "OUTPUT_LIMIT_EXCEEDED": "child output exceeded its byte limit",
+        "CHILD_DISK_LIMIT": "child runtime exceeded its growth limit",
+        "CHILD_PROCESS_LIMIT": "child process group exceeded its process limit",
+        "CHILD_MEMORY_LIMIT": "child process group exceeded its memory limit",
+        "CHILD_RESOURCE_PROBE_FAILED": (
+            "child process resources could not be measured safely"
+        ),
     }[code]

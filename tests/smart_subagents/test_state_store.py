@@ -102,6 +102,73 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(TurnBindingError):
             self.store.consume_turn_binding(binding, context())
 
+    def test_turn_binding_allows_only_the_exact_recorded_request_pair(
+        self,
+    ) -> None:
+        binding = self.store.issue_turn_binding(context(), ttl_seconds=120)
+        pair = {
+            "request_key": "request-0001",
+            "request_hash": "c" * 64,
+        }
+
+        self.store.consume_turn_binding(binding, context(), **pair)
+        self.store.consume_turn_binding(binding, context(), **pair)
+        for changed in (
+            {**pair, "request_key": "request-0002"},
+            {**pair, "request_hash": "d" * 64},
+        ):
+            with self.subTest(changed=changed):
+                with self.assertRaises(TurnBindingError) as caught:
+                    self.store.consume_turn_binding(
+                        binding,
+                        context(),
+                        **changed,
+                    )
+                self.assertEqual(
+                    "TURN_BINDING_USED",
+                    caught.exception.code,
+                )
+
+    def test_version_one_database_adds_turn_binding_request_columns(
+        self,
+    ) -> None:
+        self.store.close()
+        database = self.state_dir / "smart-subagents.sqlite3"
+        for suffix in ("-wal", "-shm"):
+            Path(f"{database}{suffix}").unlink(missing_ok=True)
+        database.unlink()
+        with closing(sqlite3.connect(database)) as connection:
+            connection.executescript(
+                """
+                create table turn_bindings (
+                  token_hash text primary key,
+                  context_hash text not null,
+                  context_json text not null,
+                  created_at text not null,
+                  expires_at text not null,
+                  consumed_at text
+                );
+                pragma user_version=1;
+                """
+            )
+        database.chmod(0o600)
+
+        self.store = SmartStore(self.state_dir)
+
+        with closing(sqlite3.connect(database)) as connection:
+            columns = {
+                row[1]: row[2].upper()
+                for row in connection.execute(
+                    "pragma table_info(turn_bindings)"
+                )
+            }
+            self.assertEqual("TEXT", columns["request_key"])
+            self.assertEqual("TEXT", columns["request_hash"])
+            self.assertEqual(
+                1,
+                connection.execute("pragma user_version").fetchone()[0],
+            )
+
     def test_route_access_is_bound_to_original_context(self) -> None:
         route_id = self.store.create_route(
             request_context=context(),

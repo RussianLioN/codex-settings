@@ -35,6 +35,13 @@ child_max_output_bytes = 8388608
 min_free_disk_bytes = 1073741824
 min_available_memory_bytes = 536870912
 min_available_fds = 128
+validation_timeout_seconds = 300
+validation_max_output_bytes = 8388608
+validation_max_address_space_bytes = 2147483648
+validation_max_processes = 64
+validation_max_file_bytes = 268435456
+validation_max_open_files = 256
+validation_max_growth_bytes = 268435456
 
 [profiles.reader]
 permission_profile = "adaptive_reader"

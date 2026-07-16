@@ -105,6 +105,33 @@
           "minLength": 0,
           "type": "string"
         },
+        "usage": {
+          "additionalProperties": false,
+          "properties": {
+            "cachedInputTokens": {
+              "maximum": 1000000000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "inputTokens": {
+              "maximum": 1000000000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "outputTokens": {
+              "maximum": 1000000000000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "reasoningOutputTokens": {
+              "maximum": 1000000000000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [],
+          "type": "object"
+        },
         "validationState": {
           "enum": [
             "not_applicable",

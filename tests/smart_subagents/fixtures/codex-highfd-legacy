@@ -1,0 +1,37 @@
+#!/bin/zsh
+set -eu
+
+target_limit=${CODEX_NOFILE_LIMIT:-4096}
+real_codex=${CODEX_REAL_BIN:-/opt/homebrew/bin/codex}
+fd_doctor=${CODEX_FD_DOCTOR:-$HOME/.local/libexec/codex_fd_doctor.sh}
+
+if [[ ! "$target_limit" =~ ^[1-9][0-9]*$ ]]; then
+  print -u2 -- "codex-highfd: CODEX_NOFILE_LIMIT must be a positive integer"
+  exit 2
+fi
+
+current_limit=$(ulimit -Sn)
+if [[ "$current_limit" != unlimited ]] && (( current_limit < target_limit )); then
+  if ! ulimit -n "$target_limit"; then
+    print -u2 -- "codex-highfd: cannot raise the soft file-descriptor limit to $target_limit"
+    exit 1
+  fi
+fi
+
+case "${1:-}" in
+  --fd-doctor)
+    shift
+    [[ -x "$fd_doctor" ]] || { print -u2 -- "codex-highfd: FD doctor is missing: $fd_doctor"; exit 1; }
+    exec "$fd_doctor" "$@"
+    ;;
+  --self-test)
+    print -- "soft_limit=$(ulimit -Sn)"
+    print -- "hard_limit=$(ulimit -Hn)"
+    print -- "real_codex=$real_codex"
+    print -- "fd_doctor=$fd_doctor"
+    exit 0
+    ;;
+esac
+
+[[ -x "$real_codex" ]] || { print -u2 -- "codex-highfd: Codex binary is missing: $real_codex"; exit 1; }
+exec "$real_codex" "$@"

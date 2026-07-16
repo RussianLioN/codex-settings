@@ -24,6 +24,7 @@ from codex_smart_subagents.child_runner import (  # noqa: E402
     ChildLaunchError,
     ChildRunRequest,
     ChildRunner,
+    ChildResourceLimits,
     ChildRuntimeLayout,
     ChildTelemetryConfig,
     PermissionProfileDefinition,
@@ -138,6 +139,8 @@ class ChildRunnerTests(unittest.TestCase):
                 f'{{HOME={json.dumps(str(self.layout.home))},'
                 f'TMPDIR={json.dumps(str(self.layout.tmpdir))},'
                 'PATH="/usr/bin:/bin:/usr/sbin:/sbin",'
+                "CODEX_SQLITE_HOME="
+                f"{json.dumps(str(self.layout.sqlite_home))},"
                 "CODEX_ADAPTIVE_SNAPSHOT_ROOT="
                 f"{json.dumps(str(snapshot))}}}"
             ),
@@ -229,6 +232,7 @@ class ChildRunnerTests(unittest.TestCase):
             "CODEX_ADAPTIVE_CHILD": "1",
             "CODEX_ADAPTIVE_SNAPSHOT_ROOT": str(self.snapshot.resolve()),
             "CODEX_HOME": str(self.layout.codex_home),
+            "CODEX_SQLITE_HOME": str(self.layout.sqlite_home),
             "HOME": str(self.layout.home),
             "LANG": "C",
             "LC_ALL": "C",
@@ -259,7 +263,7 @@ class ChildRunnerTests(unittest.TestCase):
         telemetry = ChildTelemetryConfig(
             endpoint="http://127.0.0.1:4318/random/v1/logs",
             header_name="X-Codex-Attestation-Token",
-            token="test-otel-token",
+            token="test,otel=token%value",
         )
         request = self.request(
             auth_file=source_auth,
@@ -272,11 +276,11 @@ class ChildRunnerTests(unittest.TestCase):
             (
                 'otel.exporter={ otlp-http = { endpoint='
                 '"http://127.0.0.1:4318/random/v1/logs", protocol="json", '
-                'headers={ "X-Codex-Attestation-Token"='
-                '"${CODEX_ADAPTIVE_OTEL_TOKEN}" } } }'
+                "headers={} } }"
             ),
             argv,
         )
+        self.assertNotIn("OTEL_EXPORTER_OTLP_LOGS_HEADERS", "\0".join(argv))
 
         result = self.runner.run(request)
 
@@ -291,8 +295,15 @@ class ChildRunnerTests(unittest.TestCase):
             )
         )
         self.assertEqual(
-            telemetry.token,
-            invocation["environment"]["CODEX_ADAPTIVE_OTEL_TOKEN"],
+            (
+                "X-Codex-Attestation-Token="
+                "test%2Cotel%3Dtoken%25value"
+            ),
+            invocation["environment"]["OTEL_EXPORTER_OTLP_LOGS_HEADERS"],
+        )
+        self.assertNotIn(
+            "CODEX_ADAPTIVE_OTEL_TOKEN",
+            invocation["environment"],
         )
         self.assertEqual(
             '{"token":"test-only"}\n',
@@ -314,6 +325,12 @@ class ChildRunnerTests(unittest.TestCase):
                 header_name="X-Codex-Attestation-Token",
                 token="token",
             )
+        with self.assertRaises(ValueError):
+            ChildTelemetryConfig(
+                endpoint="http://127.0.0.1:4318/v1/logs",
+                header_name="X-Codex-Attestation-Token",
+                token="unsafe\nheader",
+            )
 
     def test_runtime_directories_are_private_and_separate(self) -> None:
         paths = (
@@ -321,6 +338,7 @@ class ChildRunnerTests(unittest.TestCase):
             self.layout.home,
             self.layout.tmpdir,
             self.layout.codex_home,
+            self.layout.sqlite_home,
             self.layout.work_dir,
         )
         self.assertEqual(len(paths), len(set(paths)))
@@ -454,6 +472,89 @@ class ChildRunnerTests(unittest.TestCase):
                 )
             )
         self.assertLess(time.monotonic() - started, 1.5)
+
+    def test_memory_process_and_disk_growth_limits_fail_closed(self) -> None:
+        cases = (
+            (
+                "FAKE_GROWTH",
+                ChildResourceLimits(
+                    max_memory_bytes=512 * 1024 * 1024,
+                    max_processes=32,
+                    max_growth_bytes=32 * 1024,
+                ),
+                "CHILD_DISK_LIMIT",
+            ),
+            (
+                "FAKE_PROCESSES",
+                ChildResourceLimits(
+                    max_memory_bytes=512 * 1024 * 1024,
+                    max_processes=2,
+                    max_growth_bytes=16 * 1024 * 1024,
+                ),
+                "CHILD_PROCESS_LIMIT",
+            ),
+            (
+                "FAKE_MEMORY",
+                ChildResourceLimits(
+                    max_memory_bytes=64 * 1024 * 1024,
+                    max_processes=32,
+                    max_growth_bytes=16 * 1024 * 1024,
+                ),
+                "CHILD_MEMORY_LIMIT",
+            ),
+        )
+        for index, (prompt, limits, code) in enumerate(cases):
+            with self.subTest(code=code):
+                layout = ChildRuntimeLayout.create(
+                    self.base / f"runtime-resource-{index}"
+                )
+                with self.assertRaisesRegex(ChildLaunchError, code):
+                    self.runner.run(
+                        self.request(
+                            runtime=layout,
+                            prompt=prompt,
+                            timeout_seconds=5,
+                            resource_limits=limits,
+                        )
+                    )
+
+    def test_allows_only_the_pinned_codex_arg0_alias_contract(self) -> None:
+        allowed_layout = ChildRuntimeLayout.create(
+            self.base / "runtime-arg0-allowed"
+        )
+
+        result = self.runner.run(
+            self.request(
+                runtime=allowed_layout,
+                prompt="FAKE_ARG0",
+            )
+        )
+
+        self.assertTrue(result.succeeded)
+
+        for index, prompt in enumerate(
+            (
+                "FAKE_ARG0_WRONG_TARGET",
+                "FAKE_ARG0_WRONG_SESSION",
+                "FAKE_ARG0_UNEXPECTED_NAME",
+                "FAKE_ARG0_RELATIVE_TARGET",
+                "FAKE_ARG0_PUBLIC_PARENT",
+            )
+        ):
+            with self.subTest(prompt=prompt):
+                layout = ChildRuntimeLayout.create(
+                    self.base / f"runtime-arg0-rejected-{index}"
+                )
+                with self.assertRaisesRegex(
+                    ChildLaunchError,
+                    "CHILD_RESOURCE_PROBE_FAILED",
+                ):
+                    self.runner.run(
+                        self.request(
+                            runtime=layout,
+                            prompt=prompt,
+                        )
+                    )
 
 
 if __name__ == "__main__":

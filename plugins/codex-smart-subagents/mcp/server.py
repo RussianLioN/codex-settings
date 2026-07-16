@@ -18,7 +18,7 @@ from codex_smart_subagents.mcp_server import MCPServer, run_stdio  # noqa: E402
 from integration_runtime import (  # noqa: E402
     CoordinationStore,
     IntegrationConfig,
-    controller_client,
+    mcp_controller_client,
 )
 
 
@@ -76,7 +76,7 @@ class TrackingBackend:
 def build_server(
     environ: Mapping[str, str],
     *,
-    client_factory: ClientFactory = controller_client,
+    client_factory: ClientFactory = mcp_controller_client,
 ) -> MCPServer:
     config = IntegrationConfig.from_environ(
         environ,

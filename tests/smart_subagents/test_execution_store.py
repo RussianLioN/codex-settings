@@ -44,7 +44,7 @@ class ExecutionStoreTests(unittest.TestCase):
         self.directory.cleanup()
 
     def queued_route(self) -> str:
-        payload = valid_plan()
+        payload = valid_plan(self.catalog)
         payload["turnBinding"] = self.store.issue_turn_binding(context())
         payload["catalogGeneration"] = self.catalog.generation
         plan = self.service.smart_plan(payload, context())
@@ -77,8 +77,14 @@ class ExecutionStoreTests(unittest.TestCase):
         node = claim.nodes[0]
         self.assertEqual("node-1", node.node_id)
         self.assertEqual((), node.context_refs)
-        self.assertEqual("artifact_report", node.artifact_profile_id)
-        self.assertEqual("validation_none", node.validation_profile_id)
+        self.assertEqual(
+            self.catalog.opaque_id("artifact", "report"),
+            node.artifact_profile_id,
+        )
+        self.assertEqual(
+            self.catalog.opaque_id("validation", "none"),
+            node.validation_profile_id,
+        )
         self.assertEqual((), node.risk_flags)
         self.assertIsNone(
             self.store.claim_next_route(

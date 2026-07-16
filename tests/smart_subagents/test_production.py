@@ -8,7 +8,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -59,17 +61,7 @@ class ProductionCompositionTests(unittest.TestCase):
         self.controller = self.root / "controller"
         self.controller.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         self.controller.chmod(0o700)
-        self.codex = self.root / "codex"
-        self.codex.write_text(
-            "#!/bin/sh\n"
-            'if [ "${1:-}" = "--version" ]; then\n'
-            "  echo 'codex-cli 0.144.4'\n"
-            "  exit 0\n"
-            "fi\n"
-            "exit 7\n",
-            encoding="utf-8",
-        )
-        self.codex.chmod(0o700)
+        self.codex = FAKE_CODEX
         self.config = ControllerProcessConfig(
             codex_home=self.codex_home,
             state_home=self.state_home,
@@ -107,8 +99,11 @@ class ProductionCompositionTests(unittest.TestCase):
         runtime = build_production_runtime(self.config)
         socket_path = self.config.paths.socket_path
         try:
-            self.assertEqual(3, runtime.route_workers)
+            self.assertEqual(2, runtime.route_workers)
+            self.assertEqual(20, runtime.process_limiter.limit)
             self.assertEqual("ok", runtime.store.integrity_check())
+            self.assertEqual([], runtime.recovery_report.to_wire()["errors"])
+            self.assertIsNone(runtime.recovery_report.backup_path)
             self.assertTrue(socket_path.exists())
             schema = (
                 self.config.paths.namespace_dir
@@ -123,9 +118,188 @@ class ProductionCompositionTests(unittest.TestCase):
                     (self.config.paths.base_dir / "ns").stat().st_mode
                 ),
             )
+            boundary_snapshot = (
+                self.config.paths.namespace_dir
+                / "contracts"
+                / "boundary-permission-snapshot"
+            )
+            self.assertEqual(
+                0o500,
+                stat.S_IMODE(boundary_snapshot.stat().st_mode),
+            )
+            self.assertEqual(
+                0o400,
+                stat.S_IMODE(
+                    (boundary_snapshot / "read-probe.txt").stat().st_mode
+                ),
+            )
+            self.assertIsNotNone(runtime.server.service.reclassifier)
         finally:
             runtime.close()
         self.assertFalse(os.path.lexists(socket_path))
+
+    def test_boundary_plan_runs_one_production_reclassification(self) -> None:
+        runtime = build_production_runtime(self.config)
+        catalog = Catalog.load(self.config.catalog_path)
+        context = RequestContext(
+            shell_session_id="cas1_" + "C" * 43,
+            session_id="session-boundary",
+            turn_id="turn-boundary",
+            codex_home=str(self.codex_home.resolve()),
+            repo_root=str(REPO.resolve()),
+            base_sha="a" * 40,
+            worktree_fingerprint="b" * 64,
+        )
+        payload = valid_plan(catalog)
+        payload["catalogGeneration"] = catalog.generation
+        payload["turnBinding"] = runtime.store.issue_turn_binding(context)
+        payload["nodes"][0]["assessment"]["delegation"] = {
+            "q": {"min": 0, "max": 2},
+            "p": {"min": 0, "max": 1},
+            "v": {"min": 1, "max": 2},
+            "o": {"min": 0, "max": 1},
+        }
+        try:
+            plan = runtime.server.service.smart_plan(payload, context)
+            self.assertEqual("delegate", plan["overallDisposition"])
+            self.assertEqual(
+                "certain_gain",
+                plan["nodeDecisions"][0]["reasonCode"],
+            )
+        finally:
+            runtime.close()
+
+    def test_missing_boundary_model_degrades_only_boundary_nodes(self) -> None:
+        visible = {
+            "gpt-5.6-luna": frozenset({"low", "medium"}),
+            "gpt-5.6-sol": frozenset({"high", "xhigh", "max"}),
+        }
+        with mock.patch(
+            "codex_smart_subagents.production."
+            "AppServerModelCatalogInspector.inspect",
+            return_value=visible,
+        ):
+            runtime = build_production_runtime(self.config)
+        catalog = Catalog.load(self.config.catalog_path)
+        context = RequestContext(
+            shell_session_id="cas1_" + "D" * 43,
+            session_id="session-no-boundary-model",
+            turn_id="turn-no-boundary-model",
+            codex_home=str(self.codex_home.resolve()),
+            repo_root=str(REPO.resolve()),
+            base_sha="a" * 40,
+            worktree_fingerprint="b" * 64,
+        )
+        payload = valid_plan(catalog)
+        payload["catalogGeneration"] = catalog.generation
+        payload["turnBinding"] = runtime.store.issue_turn_binding(context)
+        payload["nodes"][0]["assessment"]["delegation"] = {
+            "q": {"min": 0, "max": 2},
+            "p": {"min": 0, "max": 1},
+            "v": {"min": 1, "max": 2},
+            "o": {"min": 0, "max": 1},
+        }
+        try:
+            self.assertIsNone(runtime.server.service.reclassifier)
+            self.assertEqual(3, runtime.route_workers)
+            plan = runtime.server.service.smart_plan(payload, context)
+            self.assertEqual("direct", plan["overallDisposition"])
+            self.assertEqual(
+                "reclassification_failed",
+                plan["nodeDecisions"][0]["reasonCode"],
+            )
+        finally:
+            runtime.close()
+
+    def test_two_clean_starts_do_not_create_recovery_backups(self) -> None:
+        backup_root = (
+            self.config.paths.namespace_dir
+            / "state"
+            / "recovery-backups"
+        )
+
+        first = build_production_runtime(self.config)
+        first.close()
+        second = build_production_runtime(self.config)
+        second.close()
+
+        self.assertFalse(backup_root.exists())
+
+    def test_build_queries_effective_requirements_through_app_server(self) -> None:
+        marker = self.root / "app-server-called"
+        traced_codex = self.root / "traced-codex"
+        traced_codex.write_text(
+            """#!/usr/bin/python3
+import os
+import sys
+from pathlib import Path
+
+if len(sys.argv) > 1 and sys.argv[1] == "app-server":
+    Path(%r).write_text("called\\n", encoding="utf-8")
+os.execv(%r, [%r, *sys.argv[1:]])
+"""
+            % (str(marker), str(FAKE_CODEX), str(FAKE_CODEX)),
+            encoding="utf-8",
+        )
+        traced_codex.chmod(0o700)
+        config = ControllerProcessConfig(
+            codex_home=self.codex_home,
+            state_home=self.state_home,
+            catalog_path=PLUGIN_ROOT / "config" / "adaptive-subagents.toml",
+            controller_executable=self.controller,
+            real_codex=traced_codex,
+        )
+
+        runtime = build_production_runtime(config)
+        try:
+            self.assertEqual("called\n", marker.read_text(encoding="utf-8"))
+        finally:
+            runtime.close()
+
+    def test_restart_with_controller_lock_proof_requeues_unexpired_lease(
+        self,
+    ) -> None:
+        first = build_production_runtime(self.config)
+        catalog = Catalog.load(self.config.catalog_path)
+        service = SmartService(first.store, catalog)
+        context = RequestContext(
+            shell_session_id="shell-restart",
+            session_id="session-restart",
+            turn_id="turn-restart",
+            codex_home=str(self.codex_home.resolve()),
+            repo_root=str(REPO.resolve()),
+            base_sha="a" * 40,
+            worktree_fingerprint="b" * 64,
+        )
+        payload = valid_plan(catalog)
+        payload["turnBinding"] = first.store.issue_turn_binding(context)
+        payload["catalogGeneration"] = catalog.generation
+        plan = service.smart_plan(payload, context)
+        service.smart_start(
+            {"schemaVersion": "1", "routeId": plan["routeId"]},
+            context,
+        )
+        claim = first.store.claim_next_route(
+            owner_id="controller-before-restart",
+            pid=123,
+            start_marker="before-restart",
+            now=datetime.now(timezone.utc),
+            lease_seconds=300,
+        )
+        self.assertIsNotNone(claim)
+        first.close()
+
+        second = build_production_runtime(self.config)
+        try:
+            self.assertEqual(1, second.recovery_report.requeued_routes)
+            self.assertIsNotNone(second.recovery_report.backup_path)
+            self.assertTrue(Path(second.recovery_report.backup_path).is_file())
+            self.assertEqual(
+                RouteState.QUEUED,
+                second.store.execution_bundle(plan["routeId"]).route.state,
+            )
+        finally:
+            second.close()
 
     def test_reader_route_runs_end_to_end_with_protocol_fake(self) -> None:
         repository = self.root / "repository"
@@ -169,7 +343,7 @@ class ProductionCompositionTests(unittest.TestCase):
             base_sha=git(repository, "rev-parse", "HEAD"),
             worktree_fingerprint=hashlib.sha256(status).hexdigest(),
         )
-        payload = valid_plan()
+        payload = valid_plan(catalog)
         payload["turnBinding"] = runtime.store.issue_turn_binding(context)
         payload["catalogGeneration"] = catalog.generation
         try:
@@ -216,6 +390,117 @@ class ProductionCompositionTests(unittest.TestCase):
             self.assertFalse(
                 (Path(artifacts[0]["path"]) / "codex-home" / "auth.json").exists()
             )
+        finally:
+            runtime.close()
+
+    def test_writer_route_builds_quarantined_candidate_end_to_end(self) -> None:
+        repository = self.root / "writer-repository"
+        repository.mkdir()
+        git(repository, "init", "-q")
+        git(repository, "config", "user.name", "Codex Test")
+        git(repository, "config", "user.email", "codex@example.invalid")
+        (repository / "source.txt").write_text("source\n", encoding="utf-8")
+        git(repository, "add", "source.txt")
+        git(repository, "commit", "-qm", "initial")
+        runtime = build_production_runtime(self.config)
+        catalog = Catalog.load(self.config.catalog_path)
+        service = SmartService(runtime.store, catalog)
+        status = subprocess.run(
+            [
+                "/usr/bin/git",
+                "-C",
+                str(repository),
+                "status",
+                "--porcelain=v2",
+                "-z",
+                "--untracked-files=all",
+            ],
+            stdout=subprocess.PIPE,
+            check=True,
+        ).stdout
+        context = RequestContext(
+            shell_session_id="cas1_" + "B" * 43,
+            session_id="session-writer",
+            turn_id="turn-writer",
+            codex_home=str(self.codex_home.resolve()),
+            repo_root=str(repository.resolve()),
+            base_sha=git(repository, "rev-parse", "HEAD"),
+            worktree_fingerprint=hashlib.sha256(status).hexdigest(),
+        )
+        payload = valid_plan(catalog)
+        reader = payload["nodes"][0]
+        reader["clientNodeId"] = "reader"
+        writer = {
+            **reader,
+            "clientNodeId": "writer",
+            "mission": "Измени source.txt в отдельном кандидате.",
+            "role": "implementer",
+            "dependencyIds": ["reader"],
+            "artifactProfileId": catalog.opaque_id(
+                "artifact",
+                "candidate",
+            ),
+            "validationProfileId": catalog.opaque_id(
+                "validation",
+                "none",
+            ),
+            "riskFlags": ["writer_final_validation"],
+        }
+        payload["nodes"] = [reader, writer]
+        payload["turnBinding"] = runtime.store.issue_turn_binding(context)
+        payload["catalogGeneration"] = catalog.generation
+        try:
+            plan = service.smart_plan(payload, context)
+            service.smart_start(
+                {"schemaVersion": "1", "routeId": plan["routeId"]},
+                context,
+            )
+
+            self.assertTrue(runtime.engine.run_once())
+
+            bundle = runtime.store.execution_bundle(plan["routeId"])
+            diagnostics = {
+                "attempts": runtime.store.attempts_for_route(plan["routeId"]),
+                "candidates": runtime.store.candidate_records(),
+                "intents": runtime.store.pending_candidate_publications(),
+            }
+            self.assertEqual(
+                RouteState.QUARANTINED,
+                bundle.route.state,
+                diagnostics,
+            )
+            self.assertTrue(
+                bundle.route.terminal_result["artifactId"].startswith("art1_")
+            )
+            self.assertEqual(
+                "not_applicable",
+                bundle.route.terminal_result["validationState"],
+            )
+            self.assertEqual(
+                "source\n",
+                (repository / "source.txt").read_text(encoding="utf-8"),
+            )
+            writer_result = next(
+                node.result for node in bundle.nodes if node.role == "implementer"
+            )
+            self.assertEqual(
+                "Кандидат подготовлен сквозным испытанием.",
+                writer_result["summary"],
+            )
+            self.assertEqual(4, len(runtime.store.runtime_artifacts(plan["routeId"])))
+            candidates = runtime.store.candidate_records()
+            self.assertEqual(1, len(candidates))
+            self.assertEqual(
+                bundle.route.terminal_result["artifactId"],
+                candidates[0]["artifactId"],
+            )
+            self.assertEqual("not_applicable", candidates[0]["validationState"])
+            self.assertEqual(
+                "VALIDATION_QUARANTINED",
+                candidates[0]["state"],
+            )
+            self.assertFalse(candidates[0]["trusted"])
+            self.assertEqual([], runtime.store.pending_candidate_publications())
         finally:
             runtime.close()
 

@@ -1,0 +1,20 @@
+{
+  "name": "codex-settings-adaptive",
+  "interface": {
+    "displayName": "Адаптивные субагенты Codex"
+  },
+  "plugins": [
+    {
+      "name": "codex-smart-subagents",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex-smart-subagents"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

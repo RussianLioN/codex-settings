@@ -8,6 +8,8 @@ import os
 import re
 import sys
 import urllib.request
+from pathlib import Path
+from urllib.parse import unquote
 
 
 SANDBOX_CHECKS = (
@@ -73,15 +75,19 @@ def send_otel(model: str, effort: str, thread_id: str) -> None:
                                         },
                                     },
                                     {
+                                        "key": "app.version",
+                                        "value": {"stringValue": "0.144.4"},
+                                    },
+                                    {
                                         "key": "model",
                                         "value": {"stringValue": model},
                                     },
                                     {
-                                        "key": "model_reasoning_effort",
+                                        "key": "reasoning_effort",
                                         "value": {"stringValue": effort},
                                     },
                                     {
-                                        "key": "conversation_id",
+                                        "key": "conversation.id",
                                         "value": {"stringValue": thread_id},
                                     },
                                 ]
@@ -97,9 +103,7 @@ def send_otel(model: str, effort: str, thread_id: str) -> None:
         data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "X-Codex-Attestation-Token": os.environ[
-                "CODEX_ADAPTIVE_OTEL_TOKEN"
-            ],
+            "X-Codex-Attestation-Token": _otel_token(),
         },
         method="POST",
     )
@@ -108,11 +112,105 @@ def send_otel(model: str, effort: str, thread_id: str) -> None:
             raise RuntimeError("OTel receiver rejected evidence")
 
 
+def _otel_token() -> str:
+    raw = os.environ["OTEL_EXPORTER_OTLP_LOGS_HEADERS"]
+    name, separator, encoded = raw.partition("=")
+    if name != "X-Codex-Attestation-Token" or not separator or not encoded:
+        raise RuntimeError("OTel header environment is malformed")
+    return unquote(encoded)
+
+
 def main() -> int:
     if sys.argv[1:] == ["--version"]:
         print("codex-cli 0.144.4")
         return 0
+    if len(sys.argv) > 1 and sys.argv[1] == "app-server":
+        initialize = json.loads(sys.stdin.readline())
+        if initialize.get("method") != "initialize":
+            return 3
+        emit(
+            {
+                "id": initialize["id"],
+                "result": {
+                    "userAgent": "codex_smart_subagents/0.144.4",
+                    "codexHome": os.environ["CODEX_HOME"],
+                    "platformFamily": "unix",
+                    "platformOs": "macos",
+                },
+            }
+        )
+        initialized = json.loads(sys.stdin.readline())
+        request = json.loads(sys.stdin.readline())
+        if initialized.get("method") != "initialized":
+            return 4
+        method = request.get("method")
+        if method == "configRequirements/read":
+            result = {"requirements": None}
+        elif method == "model/list":
+            result = {
+                "data": [
+                    {
+                        "model": slug,
+                        "supportedReasoningEfforts": [
+                            {"reasoningEffort": effort}
+                            for effort in (
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max",
+                            )
+                        ],
+                    }
+                    for slug in (
+                        "gpt-5.6-luna",
+                        "gpt-5.6-terra",
+                        "gpt-5.6-sol",
+                    )
+                ],
+                "nextCursor": None,
+            }
+        else:
+            return 5
+        emit({"id": request["id"], "result": result})
+        return 0
+    if sys.argv[1:] == ["debug", "models", "--bundled"]:
+        print(
+            json.dumps(
+                [
+                    {
+                        "slug": slug,
+                        "supported_reasoning_levels": [
+                            {"effort": effort}
+                            for effort in (
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max",
+                                "ultra",
+                            )
+                        ],
+                    }
+                    for slug in (
+                        "gpt-5.6-luna",
+                        "gpt-5.6-terra",
+                        "gpt-5.6-sol",
+                    )
+                ],
+                separators=(",", ":"),
+            )
+        )
+        return 0
     if len(sys.argv) > 1 and sys.argv[1] == "sandbox":
+        if "--" in sys.argv:
+            command = sys.argv[sys.argv.index("--") + 1 :]
+            if (
+                command
+                and Path(command[0]).name
+                == "codex-smart-subagents-validate"
+            ):
+                os.execve(command[0], command, dict(os.environ))
         print(
             "CODEX_PERMISSION_CANARY_V1:"
             + json.dumps(
@@ -125,11 +223,11 @@ def main() -> int:
     if len(sys.argv) <= 1 or sys.argv[1] != "exec":
         return 2
 
-    prompt = sys.stdin.read()
-    nonce = re.search(r"\bce1_[A-Za-z0-9_-]{43}\b", prompt)
+    prompt_text = sys.stdin.read()
+    nonce = re.search(r"\bce1_[A-Za-z0-9_-]{43}\b", prompt_text)
     if nonce is not None:
         command = (
-            prompt.split("Команда:\n", 1)[1]
+            prompt_text.split("Команда:\n", 1)[1]
             .split("\nПосле завершения", 1)[0]
         )
         emit({"type": "thread.started", "thread_id": "canary-thread"})
@@ -153,7 +251,65 @@ def main() -> int:
 
     model = option_value("--model")
     effort = json.loads(config_value("model_reasoning_effort="))
-    thread_id = "reader-thread-123"
+    prompt = json.loads(prompt_text)
+    boundary = (
+        prompt.get("contractVersion")
+        == "boundary-reclassification-v1"
+    )
+    if boundary:
+        sqlite_home = Path(os.environ["CODEX_SQLITE_HOME"])
+        (sqlite_home / "state_5.sqlite").write_bytes(b"sqlite-state")
+        (sqlite_home / "state_5.sqlite").chmod(0o600)
+        codex_home = Path(os.environ["CODEX_HOME"])
+        (codex_home / "models_cache.json").write_text(
+            '{"models":[]}\n',
+            encoding="utf-8",
+        )
+        (codex_home / "models_cache.json").chmod(0o600)
+        thread_id = "boundary-thread-123"
+        send_otel(model, effort, thread_id)
+        emit({"type": "thread.started", "thread_id": thread_id})
+        emit(
+            {
+                "type": "item.completed",
+                "item": {
+                    "id": "message-1",
+                    "type": "agent_message",
+                    "text": json.dumps(
+                        {
+                            "q": {"min": 1, "max": 2},
+                            "p": {"min": 0, "max": 1},
+                            "v": {"min": 2, "max": 2},
+                            "o": {"min": 0, "max": 1},
+                            "hardBan": "none",
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                },
+            }
+        )
+        emit(
+            {
+                "type": "turn.completed",
+                "usage": {
+                    "input_tokens": 10,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 5,
+                    "reasoning_output_tokens": 1,
+                },
+            }
+        )
+        return 0
+
+    writer = prompt.get("contractVersion") == "writer-result-v1"
+    if writer:
+        candidate = (
+            Path(os.environ["CODEX_ADAPTIVE_WORKSPACE_ROOT"])
+            / "source.txt"
+        )
+        candidate.write_text("candidate\n", encoding="utf-8")
+    thread_id = "writer-thread-123" if writer else "reader-thread-123"
     send_otel(model, effort, thread_id)
     emit({"type": "thread.started", "thread_id": thread_id})
     emit(
@@ -164,8 +320,14 @@ def main() -> int:
                 "type": "agent_message",
                 "text": json.dumps(
                     {
-                        "summary": "Снимок проверен сквозным испытанием.",
-                        "validationState": "passed",
+                        "summary": (
+                            "Кандидат подготовлен сквозным испытанием."
+                            if writer
+                            else "Снимок проверен сквозным испытанием."
+                        ),
+                        "validationState": (
+                            "not_applicable" if writer else "passed"
+                        ),
                         "artifactId": "",
                     },
                     ensure_ascii=False,

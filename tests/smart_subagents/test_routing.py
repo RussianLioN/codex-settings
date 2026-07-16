@@ -25,6 +25,7 @@ from codex_smart_subagents.routing import (  # noqa: E402
     classify_delegation,
     normalize_model_effort,
     resolve_boundary,
+    select_available_model_effort,
     select_model,
     select_reasoning_effort,
 )
@@ -148,6 +149,43 @@ class ModelRoutingTests(unittest.TestCase):
         with self.assertRaises(ModelUnavailable):
             select_model(simple, available=set())
 
+    def test_account_capabilities_promote_model_and_effort_without_downgrade(
+        self,
+    ) -> None:
+        simple = ComplexityFactors(0, 0, 0, 0, 0, 0)
+        low_reasoning = ReasoningFactors(0, 0, 0)
+        self.assertEqual(
+            ("gpt-5.6-terra", "medium"),
+            select_available_model_effort(
+                simple,
+                low_reasoning,
+                available_efforts={
+                    "gpt-5.6-terra": frozenset({"medium", "high"}),
+                    "gpt-5.6-sol": frozenset({"high"}),
+                },
+            ),
+        )
+        high_reasoning = ReasoningFactors(2, 1, 1)
+        self.assertEqual(
+            ("gpt-5.6-sol", "high"),
+            select_available_model_effort(
+                simple,
+                high_reasoning,
+                available_efforts={
+                    "gpt-5.6-luna": frozenset({"low", "medium"}),
+                    "gpt-5.6-sol": frozenset({"high"}),
+                },
+            ),
+        )
+        with self.assertRaises(ModelUnavailable):
+            select_available_model_effort(
+                simple,
+                ReasoningFactors(2, 2, 2),
+                available_efforts={
+                    "gpt-5.6-sol": frozenset({"high", "xhigh"}),
+                },
+            )
+
 
 class ReasoningRoutingTests(unittest.TestCase):
     def test_all_reasoning_combinations_follow_thresholds(self) -> None:
@@ -192,4 +230,3 @@ class ReasoningRoutingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

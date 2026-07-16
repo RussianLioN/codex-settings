@@ -33,6 +33,7 @@ CHATGPT_RESOURCES = Path("/Applications/ChatGPT.app/Contents/Resources")
 DEFAULT_WAVE_SIZE = 6
 MAX_BASE_THREADS = 20
 HIGH_FD_LIMIT = 4096
+LEGACY_HIGHFD_SHA256 = "bb5dd276d00cad26f418825bd4d2bd869dc68943f3e26a0c255d3335c7ef14e4"
 EXPECTED_BASE_AGENT_LIMITS = {
     "max_threads": MAX_BASE_THREADS,
     "max_depth": 1,
@@ -594,7 +595,15 @@ def check_fd_guardrails() -> None:
     for path in (FD_DOCTOR, HIGHFD_TEMPLATE, HIGHFD_WRAPPER, INSTALLED_FD_DOCTOR):
         assert path.exists(), f"missing FD guardrail: {path}"
         assert os.access(path, os.X_OK), f"FD guardrail is not executable: {path}"
-    assert HIGHFD_TEMPLATE.read_bytes() == HIGHFD_WRAPPER.read_bytes(), "installed codex-highfd differs from tracked template"
+    installed_highfd_digest = hashlib.sha256(HIGHFD_WRAPPER.read_bytes()).hexdigest()
+    allowed_highfd_digests = {
+        hashlib.sha256(HIGHFD_TEMPLATE.read_bytes()).hexdigest(),
+        LEGACY_HIGHFD_SHA256,
+    }
+    assert installed_highfd_digest in allowed_highfd_digests, (
+        "installed codex-highfd is neither the tracked guarded template "
+        "nor the exact supported legacy template"
+    )
     assert FD_DOCTOR.read_bytes() == INSTALLED_FD_DOCTOR.read_bytes(), "installed FD doctor differs from tracked source"
 
     ok = run_fd_doctor(DEFAULT_WAVE_SIZE, soft_limit=HIGH_FD_LIMIT, fd_count=32)

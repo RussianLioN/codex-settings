@@ -13,6 +13,9 @@ from pathlib import Path
 
 def main() -> int:
     prompt = sys.stdin.read()
+    sqlite_home = Path(os.environ["CODEX_SQLITE_HOME"])
+    (sqlite_home / "state_5.sqlite").write_bytes(b"sqlite-state")
+    (sqlite_home / "state_5.sqlite").chmod(0o600)
     probe = Path.cwd() / "umask-probe"
     probe.write_text("private\n", encoding="utf-8")
     auth_file = Path(os.environ["CODEX_HOME"]) / "auth.json"
@@ -62,6 +65,53 @@ def main() -> int:
         sys.stdout.write("x" * (2 * 1024 * 1024))
         sys.stdout.flush()
         return 0
+    if prompt == "FAKE_GROWTH":
+        (Path(os.environ["TMPDIR"]) / "growth.bin").write_bytes(
+            b"x" * (2 * 1024 * 1024)
+        )
+        time.sleep(30)
+        return 0
+    if prompt == "FAKE_PROCESSES":
+        children = [
+            subprocess.Popen(["/bin/sleep", "30"])
+            for _ in range(8)
+        ]
+        time.sleep(30)
+        return 0 if all(child.poll() is None for child in children) else 1
+    if prompt == "FAKE_MEMORY":
+        allocation = bytearray(128 * 1024 * 1024)
+        allocation[0] = 1
+        time.sleep(30)
+        return allocation[0] - 1
+    if prompt.startswith("FAKE_ARG0"):
+        session_name = (
+            "codex-arg0ABC12"
+            if prompt == "FAKE_ARG0_WRONG_SESSION"
+            else "codex-arg0ABC123"
+        )
+        arg0 = (
+            Path(os.environ["CODEX_HOME"])
+            / "tmp"
+            / "arg0"
+            / session_name
+        )
+        arg0.mkdir(parents=True, mode=0o700)
+        (arg0 / ".lock").write_bytes(b"")
+        target = (
+            Path("/bin/true")
+            if prompt == "FAKE_ARG0_WRONG_TARGET"
+            else Path(sys.argv[0]).resolve()
+        )
+        link_target: Path | str = target
+        if prompt == "FAKE_ARG0_RELATIVE_TARGET":
+            link_target = os.path.relpath(target, arg0)
+        for name in ("apply_patch", "applypatch", "codex-execve-wrapper"):
+            (arg0 / name).symlink_to(link_target)
+        if prompt == "FAKE_ARG0_UNEXPECTED_NAME":
+            (arg0 / "unexpected").symlink_to(target)
+        if prompt == "FAKE_ARG0_PUBLIC_PARENT":
+            arg0.parent.chmod(0o755)
+        time.sleep(0.4)
     if prompt == "FAKE_INVALID_JSON":
         print("not-json", flush=True)
         return 0

@@ -6,6 +6,7 @@ import base64
 import errno
 import hashlib
 import json
+import math
 import os
 import re
 import selectors
@@ -32,8 +33,10 @@ from .permissions import (
 
 FIXED_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 MAX_COMMAND_OUTPUT = 4 * 1024 * 1024
+MAX_APP_SERVER_REQUEST = 64 * 1024
 SANDBOX_RESULT_PREFIX = "CODEX_PERMISSION_CANARY_V1:"
 EXEC_RESULT_PREFIX = "CODEX_EXEC_PERMISSION_CANARY_V1:"
+EXEC_STDIN_NOTICE = b"Reading prompt from stdin...\n"
 SANDBOX_CHECKS = (
     "snapshot_read_allowed",
     "snapshot_write_denied",
@@ -71,12 +74,25 @@ _SHA256 = re.compile(r"[0-9a-f]{64}")
 _VERSION = re.compile(r"(?:codex(?:-cli)?\s+)?([0-9]+\.[0-9]+\.[0-9]+)\s*")
 _PROFILE = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}")
 _NONCE = re.compile(r"ce1_[A-Za-z0-9_-]{43}")
+_APP_SERVER_METHOD = re.compile(
+    r"[A-Za-z][A-Za-z0-9_-]*(?:/[A-Za-z][A-Za-z0-9_-]*)+"
+)
 _DENIED_ERRNOS = frozenset((errno.EACCES, errno.EPERM))
 _ALLOWED_AUTH_ENVIRONMENT = frozenset(("OPENAI_API_KEY",))
+_MAX_AUTH_BYTES = 1024 * 1024
 
 
 @dataclass
 class LiveCanaryError(RuntimeError):
+    code: str
+    message: str
+
+    def __str__(self) -> str:
+        return f"{self.code}: {self.message}"
+
+
+@dataclass
+class AppServerError(RuntimeError):
     code: str
     message: str
 
@@ -99,6 +115,327 @@ class ManagedConfigState:
 class ManagedConfigInspector(Protocol):
     def inspect(self) -> ManagedConfigState:
         """Return the fingerprint and legacy-mode status of the loaded policy."""
+
+
+class StrictAppServerClient:
+    """Run one bounded, strict app-server JSON-RPC request over stdio."""
+
+    def __init__(
+        self,
+        *,
+        codex_executable: Path,
+        codex_home: Path,
+        home: Path,
+        tmpdir: Path,
+        cwd: Path,
+        timeout_seconds: float = 5.0,
+        max_output_bytes: int = 1024 * 1024,
+        client_name: str = "codex_smart_subagents",
+        client_title: str = "Codex Smart Subagents",
+        client_version: str = "0.1.0",
+    ) -> None:
+        self._codex = _safe_executable(codex_executable, "Codex")
+        self._codex_home = _safe_owned_directory(codex_home, "CODEX_HOME")
+        self._home = _safe_private_directory(home, "app-server HOME")
+        self._tmpdir = _safe_private_directory(tmpdir, "app-server TMPDIR")
+        self._cwd = _safe_private_directory(cwd, "app-server cwd")
+        if (
+            not isinstance(timeout_seconds, (int, float))
+            or isinstance(timeout_seconds, bool)
+            or not 0 < float(timeout_seconds) <= 60
+        ):
+            raise ValueError("timeout_seconds must be in (0, 60]")
+        if (
+            type(max_output_bytes) is not int
+            or not 1024 <= max_output_bytes <= 16 * 1024 * 1024
+        ):
+            raise ValueError("max_output_bytes is outside the supported range")
+        for label, value, maximum in (
+            ("client_name", client_name, 64),
+            ("client_title", client_title, 128),
+            ("client_version", client_version, 32),
+        ):
+            if (
+                not isinstance(value, str)
+                or not value
+                or "\0" in value
+                or "\n" in value
+                or len(value.encode("utf-8")) > maximum
+            ):
+                raise ValueError(f"{label} is invalid")
+        self._timeout_seconds = float(timeout_seconds)
+        self._max_output_bytes = max_output_bytes
+        self._client_info = {
+            "name": client_name,
+            "title": client_title,
+            "version": client_version,
+        }
+
+    def call(self, method: str, params: Mapping[str, object]) -> object:
+        if (
+            not isinstance(method, str)
+            or _APP_SERVER_METHOD.fullmatch(method) is None
+        ):
+            raise ValueError("app-server method is invalid")
+        try:
+            copied_params = dict(params)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("app-server params must be a mapping") from exc
+        request = {
+            "method": method,
+            "id": 2,
+            "params": copied_params,
+        }
+        encoded_request = _encode_json_line(request)
+        if len(encoded_request) > MAX_APP_SERVER_REQUEST:
+            raise ValueError("app-server request exceeds the byte limit")
+
+        with tempfile.TemporaryDirectory(
+            prefix="app-server-sqlite-",
+            dir=self._tmpdir,
+        ) as raw_sqlite_home:
+            sqlite_home = Path(raw_sqlite_home)
+            os.chmod(sqlite_home, 0o700)
+            return self._call_with_sqlite_home(
+                encoded_request,
+                sqlite_home=sqlite_home,
+            )
+
+    def _call_with_sqlite_home(
+        self,
+        encoded_request: bytes,
+        *,
+        sqlite_home: Path,
+    ) -> object:
+        environment = {
+            "CODEX_HOME": os.fspath(self._codex_home),
+            "CODEX_SQLITE_HOME": os.fspath(sqlite_home),
+            "HOME": os.fspath(self._home),
+            "LANG": "C",
+            "LC_ALL": "C",
+            "NO_COLOR": "1",
+            "PATH": FIXED_PATH,
+            "TMPDIR": os.fspath(self._tmpdir),
+        }
+        try:
+            process = subprocess.Popen(
+                (
+                    os.fspath(self._codex),
+                    "app-server",
+                    "--strict-config",
+                    "--listen",
+                    "stdio://",
+                ),
+                cwd=self._cwd,
+                env=environment,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                shell=False,
+                close_fds=True,
+                start_new_session=True,
+                restore_signals=True,
+                umask=0o077,
+            )
+        except OSError as exc:
+            raise AppServerError("APP_SERVER_SPAWN_FAILED", str(exc)) from exc
+
+        deadline = time.monotonic() + self._timeout_seconds
+        reader: _StrictJsonLineReader | None = None
+        try:
+            reader = _StrictJsonLineReader(
+                process,
+                maximum=self._max_output_bytes,
+            )
+            initialize = {
+                "method": "initialize",
+                "id": 1,
+                "params": {
+                    "clientInfo": self._client_info,
+                    "capabilities": {
+                        "optOutNotificationMethods": [
+                            "remoteControl/status/changed"
+                        ]
+                    },
+                },
+            }
+            _write_app_server_message(
+                process,
+                _encode_json_line(initialize),
+            )
+            initialized = _read_app_server_response(
+                reader,
+                expected_id=1,
+                deadline=deadline,
+            )
+            _validate_initialize_result(
+                initialized,
+                expected_codex_home=self._codex_home,
+            )
+            _write_app_server_message(
+                process,
+                _encode_json_line(
+                    {"method": "initialized", "params": {}}
+                ),
+            )
+            _write_app_server_message(process, encoded_request)
+            return _read_app_server_response(
+                reader,
+                expected_id=2,
+                deadline=deadline,
+            )
+        finally:
+            if reader is not None:
+                reader.close()
+            _close_app_server_process(process)
+
+
+class AppServerManagedConfigInspector:
+    """Fingerprint effective managed requirements reported by Codex itself."""
+
+    def __init__(
+        self,
+        *,
+        codex_executable: Path,
+        codex_home: Path,
+        runtime_parent: Path,
+        timeout_seconds: float = 5.0,
+        max_output_bytes: int = 1024 * 1024,
+    ) -> None:
+        self._codex = _safe_executable(codex_executable, "Codex")
+        self._codex_home = _safe_owned_directory(
+            codex_home,
+            "managed requirements CODEX_HOME",
+        )
+        self._runtime_parent = _safe_private_directory(
+            runtime_parent,
+            "managed requirements runtime parent",
+        )
+        if (
+            not isinstance(timeout_seconds, (int, float))
+            or isinstance(timeout_seconds, bool)
+            or not 0 < float(timeout_seconds) <= 60
+        ):
+            raise ValueError("timeout_seconds must be in (0, 60]")
+        if (
+            type(max_output_bytes) is not int
+            or not 1024 <= max_output_bytes <= 16 * 1024 * 1024
+        ):
+            raise ValueError("max_output_bytes is outside the supported range")
+        self._timeout_seconds = float(timeout_seconds)
+        self._max_output_bytes = max_output_bytes
+
+    def inspect(self) -> ManagedConfigState:
+        with tempfile.TemporaryDirectory(
+            prefix="managed-requirements-",
+            dir=self._runtime_parent,
+        ) as raw_root:
+            runtime = _Runtime.create(Path(raw_root))
+            # The real CODEX_HOME is required for cloud-managed requirements;
+            # only the typed requirements result is retained or fingerprinted.
+            client = StrictAppServerClient(
+                codex_executable=self._codex,
+                codex_home=self._codex_home,
+                home=runtime.home,
+                tmpdir=runtime.tmp,
+                cwd=runtime.work,
+                timeout_seconds=self._timeout_seconds,
+                max_output_bytes=self._max_output_bytes,
+            )
+            try:
+                result = client.call("configRequirements/read", {})
+            except AppServerError as exc:
+                raise _managed_config_app_server_error(exc) from exc
+
+        if (
+            not isinstance(result, dict)
+            or set(result) != {"requirements"}
+        ):
+            raise LiveCanaryError(
+                "MANAGED_CONFIG_INVALID",
+                "configRequirements/read returned a malformed result",
+            )
+        requirements = result["requirements"]
+        if requirements is not None and not isinstance(requirements, dict):
+            raise LiveCanaryError(
+                "MANAGED_CONFIG_INVALID",
+                "managed requirements must be an object or null",
+            )
+        try:
+            _validate_json_tree(requirements)
+        except ValueError as exc:
+            raise LiveCanaryError(
+                "MANAGED_CONFIG_INVALID",
+                "managed requirements exceed strict JSON limits",
+            ) from exc
+        allowed_sandbox_modes = (
+            None
+            if requirements is None
+            else requirements.get("allowedSandboxModes")
+        )
+        if allowed_sandbox_modes is not None and (
+            not isinstance(allowed_sandbox_modes, list)
+            or not all(
+                isinstance(value, str) and value
+                for value in allowed_sandbox_modes
+            )
+        ):
+            raise LiveCanaryError(
+                "MANAGED_CONFIG_INVALID",
+                "allowedSandboxModes must be an array of non-empty strings",
+            )
+        feature_requirements = (
+            None
+            if requirements is None
+            else requirements.get("featureRequirements")
+        )
+        if feature_requirements is not None and (
+            not isinstance(feature_requirements, dict)
+            or not all(
+                isinstance(name, str)
+                and name
+                and type(required) is bool
+                for name, required in feature_requirements.items()
+            )
+        ):
+            raise LiveCanaryError(
+                "MANAGED_CONFIG_INVALID",
+                "featureRequirements must map feature names to booleans",
+            )
+        required_forbidden = (
+            set()
+            if feature_requirements is None
+            else {
+                name
+                for name, required in feature_requirements.items()
+                if required is True and name in FEATURES_DISABLED_FOR_CANARY
+            }
+        )
+        if required_forbidden:
+            raise LiveCanaryError(
+                "MANAGED_FEATURE_CONFLICT",
+                "managed requirements force a disabled child capability",
+            )
+        try:
+            canonical = json.dumps(
+                requirements,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError, RecursionError) as exc:
+            raise LiveCanaryError(
+                "MANAGED_CONFIG_INVALID",
+                "managed requirements cannot be canonicalized",
+            ) from exc
+        digest = hashlib.sha256(
+            b"codex-config-requirements-v1\0" + canonical
+        ).hexdigest()
+        return ManagedConfigState(
+            sha256=digest,
+            legacy_sandbox_mode=bool(allowed_sandbox_modes),
+        )
 
 
 class FileManagedConfigInspector:
@@ -147,6 +484,8 @@ class PermissionProfile(Protocol):
     name: str
     config_overrides: Sequence[str]
     sha256: str
+    writable_root: Path | None
+    workspace_access: str
 
 
 @dataclass(frozen=True)
@@ -297,6 +636,283 @@ class SubprocessExecutor:
         return CommandResult(int(process.returncode), stdout, stderr)
 
 
+class _StrictJsonLineReader:
+    def __init__(
+        self,
+        process: subprocess.Popen[bytes],
+        *,
+        maximum: int,
+    ) -> None:
+        if process.stdout is None or process.stderr is None:
+            raise AppServerError(
+                "APP_SERVER_INVALID",
+                "app-server pipes are unavailable",
+            )
+        self._process = process
+        self._maximum = maximum
+        self._total = 0
+        self._stdout = bytearray()
+        self._selector = selectors.DefaultSelector()
+        for stream in (process.stdout, process.stderr):
+            descriptor = stream.fileno()
+            os.set_blocking(descriptor, False)
+            self._selector.register(descriptor, selectors.EVENT_READ)
+        self._stdout_fd = process.stdout.fileno()
+        self._stderr_fd = process.stderr.fileno()
+
+    def read(self, *, deadline: float) -> object:
+        while True:
+            newline = self._stdout.find(b"\n")
+            if newline >= 0:
+                raw = bytes(self._stdout[:newline])
+                del self._stdout[: newline + 1]
+                if not raw:
+                    raise AppServerError(
+                        "APP_SERVER_INVALID",
+                        "app-server emitted an empty message",
+                    )
+                try:
+                    text = raw.decode("utf-8", errors="strict")
+                    value = _strict_json_loads(text)
+                    _validate_json_tree(value)
+                    return value
+                except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+                    raise AppServerError(
+                        "APP_SERVER_INVALID",
+                        "app-server emitted invalid JSON",
+                    ) from exc
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise AppServerError(
+                    "APP_SERVER_TIMEOUT",
+                    "app-server request exceeded its timeout",
+                )
+            events = self._selector.select(timeout=min(0.05, remaining))
+            stderr_seen = False
+            for key, _ in events:
+                descriptor = int(key.fd)
+                try:
+                    chunk = os.read(descriptor, 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    try:
+                        self._selector.unregister(descriptor)
+                    except KeyError:
+                        pass
+                    continue
+                self._total += len(chunk)
+                if self._total > self._maximum:
+                    raise AppServerError(
+                        "APP_SERVER_OUTPUT_LIMIT",
+                        "app-server output exceeded its byte limit",
+                    )
+                if descriptor == self._stderr_fd:
+                    stderr_seen = True
+                elif descriptor == self._stdout_fd:
+                    self._stdout.extend(chunk)
+            if stderr_seen:
+                raise AppServerError(
+                    "APP_SERVER_INVALID",
+                    "app-server wrote unexpected diagnostic output",
+                )
+            if (
+                self._process.poll() is not None
+                and not self._selector.get_map()
+            ):
+                raise AppServerError(
+                    "APP_SERVER_INVALID",
+                    "app-server exited before returning a complete response",
+                )
+
+    def close(self) -> None:
+        self._selector.close()
+
+
+def _read_app_server_response(
+    reader: _StrictJsonLineReader,
+    *,
+    expected_id: int,
+    deadline: float,
+) -> object:
+    while True:
+        message = reader.read(deadline=deadline)
+        if not isinstance(message, dict):
+            raise AppServerError(
+                "APP_SERVER_INVALID",
+                "app-server message must be an object",
+            )
+        if "id" not in message:
+            if (
+                set(message) != {"method", "params"}
+                or not isinstance(message["method"], str)
+                or not isinstance(message["params"], dict)
+            ):
+                raise AppServerError(
+                    "APP_SERVER_INVALID",
+                    "app-server notification is malformed",
+                )
+            continue
+        if type(message["id"]) is not int or message["id"] != expected_id:
+            raise AppServerError(
+                "APP_SERVER_INVALID",
+                "app-server response id is invalid",
+            )
+        if set(message) == {"id", "error"}:
+            raise AppServerError(
+                "APP_SERVER_INVALID",
+                "app-server rejected the request",
+            )
+        if set(message) != {"id", "result"}:
+            raise AppServerError(
+                "APP_SERVER_INVALID",
+                "app-server response envelope is malformed",
+            )
+        return message["result"]
+
+
+def _validate_initialize_result(
+    result: object,
+    *,
+    expected_codex_home: Path,
+) -> None:
+    expected_fields = {
+        "userAgent",
+        "codexHome",
+        "platformFamily",
+        "platformOs",
+    }
+    if (
+        not isinstance(result, dict)
+        or set(result) != expected_fields
+        or not all(isinstance(result[name], str) for name in expected_fields)
+        or not result["userAgent"]
+        or not result["platformFamily"]
+        or not result["platformOs"]
+    ):
+        raise AppServerError(
+            "APP_SERVER_INVALID",
+            "app-server initialize result is malformed",
+        )
+    if result["codexHome"] != os.fspath(expected_codex_home):
+        raise AppServerError(
+            "APP_SERVER_CODEX_HOME_MISMATCH",
+            "app-server initialized with an unexpected CODEX_HOME",
+        )
+
+
+def _write_app_server_message(
+    process: subprocess.Popen[bytes],
+    payload: bytes,
+) -> None:
+    if process.stdin is None:
+        raise AppServerError(
+            "APP_SERVER_INVALID",
+            "app-server stdin is unavailable",
+        )
+    try:
+        process.stdin.write(payload)
+        process.stdin.flush()
+    except (BrokenPipeError, OSError) as exc:
+        raise AppServerError(
+            "APP_SERVER_INVALID",
+            "app-server closed its input unexpectedly",
+        ) from exc
+
+
+def _encode_json_line(value: object) -> bytes:
+    _validate_json_tree(value)
+    try:
+        encoded = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise ValueError("value is not strict bounded JSON") from exc
+    return encoded + b"\n"
+
+
+def _strict_json_loads(value: str) -> object:
+    def object_pairs(
+        pairs: list[tuple[str, object]],
+    ) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON object key")
+            result[key] = item
+        return result
+
+    return json.loads(
+        value,
+        object_pairs_hook=object_pairs,
+        parse_constant=lambda _: (_ for _ in ()).throw(
+            ValueError("non-finite JSON number")
+        ),
+    )
+
+
+def _validate_json_tree(value: object) -> None:
+    pending: list[tuple[object, int]] = [(value, 0)]
+    nodes = 0
+    while pending:
+        current, depth = pending.pop()
+        nodes += 1
+        if nodes > 100_000 or depth > 32:
+            raise ValueError("JSON value exceeds structural limits")
+        if current is None or type(current) in (bool, int, str):
+            continue
+        if type(current) is float:
+            if not math.isfinite(current):
+                raise ValueError("JSON number must be finite")
+            continue
+        if isinstance(current, list):
+            pending.extend((item, depth + 1) for item in current)
+            continue
+        if isinstance(current, dict):
+            if not all(isinstance(key, str) for key in current):
+                raise ValueError("JSON object keys must be strings")
+            pending.extend((item, depth + 1) for item in current.values())
+            continue
+        raise ValueError("value contains a non-JSON type")
+
+
+def _close_app_server_process(process: subprocess.Popen[bytes]) -> None:
+    if process.stdin is not None and not process.stdin.closed:
+        process.stdin.close()
+    if process.poll() is None:
+        _terminate_process_group(process)
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        _terminate_process_group(process)
+        process.wait()
+    for stream in (process.stdout, process.stderr):
+        if stream is not None and not stream.closed:
+            stream.close()
+
+
+def _managed_config_app_server_error(
+    error: AppServerError,
+) -> LiveCanaryError:
+    codes = {
+        "APP_SERVER_TIMEOUT": "MANAGED_CONFIG_TIMEOUT",
+        "APP_SERVER_OUTPUT_LIMIT": "MANAGED_CONFIG_OUTPUT_LIMIT",
+        "APP_SERVER_CODEX_HOME_MISMATCH": (
+            "MANAGED_CONFIG_CODEX_HOME_MISMATCH"
+        ),
+        "APP_SERVER_SPAWN_FAILED": "MANAGED_CONFIG_UNAVAILABLE",
+    }
+    return LiveCanaryError(
+        codes.get(error.code, "MANAGED_CONFIG_INVALID"),
+        "effective managed requirements could not be verified",
+    )
+
+
 class LivePermissionCanary:
     """Verify one immutable profile with live sandbox and Codex exec probes."""
 
@@ -333,6 +949,8 @@ class LivePermissionCanary:
             self._profile_name,
             self._profile_overrides,
             targets.snapshot_root,
+            getattr(profile, "writable_root", None),
+            getattr(profile, "workspace_access", "write"),
         )
         calculated = _profile_sha256(
             self._profile_name,
@@ -380,66 +998,73 @@ class LivePermissionCanary:
             dir=self._runtime_parent,
         ) as raw_root:
             runtime = _Runtime.create(Path(raw_root))
-            environment = self._environment(runtime)
-
-            version = self._executor.run(
-                CanaryCommand(
-                    argv=(os.fspath(self._codex), "--version"),
-                    cwd=runtime.work,
-                    environment=environment,
-                    stdin=b"",
-                    timeout_seconds=self._timeouts.version_seconds,
+            staged_auth: Path | None = None
+            if not self._auth_environment:
+                # Sandbox and exec see only this bounded copy, never the user's
+                # config.toml or the rest of the real CODEX_HOME.
+                staged_auth = _stage_canary_auth(
+                    self._codex_home / "auth.json",
+                    runtime.codex_home,
                 )
-            )
-            if not _version_matches(version, request.codex_version):
-                return _failed_evidence(
+            try:
+                return self._verify_in_runtime(
                     request,
+                    runtime=runtime,
                     probe_id=probe_id,
                     verified_at=verified_at,
-                    legacy_sandbox_mode=False,
                 )
+            finally:
+                if staged_auth is not None:
+                    _remove_canary_auth(staged_auth)
 
-            with _NetworkFixtures() as network:
-                sandbox = self._executor.run(
-                    self._sandbox_command(runtime, environment, network)
-                )
-            sandbox_checks = _parse_sandbox_result(sandbox)
-            if sandbox_checks is None:
-                return _failed_evidence(
-                    request,
-                    probe_id=probe_id,
-                    verified_at=verified_at,
-                    legacy_sandbox_mode=False,
-                )
+    def _verify_in_runtime(
+        self,
+        request: CanaryRequest,
+        *,
+        runtime: "_Runtime",
+        probe_id: str,
+        verified_at: datetime,
+    ) -> CanaryEvidence:
+        environment = self._environment(runtime)
 
-            checks = {name: False for name in REQUIRED_CANARY_CHECKS}
-            checks["catalog_syntax_loaded"] = True
-            for name in SANDBOX_CHECKS:
-                checks[name] = sandbox_checks[name]
-            checks["sandbox_negative_probe"] = all(
-                sandbox_checks[name] for name in SANDBOX_CHECKS
+        version = self._executor.run(
+            CanaryCommand(
+                argv=(os.fspath(self._codex), "--version"),
+                cwd=runtime.work,
+                environment=environment,
+                stdin=b"",
+                timeout_seconds=self._timeouts.version_seconds,
             )
-            if not checks["sandbox_negative_probe"]:
-                return _evidence(
-                    request,
-                    probe_id=probe_id,
-                    verified_at=verified_at,
-                    legacy_sandbox_mode=False,
-                    checks=checks,
-                )
+        )
+        if not _version_matches(version, request.codex_version):
+            return _failed_evidence(
+                request,
+                probe_id=probe_id,
+                verified_at=verified_at,
+                legacy_sandbox_mode=False,
+            )
 
-            nonce = _nonce("ce1_")
-            exec_command, expected_probe_command = self._exec_command(
-                runtime,
-                environment,
-                nonce,
+        with _NetworkFixtures() as network:
+            sandbox = self._executor.run(
+                self._sandbox_command(runtime, environment, network)
             )
-            codex_exec = self._executor.run(exec_command)
-            checks["exec_negative_probe"] = _parse_exec_result(
-                codex_exec,
-                nonce,
-                expected_probe_command,
+        sandbox_checks = _parse_sandbox_result(sandbox)
+        if sandbox_checks is None:
+            return _failed_evidence(
+                request,
+                probe_id=probe_id,
+                verified_at=verified_at,
+                legacy_sandbox_mode=False,
             )
+
+        checks = {name: False for name in REQUIRED_CANARY_CHECKS}
+        checks["catalog_syntax_loaded"] = True
+        for name in SANDBOX_CHECKS:
+            checks[name] = sandbox_checks[name]
+        checks["sandbox_negative_probe"] = all(
+            sandbox_checks[name] for name in SANDBOX_CHECKS
+        )
+        if not checks["sandbox_negative_probe"]:
             return _evidence(
                 request,
                 probe_id=probe_id,
@@ -447,6 +1072,26 @@ class LivePermissionCanary:
                 legacy_sandbox_mode=False,
                 checks=checks,
             )
+
+        nonce = _nonce("ce1_")
+        exec_command, expected_probe_command = self._exec_command(
+            runtime,
+            environment,
+            nonce,
+        )
+        codex_exec = self._executor.run(exec_command)
+        checks["exec_negative_probe"] = _parse_exec_result(
+            codex_exec,
+            nonce,
+            expected_probe_command,
+        )
+        return _evidence(
+            request,
+            probe_id=probe_id,
+            verified_at=verified_at,
+            legacy_sandbox_mode=False,
+            checks=checks,
+        )
 
     def _inspect_managed_config(self) -> ManagedConfigState:
         try:
@@ -466,7 +1111,7 @@ class LivePermissionCanary:
     def _environment(self, runtime: "_Runtime") -> Mapping[str, str]:
         environment = {
             "CODEX_ADAPTIVE_CHILD": "1",
-            "CODEX_HOME": os.fspath(self._codex_home),
+            "CODEX_HOME": os.fspath(runtime.codex_home),
             "HOME": os.fspath(runtime.home),
             "LANG": "C",
             "LC_ALL": "C",
@@ -609,13 +1254,14 @@ class _Runtime:
     root: Path
     home: Path
     tmp: Path
+    codex_home: Path
     work: Path
 
     @classmethod
     def create(cls, root: Path) -> "_Runtime":
         root.chmod(0o700)
         children = []
-        for name in ("home", "tmp", "work"):
+        for name in ("home", "tmp", "codex-home", "work"):
             path = root / name
             path.mkdir(mode=0o700)
             path.chmod(0o700)
@@ -624,7 +1270,8 @@ class _Runtime:
             root=root.resolve(strict=True),
             home=children[0],
             tmp=children[1],
-            work=children[2],
+            codex_home=children[2],
+            work=children[3],
         )
 
 
@@ -704,6 +1351,8 @@ def _validate_profile_policy(
     name: str,
     overrides: Sequence[str],
     snapshot_root: Path,
+    writable_root: Path | None,
+    workspace_access: str,
 ) -> None:
     try:
         parsed = tomllib.loads("\n".join(overrides))
@@ -712,13 +1361,27 @@ def _validate_profile_policy(
         network = selected["network"]
     except (KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
         raise ValueError("permission profile overrides are not valid TOML") from exc
+    if workspace_access not in {"read", "write"}:
+        raise ValueError("workspace access must be read or write")
+    if writable_root is not None and workspace_access != "write":
+        raise ValueError("writer profile requires writable control workspace")
     expected_filesystem = {
         ":root": "deny",
         ":minimal": "read",
         ":tmpdir": "write",
-        ":workspace_roots": {".": "write"},
+        ":workspace_roots": {".": workspace_access},
         os.fspath(snapshot_root): "read",
     }
+    if writable_root is not None:
+        writable = _safe_private_directory(
+            writable_root,
+            "writer candidate root",
+        )
+        if writable == snapshot_root:
+            raise ValueError(
+                "writer candidate root must differ from the snapshot"
+            )
+        expected_filesystem[os.fspath(writable)] = "write"
     if (
         not isinstance(selected, dict)
         or set(selected) != {"description", "filesystem", "network"}
@@ -728,7 +1391,7 @@ def _validate_profile_policy(
         or network != {"enabled": False}
     ):
         raise ValueError(
-            "permission profile must match the exact reader policy"
+            "permission profile must match the exact child policy"
         )
 
 
@@ -884,6 +1547,112 @@ def _read_stable_file(path: Path, *, maximum: int) -> bytes:
         os.close(descriptor)
 
 
+def _stage_canary_auth(source: Path, codex_home: Path) -> Path:
+    if not source.is_absolute() or source.is_symlink():
+        raise LiveCanaryError(
+            "CANARY_AUTH_UNAVAILABLE",
+            "authentication source is unsafe",
+        )
+    source_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        source_fd = os.open(source, source_flags)
+    except OSError as exc:
+        raise LiveCanaryError(
+            "CANARY_AUTH_UNAVAILABLE",
+            "authentication source is unavailable",
+        ) from exc
+    destination = codex_home / "auth.json"
+    try:
+        before = os.fstat(source_fd)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.getuid()
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or not 0 < before.st_size <= _MAX_AUTH_BYTES
+        ):
+            raise LiveCanaryError(
+                "CANARY_AUTH_UNAVAILABLE",
+                "authentication source is not a private bounded file",
+            )
+        destination_flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        destination_fd = os.open(destination, destination_flags, 0o600)
+        try:
+            remaining = before.st_size
+            while remaining:
+                chunk = os.read(source_fd, min(remaining, 64 * 1024))
+                if not chunk:
+                    raise LiveCanaryError(
+                        "CANARY_AUTH_UNAVAILABLE",
+                        "authentication source changed during staging",
+                    )
+                view = memoryview(chunk)
+                while view:
+                    view = view[os.write(destination_fd, view) :]
+                remaining -= len(chunk)
+            if os.read(source_fd, 1):
+                raise LiveCanaryError(
+                    "CANARY_AUTH_UNAVAILABLE",
+                    "authentication source changed during staging",
+                )
+            after = os.fstat(source_fd)
+            identity_before = (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+            )
+            identity_after = (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+            )
+            if identity_before != identity_after:
+                raise LiveCanaryError(
+                    "CANARY_AUTH_UNAVAILABLE",
+                    "authentication source changed during staging",
+                )
+            os.fsync(destination_fd)
+        except BaseException:
+            os.close(destination_fd)
+            destination.unlink(missing_ok=True)
+            raise
+        else:
+            os.close(destination_fd)
+    finally:
+        os.close(source_fd)
+    return destination
+
+
+def _remove_canary_auth(path: Path) -> None:
+    try:
+        metadata = os.lstat(path)
+    except FileNotFoundError:
+        return
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or metadata.st_nlink != 1
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+    ):
+        raise LiveCanaryError(
+            "CANARY_AUTH_CLEANUP_FAILED",
+            "staged authentication path changed during verification",
+        )
+    path.unlink()
+
+
 def _safe_probe_file(path: Path, label: str) -> Path:
     if not path.is_absolute() or path.is_symlink():
         raise ValueError(f"{label} must be an absolute non-symlink file")
@@ -973,7 +1742,11 @@ def _parse_exec_result(
     nonce: str,
     expected_command: str,
 ) -> bool:
-    if result.exit_code != 0 or result.stderr or _NONCE.fullmatch(nonce) is None:
+    if (
+        result.exit_code != 0
+        or result.stderr not in {b"", EXEC_STDIN_NOTICE}
+        or _NONCE.fullmatch(nonce) is None
+    ):
         return False
     try:
         text = result.stdout.decode("utf-8", errors="strict")
@@ -1006,11 +1779,21 @@ def _parse_exec_result(
             and item.get("status") == "completed"
             and isinstance(item.get("command"), str)
             and nonce in item["command"]
-            and expected_command in item["command"]
+            and _exec_command_matches(item["command"], expected_command)
             and item.get("aggregated_output") == marker
         ):
             return True
     return False
+
+
+def _exec_command_matches(observed: str, expected: str) -> bool:
+    if observed == expected:
+        return True
+    try:
+        arguments = shlex.split(observed, posix=True)
+    except ValueError:
+        return False
+    return arguments == ["/bin/zsh", "-c", expected]
 
 
 def _evidence(

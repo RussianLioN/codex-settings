@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -21,6 +22,8 @@ DEFAULT_MAX_FILE_BYTES = 32 * 1024 * 1024
 DEFAULT_MAX_TOTAL_BYTES = 512 * 1024 * 1024
 DEFAULT_MAX_DIFF_BYTES = 128 * 1024 * 1024
 _ALLOWED_MODES = frozenset({"100644", "100755"})
+_ARTIFACT_ID = re.compile(r"art1_[A-Za-z0-9_-]{43}")
+_GIT_SHA = re.compile(r"[0-9a-f]{40}")
 
 
 @dataclass
@@ -56,6 +59,16 @@ class CandidateResult:
     file_count: int
     total_bytes: int
     diff_bytes: int
+
+
+@dataclass(frozen=True)
+class CandidateEvidence:
+    artifact_id: str
+    ref: str
+    commit_sha: str
+    tree_sha: str
+    parent_sha: str
+    message_bound: bool
 
 
 @dataclass(frozen=True)
@@ -106,6 +119,61 @@ class QuarantineRepository:
             git_binary=binary,
         )
         instance._initialize()
+        return instance
+
+    @classmethod
+    def open_registered(
+        cls,
+        *,
+        state_root: Path,
+        source_root: Path,
+        git_dir: Path,
+        git_binary: Path | None = None,
+    ) -> "QuarantineRepository":
+        source = source_root.expanduser().resolve(strict=True)
+        root = state_root.expanduser().resolve(strict=True)
+        registered_git = git_dir.expanduser().resolve(strict=True)
+        expected_parent = (root / "quarantine").resolve(strict=True)
+        expected_name = f"{sha256_text(str(source))[:24]}.git"
+        if (
+            not source.is_dir()
+            or root.is_symlink()
+            or not root.is_dir()
+            or registered_git.is_symlink()
+            or not registered_git.is_dir()
+            or registered_git.parent != expected_parent
+            or registered_git.name != expected_name
+        ):
+            raise QuarantineError(
+                "REGISTERED_REPOSITORY_UNSAFE",
+                "registered quarantine repository identity is unsafe",
+            )
+        for path in (root, expected_parent, registered_git):
+            metadata = path.stat()
+            if (
+                metadata.st_uid != os.getuid()
+                or not stat.S_ISDIR(metadata.st_mode)
+                or stat.S_IMODE(metadata.st_mode) != 0o700
+            ):
+                raise QuarantineError(
+                    "REGISTERED_REPOSITORY_UNSAFE",
+                    "registered quarantine repository permissions are unsafe",
+                )
+        binary = (git_binary or _default_git()).expanduser().resolve(strict=True)
+        if not binary.is_file() or not os.access(binary, os.X_OK):
+            raise QuarantineError("GIT_UNAVAILABLE", f"git is unavailable: {binary}")
+        instance = cls(
+            source_root=source,
+            git_dir=registered_git,
+            git_binary=binary,
+        )
+        alternates = instance.git_dir / "objects" / "info" / "alternates"
+        if alternates.exists():
+            raise QuarantineError(
+                "ALTERNATES_FORBIDDEN",
+                "quarantine Git must not use object alternates",
+            )
+        instance._secure_git_dir()
         return instance
 
     def import_base(self, base_sha: str) -> BaseImport:
@@ -165,6 +233,29 @@ class QuarantineRepository:
         max_total_bytes: int = DEFAULT_MAX_TOTAL_BYTES,
         max_diff_bytes: int = DEFAULT_MAX_DIFF_BYTES,
     ) -> CandidateResult:
+        candidate = self.prepare_candidate(
+            candidate_root,
+            base,
+            source_date_epoch=source_date_epoch,
+            max_files=max_files,
+            max_file_bytes=max_file_bytes,
+            max_total_bytes=max_total_bytes,
+            max_diff_bytes=max_diff_bytes,
+        )
+        self.publish_candidate(candidate)
+        return candidate
+
+    def prepare_candidate(
+        self,
+        candidate_root: Path,
+        base: BaseImport,
+        *,
+        source_date_epoch: int,
+        max_files: int = DEFAULT_MAX_FILES,
+        max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
+        max_total_bytes: int = DEFAULT_MAX_TOTAL_BYTES,
+        max_diff_bytes: int = DEFAULT_MAX_DIFF_BYTES,
+    ) -> CandidateResult:
         if source_date_epoch < 0:
             raise ValueError("source_date_epoch must be non-negative")
         files = _collect_files(
@@ -189,17 +280,6 @@ class QuarantineRepository:
             source_date_epoch=source_date_epoch,
         )
         ref = f"refs/candidates/{artifact_id}"
-        try:
-            self._git("update-ref", ref, commit_sha)
-            self._secure_git_dir()
-            if self.fsck() != "ok":
-                raise QuarantineError(
-                    "FSCK_FAILED",
-                    "candidate quarantine fsck failed",
-                )
-        except Exception:
-            self._git("update-ref", "-d", ref, check=False)
-            raise
         return CandidateResult(
             artifact_id=artifact_id,
             commit_sha=commit_sha,
@@ -208,6 +288,169 @@ class QuarantineRepository:
             file_count=len(files),
             total_bytes=sum(len(file.data) for file in files),
             diff_bytes=diff_bytes,
+        )
+
+    def publish_candidate(self, candidate: CandidateResult) -> None:
+        expected_ref = f"refs/candidates/{candidate.artifact_id}"
+        if (
+            _ARTIFACT_ID.fullmatch(candidate.artifact_id) is None
+            or candidate.ref != expected_ref
+            or _GIT_SHA.fullmatch(candidate.commit_sha) is None
+            or _GIT_SHA.fullmatch(candidate.tree_sha) is None
+        ):
+            raise QuarantineError(
+                "CANDIDATE_IDENTITY_INVALID",
+                "candidate publication identity is invalid",
+            )
+        zero = "0" * 40
+        self._git("update-ref", candidate.ref, candidate.commit_sha, zero)
+        self._secure_git_dir()
+        if self.fsck() != "ok":
+            raise QuarantineError(
+                "FSCK_FAILED",
+                "candidate quarantine fsck failed",
+            )
+        evidence = self.candidate_evidence(candidate.ref)
+        if (
+            evidence.commit_sha != candidate.commit_sha
+            or evidence.tree_sha != candidate.tree_sha
+            or not evidence.message_bound
+        ):
+            raise QuarantineError(
+                "CANDIDATE_PUBLICATION_MISMATCH",
+                "published candidate does not match its prepared identity",
+            )
+
+    def ref_exists(self, ref: str) -> bool:
+        _artifact_from_ref(ref)
+        result = self._git(
+            "show-ref",
+            "--verify",
+            "--quiet",
+            ref,
+            check=False,
+        )
+        return result.returncode == 0
+
+    def candidate_refs(self) -> dict[str, str]:
+        payload = self._git(
+            "for-each-ref",
+            "--format=%(refname)%00%(objectname)",
+            "refs/candidates",
+        )
+        refs: dict[str, str] = {}
+        for line in payload.splitlines():
+            try:
+                raw_ref, raw_commit = line.split(b"\0", 1)
+                ref = raw_ref.decode("ascii")
+                commit = raw_commit.decode("ascii")
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise QuarantineError(
+                    "CANDIDATE_REF_INVALID",
+                    "candidate reference listing is invalid",
+                ) from exc
+            if (
+                not ref.startswith("refs/candidates/")
+                or len(ref) > 512
+                or _GIT_SHA.fullmatch(commit) is None
+            ):
+                raise QuarantineError(
+                    "CANDIDATE_REF_INVALID",
+                    "candidate reference identity is invalid",
+                )
+            refs[ref] = commit
+        return refs
+
+    def candidate_evidence(self, ref: str) -> CandidateEvidence:
+        artifact_id = _artifact_from_ref(ref)
+        commit_sha = self._git(
+            "rev-parse",
+            "--verify",
+            f"{ref}^{{commit}}",
+        ).decode("ascii").strip()
+        if _GIT_SHA.fullmatch(commit_sha) is None:
+            raise QuarantineError(
+                "CANDIDATE_COMMIT_INVALID",
+                "candidate commit identifier is invalid",
+            )
+        payload = self._git(
+            "show",
+            "-s",
+            "--format=%T%x00%P%x00%B",
+            commit_sha,
+        )
+        try:
+            raw_tree, raw_parents, raw_message = payload.split(b"\0", 2)
+            tree_sha = raw_tree.decode("ascii").strip()
+            parent_text = raw_parents.decode("ascii").strip()
+            message = raw_message.decode("utf-8")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise QuarantineError(
+                "CANDIDATE_COMMIT_INVALID",
+                "candidate commit evidence is invalid",
+            ) from exc
+        parents = parent_text.split()
+        if (
+            _GIT_SHA.fullmatch(tree_sha) is None
+            or len(parents) != 1
+            or _GIT_SHA.fullmatch(parents[0]) is None
+        ):
+            raise QuarantineError(
+                "CANDIDATE_COMMIT_INVALID",
+                "candidate commit topology is invalid",
+            )
+        return CandidateEvidence(
+            artifact_id=artifact_id,
+            ref=ref,
+            commit_sha=commit_sha,
+            tree_sha=tree_sha,
+            parent_sha=parents[0],
+            message_bound=message.rstrip("\n") == (
+                f"quarantine candidate {artifact_id}"
+            ),
+        )
+
+    def base_evidence_matches(
+        self,
+        *,
+        source_sha: str,
+        commit_sha: str,
+        tree_sha: str,
+    ) -> bool:
+        if not all(
+            _GIT_SHA.fullmatch(value) is not None
+            for value in (source_sha, commit_sha, tree_sha)
+        ):
+            return False
+        ref = f"refs/bases/{source_sha}"
+        result = self._git(
+            "rev-parse",
+            "--verify",
+            f"{ref}^{{commit}}",
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+        observed_commit = result.stdout.decode("ascii", "replace").strip()
+        if observed_commit != commit_sha:
+            return False
+        payload = self._git(
+            "show",
+            "-s",
+            "--format=%T%x00%P%x00%B",
+            commit_sha,
+        )
+        try:
+            raw_tree, raw_parents, raw_message = payload.split(b"\0", 2)
+            observed_tree = raw_tree.decode("ascii").strip()
+            parents = raw_parents.decode("ascii").strip()
+            message = raw_message.decode("utf-8").rstrip("\n")
+        except (ValueError, UnicodeDecodeError):
+            return False
+        return (
+            observed_tree == tree_sha
+            and not parents
+            and message == f"quarantine base {source_sha}"
         )
 
     def materialize(self, revision: str, destination: Path) -> None:
@@ -550,6 +793,22 @@ def validate_paths(paths: Iterable[str]) -> None:
     """Validate portable Git paths without materializing them first."""
 
     _validate_path_set(paths)
+
+
+def _artifact_from_ref(ref: str) -> str:
+    prefix = "refs/candidates/"
+    if not ref.startswith(prefix):
+        raise QuarantineError(
+            "CANDIDATE_REF_INVALID",
+            "candidate reference is outside the allowed namespace",
+        )
+    artifact_id = ref[len(prefix) :]
+    if _ARTIFACT_ID.fullmatch(artifact_id) is None:
+        raise QuarantineError(
+            "CANDIDATE_REF_INVALID",
+            "candidate reference artifact identifier is invalid",
+        )
+    return artifact_id
 
 
 def _collect_files(

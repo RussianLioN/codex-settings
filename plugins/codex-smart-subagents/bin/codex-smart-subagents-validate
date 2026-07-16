@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Apply local process resource limits and exec one exact validation argv."""
+
+from __future__ import annotations
+
+import os
+import resource
+import subprocess
+import sys
+
+
+def _limit(name: str, value: int, *, optional: bool = False) -> None:
+    constant = getattr(resource, name, None)
+    if constant is None:
+        return
+    _soft, hard = resource.getrlimit(constant)
+    selected = value if hard == resource.RLIM_INFINITY else min(value, hard)
+    try:
+        resource.setrlimit(constant, (selected, hard))
+    except (OSError, ValueError):
+        if not optional:
+            raise
+
+
+def main() -> int:
+    arguments = sys.argv[1:]
+    expected = (
+        "--address-space",
+        "--processes",
+        "--file-size",
+        "--open-files",
+        "--cwd",
+        "--",
+    )
+    if len(arguments) < 12:
+        return 64
+    values: dict[str, int] = {}
+    index = 0
+    for option in expected[:4]:
+        if arguments[index] != option:
+            return 64
+        try:
+            value = int(arguments[index + 1])
+        except ValueError:
+            return 64
+        if value <= 0:
+            return 64
+        values[option] = value
+        index += 2
+    if arguments[index] != "--cwd" or index + 1 >= len(arguments):
+        return 64
+    cwd = arguments[index + 1]
+    if not os.path.isabs(cwd) or "\0" in cwd:
+        return 64
+    index += 2
+    if arguments[index] != "--" or index + 1 >= len(arguments):
+        return 64
+    command = arguments[index + 1 :]
+    if not os.path.isabs(command[0]) or any("\0" in value for value in command):
+        return 64
+
+    _limit("RLIMIT_CORE", 0)
+    _limit("RLIMIT_AS", values["--address-space"], optional=True)
+    _limit("RLIMIT_DATA", values["--address-space"], optional=True)
+    try:
+        process_table = subprocess.run(
+            ["/bin/ps", "-axo", "uid="],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=True,
+            timeout=2,
+            env={
+                "LANG": "C",
+                "LC_ALL": "C",
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            },
+        )
+        current_user_processes = sum(
+            1
+            for line in process_table.stdout.splitlines()
+            if int(line.strip()) == os.getuid()
+        )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 70
+    _limit(
+        "RLIMIT_NPROC",
+        current_user_processes + values["--processes"],
+    )
+    _limit("RLIMIT_FSIZE", values["--file-size"])
+    _limit("RLIMIT_NOFILE", values["--open-files"])
+    try:
+        os.chdir(cwd)
+    except OSError:
+        return 72
+    os.execve(command[0], command, dict(os.environ))
+    return 127
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

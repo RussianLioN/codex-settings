@@ -3,9 +3,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import socket
 import stat
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import ModuleType
@@ -116,7 +119,7 @@ class PluginMetadataTests(unittest.TestCase):
             ["smart_plan", "smart_start", "smart_wait", "smart_cancel"],
             server["enabled_tools"],
         )
-        self.assertGreaterEqual(server["tool_timeout_sec"], 60)
+        self.assertGreaterEqual(server["tool_timeout_sec"], 420)
         self.assertIn("CODEX_ADAPTIVE_CATALOG", server["env_vars"])
 
     def test_hook_config_has_only_supported_turn_events(self) -> None:
@@ -222,6 +225,7 @@ class HookIntegrationTests(unittest.TestCase):
         self.assertIn("scope_", context)
         self.assertIn("artifact_", context)
         self.assertIn("validation_", context)
+        self.assertIn("по определениям и правилам схемы smart_plan", context)
         self.assertNotIn(str(REPO), context)
         self.assertNotIn("gpt-5.6", context)
         self.assertEqual("issue_turn_binding", self.client.calls[0][0])
@@ -259,6 +263,41 @@ class HookIntegrationTests(unittest.TestCase):
         self.assertFalse(response["continue"])
         self.assertIn("контроллер", response["stopReason"].lower())
         self.assertNotIn("socket unavailable", json.dumps(response))
+
+    def test_slow_controller_still_respects_the_hook_budget(self) -> None:
+        config = self.runtime.IntegrationConfig.from_environ(
+            self.env,
+            require_catalog=True,
+        )
+        socket_path = config.paths.socket_path
+        socket_path.parent.mkdir(parents=True, mode=0o700)
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(socket_path))
+        listener.listen(1)
+
+        def serve() -> None:
+            connection, _address = listener.accept()
+            with connection:
+                connection.recv(64 * 1024)
+                time.sleep(1)
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        started = time.monotonic()
+        try:
+            response = self.prompt_hook.handle(
+                hook_payload("UserPromptSubmit"),
+                self.env,
+            )
+        finally:
+            listener.close()
+            thread.join(timeout=2)
+            if os.path.lexists(socket_path):
+                socket_path.unlink()
+
+        self.assertFalse(response["continue"])
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertFalse(thread.is_alive())
 
     def test_stop_requests_at_most_two_planning_continuations(self) -> None:
         self.prompt_hook.handle(
@@ -446,6 +485,39 @@ class MCPEntrypointTests(unittest.TestCase):
                     client_factory=lambda _config: self.client,
                 )
 
+    def test_tools_list_explains_assessment_scale_and_graph_invariants(
+        self,
+    ) -> None:
+        server = self.server_entry.build_server(
+            self.env,
+            client_factory=lambda _config: self.client,
+        )
+        response = server.handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {},
+            }
+        )
+        tools = {
+            tool["name"]: tool
+            for tool in response["result"]["tools"]
+        }
+        plan = tools["smart_plan"]
+        self.assertIn("implementer", plan["description"])
+        self.assertIn("глубины 4", plan["description"])
+        node = plan["inputSchema"]["properties"]["nodes"]["items"]
+        assessment = node["properties"]["assessment"]["properties"]
+        delegation = assessment["delegation"]["properties"]
+        for factor in ("q", "p", "v", "o"):
+            description = delegation[factor]["description"]
+            self.assertIn("0 — низко", description)
+            self.assertIn("min", description)
+        for group in ("complexity", "reasoning"):
+            for field in assessment[group]["properties"].values():
+                self.assertIn("0 — низко", field["description"])
+
 
 class RuntimeHardeningTests(unittest.TestCase):
     @classmethod
@@ -475,6 +547,98 @@ class RuntimeHardeningTests(unittest.TestCase):
         environment = run.call_args.kwargs["env"]
         self.assertEqual("/dev/null", environment["GIT_CONFIG_GLOBAL"])
         self.assertEqual("0", environment["GIT_OPTIONAL_LOCKS"])
+
+    def test_git_identity_uses_two_calls_with_budgeted_timeouts(self) -> None:
+        results = (
+            mock.Mock(
+                stdout=(
+                    f"{REPO}\n"
+                    + "a" * 40
+                    + "\n"
+                ).encode("utf-8")
+            ),
+            mock.Mock(stdout=b""),
+        )
+        with mock.patch.object(
+            self.runtime.subprocess,
+            "run",
+            side_effect=results,
+        ) as run:
+            identity = self.runtime._git_identity(str(REPO))
+
+        self.assertEqual(str(REPO.resolve()), identity[0])
+        self.assertEqual("a" * 40, identity[1])
+        self.assertEqual(2, run.call_count)
+        first, second = run.call_args_list
+        self.assertIn("--show-toplevel", first.args[0])
+        self.assertIn("HEAD", first.args[0])
+        self.assertIn("--porcelain=v2", second.args[0])
+        self.assertGreater(first.kwargs["timeout"], 0.05)
+        self.assertLessEqual(first.kwargs["timeout"], 0.4)
+        self.assertGreater(second.kwargs["timeout"], 0.05)
+        self.assertLessEqual(second.kwargs["timeout"], 0.65)
+
+    def test_mcp_client_allows_delayed_plan_and_wait(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            config = self.runtime.IntegrationConfig.from_environ(
+                environment(Path(raw)),
+                require_catalog=False,
+            )
+            socket_path = config.paths.socket_path
+            socket_path.parent.mkdir(parents=True, mode=0o700)
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            listener.bind(str(socket_path))
+            listener.listen(2)
+            failures: list[BaseException] = []
+
+            def serve() -> None:
+                try:
+                    for _ in range(2):
+                        connection, _address = listener.accept()
+                        with connection:
+                            with connection.makefile(
+                                "rwb",
+                                buffering=0,
+                            ) as stream:
+                                request = json.loads(stream.readline())
+                                time.sleep(1.7)
+                                stream.write(
+                                    json.dumps(
+                                        {
+                                            "ok": True,
+                                            "result": {
+                                                "method": request["method"]
+                                            },
+                                        },
+                                        separators=(",", ":"),
+                                    ).encode("utf-8")
+                                    + b"\n"
+                                )
+                except BaseException as exc:
+                    failures.append(exc)
+
+            thread = threading.Thread(target=serve, daemon=True)
+            thread.start()
+            client = self.runtime.mcp_controller_client(config)
+            try:
+                self.assertEqual(
+                    "smart_plan",
+                    client.call("smart_plan", {})["method"],
+                )
+                self.assertEqual(
+                    "smart_wait",
+                    client.call(
+                        "smart_wait",
+                        {"timeoutSeconds": 2},
+                    )["method"],
+                )
+            finally:
+                listener.close()
+                thread.join(timeout=5)
+                if os.path.lexists(socket_path):
+                    socket_path.unlink()
+            self.assertFalse(thread.is_alive())
+            self.assertEqual([], failures)
 
 
 class SkillContractTests(unittest.TestCase):

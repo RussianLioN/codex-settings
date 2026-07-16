@@ -31,12 +31,16 @@ def otlp_payload(
         },
         {"key": "model", "value": {"stringValue": model}},
         {
-            "key": "model_reasoning_effort",
+            "key": "reasoning_effort",
             "value": {"stringValue": effort},
         },
         {
-            "key": "conversation_id",
+            "key": "conversation.id",
             "value": {"stringValue": conversation_id},
+        },
+        {
+            "key": "app.version",
+            "value": {"stringValue": "0.144.4"},
         },
         {
             "key": "account.email",
@@ -141,10 +145,11 @@ class AttestationTests(unittest.TestCase):
             events=[
                 {
                     "event.name": "codex.conversation_starts",
+                    "app.version": "0.144.4",
                     "service.version": "0.144.4",
                     "model": "gpt-5.6-terra",
-                    "model_reasoning_effort": "high",
-                    "conversation_id": "thread-123",
+                    "reasoning_effort": "high",
+                    "conversation.id": "thread-123",
                 }
             ],
             jsonl_events=[
@@ -167,16 +172,21 @@ class AttestationTests(unittest.TestCase):
     ) -> None:
         base = {
             "event.name": "codex.conversation_starts",
+            "app.version": "0.144.4",
             "service.version": "0.144.4",
             "model": "gpt-5.6-terra",
-            "model_reasoning_effort": "high",
-            "conversation_id": "thread-123",
+            "reasoning_effort": "high",
+            "conversation.id": "thread-123",
         }
         cases = [
             ({key: value for key, value in base.items() if key != "model"}, "FIELD_MISSING"),
             ({**base, "model": "gpt-5.6-luna"}, "MODEL_MISMATCH"),
-            ({**base, "model_reasoning_effort": "medium"}, "EFFORT_MISMATCH"),
-            ({**base, "conversation_id": "other"}, "CONVERSATION_MISMATCH"),
+            ({**base, "reasoning_effort": "medium"}, "EFFORT_MISMATCH"),
+            ({**base, "conversation.id": "other"}, "CONVERSATION_MISMATCH"),
+            (
+                {**base, "service.version": "0.144.3"},
+                "AMBIGUOUS_ATTESTATION",
+            ),
         ]
         for event, code in cases:
             with self.subTest(code=code), self.assertRaises(AttestationError) as caught:

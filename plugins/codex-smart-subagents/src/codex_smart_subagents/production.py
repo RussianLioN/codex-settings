@@ -12,19 +12,49 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .boundary_reclassifier import (
+    BOUNDARY_MODEL,
+    BOUNDARY_REASONING_EFFORT,
+    BoundaryPermissionProfile,
+    BoundaryReclassifier,
+    BoundaryReclassifierConfig,
+)
+from .candidate_recovery import (
+    CandidateRecovery,
+    CandidateRecoveryError,
+    CandidateRecoveryReport,
+)
 from .catalog import Catalog
-from .child_runner import ChildRunner, PermissionProfileDefinition
+from .child_runner import (
+    ChildResourceLimits,
+    ChildRunner,
+    PermissionProfileDefinition,
+)
 from .controller import ControllerServer
 from .daemon import ControllerProcessConfig, ControllerStartError
 from .execution import ExecutionEngine
 from .identity import sha256_text
 from .launcher import probe_codex_version
 from .live_canary import (
+    AppServerManagedConfigInspector,
     CanaryProbeTargets,
-    FileManagedConfigInspector,
+    LiveCanaryError,
     LivePermissionCanary,
+    ManagedConfigInspector,
+)
+from .model_catalog import (
+    AppServerModelCatalogInspector,
+    ModelCatalogError,
+    account_catalog_policy,
+    probe_model_catalog,
+    require_catalog_support,
 )
 from .permissions import PermissionGate
+from .process_limiter import (
+    CompositeProcessLimiter,
+    ProcessLimitedNodeExecutor,
+    ProcessLimiter,
+)
 from .resource_gate import ResourceGate
 from .runtime_executor import (
     READER_RESULT_SCHEMA,
@@ -34,7 +64,15 @@ from .runtime_executor import (
 from .service import SmartService
 from .snapshot import SnapshotBuilder, SnapshotLimits, SnapshotResult
 from .store import SmartStore
+from .validation import ValidationLimits, ValidationRunner, ValidationSandbox
 from .worker import ChildWorkRequest, ChildWorker
+from .writer_executor import (
+    WRITER_RESULT_SCHEMA,
+    RoleDispatchExecutor,
+    WriterExecutorConfig,
+    WriterNodeExecutor,
+)
+from .writer_worker import WriterWorker
 
 
 class ProductionRuntime:
@@ -45,6 +83,8 @@ class ProductionRuntime:
         store: SmartStore,
         engine: ExecutionEngine,
         route_workers: int,
+        process_limiter: ProcessLimiter,
+        recovery_report: CandidateRecoveryReport,
         stop_event: threading.Event | None = None,
     ) -> None:
         if route_workers <= 0:
@@ -53,6 +93,8 @@ class ProductionRuntime:
         self.store = store
         self.engine = engine
         self.route_workers = route_workers
+        self.process_limiter = process_limiter
+        self.recovery_report = recovery_report
         self.stop_event = stop_event or threading.Event()
         self._threads: list[threading.Thread] = []
         self._errors: list[BaseException] = []
@@ -118,7 +160,7 @@ class LiveChildRunnerFactory:
         codex_executable: Path,
         codex_home: Path,
         canary_runtime_parent: Path,
-        managed_config_inspector: FileManagedConfigInspector,
+        managed_config_inspector: ManagedConfigInspector,
         store: SmartStore,
         controller_socket: Path,
     ) -> None:
@@ -159,8 +201,8 @@ class LiveChildRunnerFactory:
             profile=profile,
             managed_config_inspector=self.managed_config_inspector,
             targets=targets,
-            model="gpt-5.6-luna",
-            reasoning_effort="low",
+            model=work_request.model,
+            reasoning_effort=work_request.reasoning_effort,
         )
         return ChildRunner(PermissionGate(canary))
 
@@ -176,6 +218,14 @@ def build_production_runtime(
             "CODEX_VERSION_UNSUPPORTED",
             f"Codex {version} is not allowed by the active catalog",
         )
+    try:
+        observed_models = probe_model_catalog(
+            config.real_codex,
+            config.codex_home,
+        )
+        require_catalog_support(catalog, observed_models)
+    except ModelCatalogError as exc:
+        raise ControllerStartError(exc.code, exc.message) from exc
 
     paths = config.paths
     for directory in (
@@ -184,46 +234,76 @@ def build_production_runtime(
         paths.namespace_dir,
         paths.namespace_dir / "state",
         paths.namespace_dir / "runtime",
+        paths.namespace_dir / "validation",
+        paths.namespace_dir / "quarantine-state",
         paths.namespace_dir / "canary",
         paths.namespace_dir / "contracts",
     ):
         _prepare_private_directory(directory)
     output_schema = paths.namespace_dir / "contracts" / "reader-result.schema.json"
     materialize_reader_schema(output_schema)
+    writer_schema = paths.namespace_dir / "contracts" / "writer-result.schema.json"
+    materialize_writer_schema(writer_schema)
+    boundary_snapshot = materialize_boundary_permission_snapshot(
+        paths.namespace_dir
+        / "contracts"
+        / "boundary-permission-snapshot"
+    )
+
+    try:
+        account_models = AppServerModelCatalogInspector(
+            codex_executable=config.real_codex,
+            codex_home=config.codex_home,
+            runtime_parent=paths.namespace_dir / "canary",
+        ).inspect()
+        available_model_efforts = account_catalog_policy(
+            catalog,
+            account_models,
+        )
+    except ModelCatalogError as exc:
+        raise ControllerStartError(exc.code, exc.message) from exc
+    boundary_model_available = (
+        BOUNDARY_REASONING_EFFORT
+        in available_model_efforts.get(
+            BOUNDARY_MODEL,
+            frozenset(),
+        )
+    )
 
     store = SmartStore(paths.namespace_dir / "state")
     server: ControllerServer | None = None
     try:
-        service = SmartService(store, catalog)
+        service = SmartService(
+            store,
+            catalog,
+            available_model_efforts=available_model_efforts,
+            max_reclassifier_workers=catalog.limits["root_processes"],
+        )
         server = ControllerServer(
             paths=paths,
             service=service,
             codex_home_hash=sha256_text(str(config.codex_home.resolve())),
         )
-        inspector = FileManagedConfigInspector((config.catalog_path,))
-        managed_state = inspector.inspect()
-        runner_factory = LiveChildRunnerFactory(
+        try:
+            recovery_report = CandidateRecovery(store).apply(
+                controller_stopped=True,
+            )
+        except CandidateRecoveryError as exc:
+            raise ControllerStartError(exc.code, exc.message) from exc
+        if recovery_report.errors:
+            raise ControllerStartError(
+                "CANDIDATE_RECOVERY_FAILED",
+                "registered quarantine recovery reported unsafe evidence",
+            )
+        inspector = AppServerManagedConfigInspector(
             codex_executable=config.real_codex,
             codex_home=config.codex_home,
-            canary_runtime_parent=paths.namespace_dir / "canary",
-            managed_config_inspector=inspector,
-            store=store,
-            controller_socket=paths.socket_path,
+            runtime_parent=paths.namespace_dir / "canary",
         )
-        worker = ChildWorker(
-            snapshot_builder=SnapshotBuilder(
-                SnapshotLimits(
-                    max_files=catalog.limits["snapshot_max_files"],
-                    max_file_bytes=catalog.limits[
-                        "snapshot_max_file_bytes"
-                    ],
-                    max_total_bytes=catalog.limits[
-                        "snapshot_max_total_bytes"
-                    ],
-                )
-            ),
-            child_runner_factory=runner_factory,
-        )
+        try:
+            managed_state = inspector.inspect()
+        except LiveCanaryError as exc:
+            raise ControllerStartError(exc.code, exc.message) from exc
         resource_gate = ResourceGate(
             root=paths.namespace_dir,
             min_free_disk_bytes=catalog.limits["min_free_disk_bytes"],
@@ -232,7 +312,103 @@ def build_production_runtime(
             ],
             min_available_fds=catalog.limits["min_available_fds"],
         )
-        executor = RuntimeNodeExecutor(
+        global_process_limiter = ProcessLimiter(
+            catalog.limits["global_processes"]
+        )
+        boundary_process_limiter = ProcessLimiter(
+            catalog.limits["root_processes"]
+        )
+        if boundary_model_available:
+            boundary_profile = BoundaryPermissionProfile(
+                boundary_snapshot
+            )
+            boundary_canary = LivePermissionCanary(
+                codex_executable=config.real_codex,
+                ruby_executable=Path("/usr/bin/ruby"),
+                codex_home=config.codex_home,
+                runtime_parent=paths.namespace_dir / "canary",
+                profile=boundary_profile,
+                managed_config_inspector=inspector,
+                targets=CanaryProbeTargets(
+                    snapshot_root=boundary_snapshot,
+                    snapshot_read_file=(
+                        boundary_snapshot / "read-probe.txt"
+                    ),
+                    snapshot_write_file=(
+                        boundary_snapshot / "read-probe.txt"
+                    ),
+                    secret_read_file=_required_auth_file(
+                        config.codex_home
+                    ),
+                    source_git_read_file=output_schema,
+                    controller_database_read_file=store.path,
+                    source_worktree_write_file=writer_schema,
+                    controller_socket=paths.socket_path,
+                ),
+                model=BOUNDARY_MODEL,
+                reasoning_effort=BOUNDARY_REASONING_EFFORT,
+            )
+            service.reclassifier = BoundaryReclassifier(
+                BoundaryReclassifierConfig(
+                    codex_executable=config.real_codex,
+                    codex_version=version,
+                    managed_config_sha256=managed_state.sha256,
+                    runtime_parent=paths.namespace_dir / "canary",
+                    permission_snapshot_root=boundary_snapshot,
+                    auth_file=_required_auth_file(config.codex_home),
+                    timeout_seconds=min(
+                        60,
+                        catalog.limits["child_timeout_seconds"],
+                    ),
+                    max_output_bytes=min(
+                        1024 * 1024,
+                        catalog.limits["child_max_output_bytes"],
+                    ),
+                ),
+                permission_gate=PermissionGate(boundary_canary),
+                resource_gate=resource_gate,
+                process_limiter=CompositeProcessLimiter(
+                    boundary_process_limiter,
+                    global_process_limiter,
+                ),
+            )
+        runner_factory = LiveChildRunnerFactory(
+            codex_executable=config.real_codex,
+            codex_home=config.codex_home,
+            canary_runtime_parent=paths.namespace_dir / "canary",
+            managed_config_inspector=inspector,
+            store=store,
+            controller_socket=paths.socket_path,
+        )
+        snapshot_builder = SnapshotBuilder(
+            SnapshotLimits(
+                max_files=catalog.limits["snapshot_max_files"],
+                max_file_bytes=catalog.limits[
+                    "snapshot_max_file_bytes"
+                ],
+                max_total_bytes=catalog.limits[
+                    "snapshot_max_total_bytes"
+                ],
+            )
+        )
+        worker = ChildWorker(
+            snapshot_builder=snapshot_builder,
+            child_runner_factory=runner_factory,
+        )
+        writer_worker = WriterWorker(
+            snapshot_builder=snapshot_builder,
+            child_runner_factory=runner_factory,
+        )
+        child_resource_limits = ChildResourceLimits(
+            max_memory_bytes=catalog.limits[
+                "validation_max_address_space_bytes"
+            ],
+            max_processes=catalog.limits["validation_max_processes"],
+            max_growth_bytes=catalog.limits[
+                "validation_max_growth_bytes"
+            ],
+        )
+        reader_executor = RuntimeNodeExecutor(
             worker=worker,
             config=RuntimeExecutorConfig(
                 runtime_parent=paths.namespace_dir / "runtime",
@@ -249,10 +425,92 @@ def build_production_runtime(
                 output_schema=output_schema,
                 timeout_seconds=catalog.limits["child_timeout_seconds"],
                 max_output_bytes=catalog.limits["child_max_output_bytes"],
+                resource_limits=child_resource_limits,
                 auth_file=_required_auth_file(config.codex_home),
             ),
             resource_gate=resource_gate,
             artifact_registry=store,
+        )
+        validation_helper = (
+            Path(__file__).resolve().parents[2]
+            / "bin"
+            / "codex-smart-subagents-validate"
+        )
+        writer_executor = WriterNodeExecutor(
+            worker=writer_worker,
+            config=WriterExecutorConfig(
+                runtime_parent=paths.namespace_dir / "runtime",
+                validation_parent=paths.namespace_dir / "validation",
+                quarantine_state_root=(
+                    paths.namespace_dir / "quarantine-state"
+                ),
+                codex_executable=config.real_codex,
+                codex_version=version,
+                writer_permission_profile_id=catalog.opaque_id(
+                    "permission",
+                    "writer",
+                ),
+                writer_permission_profile_name=catalog.profiles["writer"][
+                    "permission_profile"
+                ],
+                managed_config_sha256=managed_state.sha256,
+                output_schema=writer_schema,
+                timeout_seconds=catalog.limits["child_timeout_seconds"],
+                max_output_bytes=catalog.limits["child_max_output_bytes"],
+                max_files=catalog.limits["snapshot_max_files"],
+                max_file_bytes=catalog.limits["snapshot_max_file_bytes"],
+                max_total_bytes=catalog.limits["snapshot_max_total_bytes"],
+                validation_commands={
+                    catalog.opaque_id("validation", alias): tuple(
+                        tuple(command)
+                        for command in settings["commands"]
+                    )
+                    for alias, settings in catalog.validation.items()
+                },
+                resource_limits=child_resource_limits,
+                auth_file=_required_auth_file(config.codex_home),
+            ),
+            validation_runner=ValidationRunner(
+                sandbox=ValidationSandbox(
+                    codex_executable=config.real_codex,
+                    helper_executable=validation_helper,
+                    permission_profile_name="adaptive_validator",
+                ),
+                limits=ValidationLimits(
+                    timeout_seconds=catalog.limits[
+                        "validation_timeout_seconds"
+                    ],
+                    max_output_bytes=catalog.limits[
+                        "validation_max_output_bytes"
+                    ],
+                    max_address_space_bytes=catalog.limits[
+                        "validation_max_address_space_bytes"
+                    ],
+                    max_processes=catalog.limits[
+                        "validation_max_processes"
+                    ],
+                    max_file_bytes=catalog.limits[
+                        "validation_max_file_bytes"
+                    ],
+                    max_open_files=catalog.limits[
+                        "validation_max_open_files"
+                    ],
+                    max_growth_bytes=catalog.limits[
+                        "validation_max_growth_bytes"
+                    ],
+                ),
+                managed_config_inspector=inspector,
+                expected_managed_config_sha256=managed_state.sha256,
+            ),
+            resource_gate=resource_gate,
+            artifact_registry=store,
+        )
+        executor = ProcessLimitedNodeExecutor(
+            RoleDispatchExecutor(
+                reader=reader_executor,
+                writer=writer_executor,
+            ),
+            global_process_limiter,
         )
         stop_event = threading.Event()
         engine = ExecutionEngine(
@@ -264,16 +522,27 @@ def build_production_runtime(
             heartbeat_seconds=catalog.limits["heartbeat_seconds"],
             shutdown_event=stop_event,
         )
+        reserved_boundary_slots = (
+            catalog.limits["root_processes"]
+            if boundary_model_available
+            else 0
+        )
+        execution_slots = max(
+            catalog.limits["root_processes"],
+            catalog.limits["global_processes"]
+            - reserved_boundary_slots,
+        )
         route_workers = max(
             1,
-            catalog.limits["global_processes"]
-            // catalog.limits["root_processes"],
+            execution_slots // catalog.limits["root_processes"],
         )
         return ProductionRuntime(
             server=server,
             store=store,
             engine=engine,
             route_workers=route_workers,
+            process_limiter=global_process_limiter,
+            recovery_report=recovery_report,
             stop_event=stop_event,
         )
     except BaseException:
@@ -284,11 +553,58 @@ def build_production_runtime(
 
 
 def materialize_reader_schema(path: Path) -> None:
+    _materialize_schema(path, READER_RESULT_SCHEMA)
+
+
+def materialize_writer_schema(path: Path) -> None:
+    _materialize_schema(path, WRITER_RESULT_SCHEMA)
+
+
+def materialize_boundary_permission_snapshot(path: Path) -> Path:
+    parent = path.parent.resolve(strict=True)
+    _prepare_private_directory(parent)
+    expected = b"adaptive boundary classifier read probe\n"
+    if os.path.lexists(path):
+        return _verify_boundary_permission_snapshot(path, expected)
+
+    temporary = parent / (
+        f".{path.name}.{os.getpid()}.{os.urandom(8).hex()}"
+    )
+    temporary.mkdir(mode=0o700)
+    probe = temporary / "read-probe.txt"
+    descriptor = os.open(
+        probe,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        0o600,
+    )
+    try:
+        view = memoryview(expected)
+        while view:
+            view = view[os.write(descriptor, view) :]
+        os.fsync(descriptor)
+        os.fchmod(descriptor, 0o400)
+    finally:
+        os.close(descriptor)
+    os.chmod(temporary, 0o500)
+    try:
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.chmod(temporary, 0o700)
+            probe.unlink(missing_ok=True)
+            temporary.rmdir()
+        except OSError:
+            pass
+        raise
+    return _verify_boundary_permission_snapshot(path, expected)
+
+
+def _materialize_schema(path: Path, schema: dict[str, Any]) -> None:
     parent = path.parent.resolve(strict=True)
     _prepare_private_directory(parent)
     encoded = (
         json.dumps(
-            READER_RESULT_SCHEMA,
+            schema,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -326,6 +642,54 @@ def materialize_reader_schema(path: Path) -> None:
     finally:
         os.close(descriptor)
     os.replace(temporary, path)
+
+
+def _verify_boundary_permission_snapshot(
+    path: Path,
+    expected: bytes,
+) -> Path:
+    try:
+        metadata = path.lstat()
+        entries = tuple(path.iterdir())
+    except OSError as exc:
+        raise ControllerStartError(
+            "BOUNDARY_SNAPSHOT_UNSAFE",
+            "boundary permission snapshot is unavailable",
+        ) from exc
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o500
+        or len(entries) != 1
+        or entries[0].name != "read-probe.txt"
+    ):
+        raise ControllerStartError(
+            "BOUNDARY_SNAPSHOT_UNSAFE",
+            "boundary permission snapshot metadata is unsafe",
+        )
+    probe = entries[0]
+    try:
+        probe_metadata = probe.lstat()
+        contents = probe.read_bytes()
+    except OSError as exc:
+        raise ControllerStartError(
+            "BOUNDARY_SNAPSHOT_UNSAFE",
+            "boundary permission probe is unavailable",
+        ) from exc
+    if (
+        not stat.S_ISREG(probe_metadata.st_mode)
+        or stat.S_ISLNK(probe_metadata.st_mode)
+        or probe_metadata.st_uid != os.getuid()
+        or probe_metadata.st_nlink != 1
+        or stat.S_IMODE(probe_metadata.st_mode) != 0o400
+        or contents != expected
+    ):
+        raise ControllerStartError(
+            "BOUNDARY_SNAPSHOT_UNSAFE",
+            "boundary permission probe metadata is unsafe",
+        )
+    return path.resolve(strict=True)
 
 
 def install_signal_handlers(runtime: ProductionRuntime) -> None:

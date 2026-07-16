@@ -13,7 +13,7 @@
         "XDG_STATE_HOME"
       ],
       "startup_timeout_sec": 5,
-      "tool_timeout_sec": 65,
+      "tool_timeout_sec": 430,
       "required": false,
       "enabled_tools": [
         "smart_plan",
