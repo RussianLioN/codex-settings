@@ -157,6 +157,18 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual("direct", plan["overallDisposition"])
         self.assertFalse(plan["startable"])
 
+    def test_queue_node_limit_fails_before_consuming_turn_binding(self) -> None:
+        self.catalog.limits["queue_nodes"] = 1
+        self.service.smart_plan(self._bound_plan(), context())
+        blocked = self._bound_plan()
+        blocked["requestKey"] = "second-route"
+
+        with self.assertRaises(ServiceError) as caught:
+            self.service.smart_plan(blocked, context())
+
+        self.assertEqual("QUEUE_FULL", caught.exception.code)
+        self.store.consume_turn_binding(blocked["turnBinding"], context())
+
     def _bound_plan(self) -> dict[str, object]:
         payload = valid_plan()
         payload["turnBinding"] = self.store.issue_turn_binding(context())

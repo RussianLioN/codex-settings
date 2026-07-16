@@ -260,6 +260,45 @@ class ExecutionStoreTests(unittest.TestCase):
         self.assertEqual(route_id, second.route.route_id)
         self.assertNotEqual(first.lease_token, second.lease_token)
 
+    def test_runtime_artifact_is_reserved_then_sealed_by_inode(self) -> None:
+        route_id = self.queued_route()
+        runtime_parent = Path(self.directory.name) / "runtime"
+        runtime_parent.mkdir(mode=0o700)
+        runtime_path = runtime_parent / "reader-attempt"
+
+        artifact_id = self.store.reserve_runtime_artifact(
+            route_id=route_id,
+            node_id="node-1",
+            kind="reader_runtime",
+            path=runtime_path,
+            allowed_root=runtime_parent,
+        )
+        reserved = self.store.runtime_artifacts(route_id)
+        self.assertEqual("RESERVED", reserved[0]["state"])
+        self.assertEqual(str(runtime_path), reserved[0]["path"])
+        self.assertIsNone(reserved[0]["device"])
+
+        runtime_path.mkdir(mode=0o700)
+        sealed = self.store.seal_runtime_artifact(
+            artifact_id,
+            terminal=True,
+        )
+
+        metadata = runtime_path.stat()
+        self.assertEqual("TERMINAL", sealed["state"])
+        self.assertEqual(metadata.st_dev, sealed["device"])
+        self.assertEqual(metadata.st_ino, sealed["inode"])
+
+        outside = Path(self.directory.name) / "outside"
+        with self.assertRaises(ValueError):
+            self.store.reserve_runtime_artifact(
+                route_id=route_id,
+                node_id="node-1",
+                kind="reader_runtime",
+                path=outside,
+                allowed_root=runtime_parent,
+            )
+
     def test_heartbeat_requires_the_active_lease_identity(self) -> None:
         self.queued_route()
         now = datetime.now(timezone.utc)

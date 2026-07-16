@@ -98,6 +98,14 @@ class SmartService:
             self._consume_binding(arguments["turnBinding"], request_context)
             return validate_tool_output("smart_plan", existing.plan_output)
 
+        if (
+            self.store.active_node_count() + len(arguments["nodes"])
+            > self.catalog.limits["queue_nodes"]
+        ):
+            raise ServiceError(
+                "QUEUE_FULL",
+                "adaptive subagent queue has reached its configured node limit",
+            )
         self._consume_binding(arguments["turnBinding"], request_context)
         split_generation = arguments.get("lineage", {}).get("generation", 0)
         try:

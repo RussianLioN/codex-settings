@@ -131,11 +131,170 @@ class SmartStore:
         os.chmod(self.path, 0o600)
         self._configure()
         self._migrate()
+        self._ensure_runtime_artifacts_schema()
         self._verify_database_file()
 
     def close(self) -> None:
         with self._lock:
             self._connection.close()
+
+    def active_node_count(self) -> int:
+        terminal = tuple(
+            state.value for state in RouteState if is_terminal(state)
+        )
+        placeholders = ",".join("?" for _ in terminal)
+        with self._lock:
+            row = self._connection.execute(
+                f"""
+                select count(*) as count
+                from nodes
+                where route_id in (
+                  select route_id from routes
+                  where startable = 1
+                    and state not in ({placeholders})
+                )
+                """,
+                terminal,
+            ).fetchone()
+        return int(row["count"])
+
+    def reserve_runtime_artifact(
+        self,
+        *,
+        route_id: str,
+        node_id: str,
+        kind: str,
+        path: Path,
+        allowed_root: Path,
+    ) -> str:
+        if (
+            not kind
+            or len(kind) > 64
+            or not kind.replace("_", "").isalnum()
+        ):
+            raise ValueError("runtime artifact kind is invalid")
+        root = allowed_root.expanduser().resolve(strict=True)
+        if (
+            not root.is_dir()
+            or root.is_symlink()
+            or root.stat().st_uid != os.getuid()
+            or stat.S_IMODE(root.stat().st_mode) != 0o700
+        ):
+            raise ValueError("runtime artifact root is unsafe")
+        if not path.is_absolute() or path.parent.resolve(strict=True) != root:
+            raise ValueError("runtime artifact path must be a direct child")
+        if os.path.lexists(path):
+            raise ValueError("runtime artifact path must be fresh")
+        artifact_id = new_opaque_id("ra1")
+        now = _utc_now()
+        with self._transaction() as connection:
+            node = connection.execute(
+                """
+                select 1 from nodes
+                where route_id = ? and node_id = ?
+                """,
+                (route_id, node_id),
+            ).fetchone()
+            if node is None:
+                raise RouteNotFound(
+                    "NODE_NOT_FOUND",
+                    "route node does not exist",
+                )
+            connection.execute(
+                """
+                insert into runtime_artifacts (
+                  artifact_id, route_id, node_id, kind, path, allowed_root,
+                  state, device, inode, created_at, updated_at
+                ) values (?, ?, ?, ?, ?, ?, 'RESERVED', null, null, ?, ?)
+                """,
+                (
+                    artifact_id,
+                    route_id,
+                    node_id,
+                    kind,
+                    os.fspath(path),
+                    os.fspath(root),
+                    _iso(now),
+                    _iso(now),
+                ),
+            )
+        return artifact_id
+
+    def seal_runtime_artifact(
+        self,
+        artifact_id: str,
+        *,
+        terminal: bool,
+    ) -> dict[str, Any]:
+        with self._transaction() as connection:
+            row = connection.execute(
+                """
+                select * from runtime_artifacts
+                where artifact_id = ?
+                """,
+                (artifact_id,),
+            ).fetchone()
+            if row is None:
+                raise RouteNotFound(
+                    "ARTIFACT_NOT_FOUND",
+                    "runtime artifact does not exist",
+                )
+            path = Path(str(row["path"]))
+            root = Path(str(row["allowed_root"]))
+            try:
+                metadata = os.lstat(path)
+            except FileNotFoundError:
+                state = "MISSING"
+                device = None
+                inode = None
+            else:
+                if (
+                    path.parent.resolve(strict=True) != root.resolve(strict=True)
+                    or stat.S_ISLNK(metadata.st_mode)
+                    or not stat.S_ISDIR(metadata.st_mode)
+                    or metadata.st_uid != os.getuid()
+                    or stat.S_IMODE(metadata.st_mode) != 0o700
+                ):
+                    raise StoreError(
+                        "UNSAFE_RUNTIME_ARTIFACT",
+                        "runtime artifact identity is unsafe",
+                    )
+                state = "TERMINAL" if terminal else "ACTIVE"
+                device = int(metadata.st_dev)
+                inode = int(metadata.st_ino)
+            now = _utc_now()
+            connection.execute(
+                """
+                update runtime_artifacts
+                set state = ?, device = ?, inode = ?, updated_at = ?
+                where artifact_id = ?
+                """,
+                (state, device, inode, _iso(now), artifact_id),
+            )
+            updated = connection.execute(
+                """
+                select * from runtime_artifacts
+                where artifact_id = ?
+                """,
+                (artifact_id,),
+            ).fetchone()
+        return _runtime_artifact_record(updated)
+
+    def runtime_artifacts(
+        self,
+        route_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        query = """
+            select * from runtime_artifacts
+        """
+        parameters: tuple[str, ...] = ()
+        if route_id is not None:
+            query += " where route_id = ?"
+            parameters = (route_id,)
+        query += " order by created_at, artifact_id"
+        with self._lock:
+            rows = self._connection.execute(query, parameters).fetchall()
+        return [_runtime_artifact_record(row) for row in rows]
 
     def issue_turn_binding(
         self,
@@ -1437,6 +1596,29 @@ class SmartStore:
             )
             connection.execute(f"pragma user_version={SCHEMA_VERSION}")
 
+    def _ensure_runtime_artifacts_schema(self) -> None:
+        with self._transaction() as connection:
+            connection.executescript(
+                """
+                create table if not exists runtime_artifacts (
+                  artifact_id text primary key,
+                  route_id text not null references routes(route_id) on delete cascade,
+                  node_id text not null,
+                  kind text not null,
+                  path text not null unique,
+                  allowed_root text not null,
+                  state text not null,
+                  device integer,
+                  inode integer,
+                  created_at text not null,
+                  updated_at text not null
+                );
+
+                create index if not exists runtime_artifacts_route
+                  on runtime_artifacts(route_id, created_at);
+                """
+            )
+
     def _verify_database_file(self) -> None:
         info = self.path.stat()
         if (
@@ -1548,6 +1730,24 @@ def _node_record(row: sqlite3.Row) -> NodeRecord:
         state=RouteState(row["state"]),
         result=None if result is None else json.loads(result),
     )
+
+
+def _runtime_artifact_record(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "artifactId": str(row["artifact_id"]),
+        "routeId": str(row["route_id"]),
+        "nodeId": str(row["node_id"]),
+        "kind": str(row["kind"]),
+        "path": str(row["path"]),
+        "allowedRoot": str(row["allowed_root"]),
+        "state": str(row["state"]),
+        "device": (
+            None if row["device"] is None else int(row["device"])
+        ),
+        "inode": None if row["inode"] is None else int(row["inode"]),
+        "createdAt": str(row["created_at"]),
+        "updatedAt": str(row["updated_at"]),
+    }
 
 
 def _json(value: Any) -> str:

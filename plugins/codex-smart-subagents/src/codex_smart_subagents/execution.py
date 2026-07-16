@@ -87,6 +87,7 @@ class ExecutionEngine:
         max_sol_workers: int,
         lease_seconds: int,
         heartbeat_seconds: int,
+        shutdown_event: threading.Event | None = None,
     ) -> None:
         if (
             max_workers <= 0
@@ -105,8 +106,11 @@ class ExecutionEngine:
         self.owner_id = new_opaque_id("owner1")
         self.start_marker = f"{os.getpid()}:{time.monotonic_ns()}"
         self._sol_semaphore = threading.BoundedSemaphore(max_sol_workers)
+        self.shutdown_event = shutdown_event
 
     def run_once(self) -> bool:
+        if self.shutdown_event is not None and self.shutdown_event.is_set():
+            return False
         claim = self.store.claim_next_route(
             owner_id=self.owner_id,
             pid=os.getpid(),
@@ -124,6 +128,7 @@ class ExecutionEngine:
             lease_seconds=self.lease_seconds,
             heartbeat_seconds=self.heartbeat_seconds,
             cancellation=cancellation,
+            shutdown_event=self.shutdown_event,
         )
         monitor.start()
         try:
@@ -539,6 +544,7 @@ class _LeaseMonitor:
         lease_seconds: int,
         heartbeat_seconds: int,
         cancellation: threading.Event,
+        shutdown_event: threading.Event | None,
     ) -> None:
         self.store = store
         self.claim = claim
@@ -546,6 +552,7 @@ class _LeaseMonitor:
         self.lease_seconds = lease_seconds
         self.heartbeat_seconds = heartbeat_seconds
         self.cancellation = cancellation
+        self.shutdown_event = shutdown_event
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._run,
@@ -563,6 +570,9 @@ class _LeaseMonitor:
     def _run(self) -> None:
         next_heartbeat = time.monotonic() + self.heartbeat_seconds
         while not self._stop.wait(0.05):
+            if self.shutdown_event is not None and self.shutdown_event.is_set():
+                self.cancellation.set()
+                return
             try:
                 state = self.store.route_state(self.claim.route.route_id)
                 if state in {RouteState.CANCELLING, RouteState.CANCELLED}:

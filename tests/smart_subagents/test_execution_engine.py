@@ -253,6 +253,30 @@ class ExecutionEngineTests(unittest.TestCase):
             route.terminal_result["validationState"],
         )
 
+    def test_controller_shutdown_cancels_running_child_contract(self) -> None:
+        route_id = self.start_route()
+        executor = FakeNodeExecutor(self.store)
+        shutdown = threading.Event()
+        engine = ExecutionEngine(
+            self.store,
+            executor,
+            max_workers=2,
+            max_sol_workers=1,
+            lease_seconds=45,
+            heartbeat_seconds=1,
+            shutdown_event=shutdown,
+        )
+        thread = threading.Thread(target=engine.run_once)
+        thread.start()
+        self.assertTrue(executor.started_event.wait(2))
+
+        shutdown.set()
+        thread.join(timeout=3)
+
+        self.assertFalse(thread.is_alive())
+        route = self.store.execution_bundle(route_id).route
+        self.assertEqual(RouteState.CANCELLED, route.state)
+
 
 if __name__ == "__main__":
     unittest.main()
