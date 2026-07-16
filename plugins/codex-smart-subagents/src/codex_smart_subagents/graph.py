@@ -17,7 +17,7 @@ ALLOWED_ROLES = frozenset(
 )
 
 
-@dataclass(frozen=True)
+@dataclass
 class GraphError(ValueError):
     code: str
     message: str
@@ -170,4 +170,3 @@ def _ancestors(node_id: str, by_id: dict[str, TaskNode]) -> set[str]:
         result.add(dependency)
         pending.extend(by_id[dependency].dependencies)
     return result
-

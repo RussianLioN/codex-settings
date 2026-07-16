@@ -17,7 +17,7 @@ CATALOG_PATTERN = r"^cg1_[a-f0-9]{16}$"
 OPAQUE_ID_PATTERN = r"^[A-Za-z][A-Za-z0-9_-]{2,63}$"
 
 
-@dataclass(frozen=True)
+@dataclass
 class ContractError(ValueError):
     code: str
     message: str

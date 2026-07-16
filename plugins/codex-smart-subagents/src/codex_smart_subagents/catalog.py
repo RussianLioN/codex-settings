@@ -45,7 +45,7 @@ EXPECTED_MODELS = {
 }
 
 
-@dataclass(frozen=True)
+@dataclass
 class CatalogError(ValueError):
     message: str
 
@@ -217,4 +217,3 @@ def _string_list(value: Any, path: str) -> None:
         or not all(isinstance(item, str) and item for item in value)
     ):
         raise CatalogError(f"{path} must be a non-empty string array")
-
