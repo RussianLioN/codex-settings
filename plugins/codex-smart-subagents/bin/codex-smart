@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+"""Conservative wrapper for ordinary interactive Codex launches."""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+
+PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+SOURCE = PLUGIN_ROOT / "src"
+if str(SOURCE) not in sys.path:
+    sys.path.insert(0, str(SOURCE))
+
+from codex_smart_subagents.daemon import (  # noqa: E402
+    ControllerProcessConfig,
+    ensure_controller_running,
+)
+from codex_smart_subagents.launcher import run_launcher  # noqa: E402
+
+
+def main() -> int:
+    environment = dict(os.environ)
+    environment.setdefault("CODEX_HOME", str(Path.home() / ".codex"))
+    environment.setdefault(
+        "CODEX_ADAPTIVE_CATALOG",
+        str(PLUGIN_ROOT / "config" / "adaptive-subagents.toml"),
+    )
+    config = ControllerProcessConfig.from_environ(
+        environment,
+        plugin_root=PLUGIN_ROOT,
+    )
+
+    def ensure(adaptive_environment):
+        ensure_controller_running(
+            config,
+            shell_session_id=adaptive_environment[
+                "CODEX_ADAPTIVE_SESSION_ID"
+            ],
+            environ=adaptive_environment,
+        )
+
+    return run_launcher(
+        sys.argv[1:],
+        real_binary=config.real_codex,
+        wrapper=Path(__file__),
+        environment=environment,
+        ensure_controller=ensure,
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

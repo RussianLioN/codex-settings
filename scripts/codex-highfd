@@ -4,6 +4,7 @@ set -eu
 target_limit=${CODEX_NOFILE_LIMIT:-4096}
 real_codex=${CODEX_REAL_BIN:-/opt/homebrew/bin/codex}
 fd_doctor=${CODEX_FD_DOCTOR:-$HOME/.local/libexec/codex_fd_doctor.sh}
+smart_launcher=${CODEX_SMART_LAUNCHER:-$HOME/.local/bin/codex-smart}
 
 if [[ ! "$target_limit" =~ ^[1-9][0-9]*$ ]]; then
   print -u2 -- "codex-highfd: CODEX_NOFILE_LIMIT must be a positive integer"
@@ -29,9 +30,14 @@ case "${1:-}" in
     print -- "hard_limit=$(ulimit -Hn)"
     print -- "real_codex=$real_codex"
     print -- "fd_doctor=$fd_doctor"
+    print -- "smart_launcher=$smart_launcher"
     exit 0
     ;;
 esac
 
 [[ -x "$real_codex" ]] || { print -u2 -- "codex-highfd: Codex binary is missing: $real_codex"; exit 1; }
+if [[ -x "$smart_launcher" ]]; then
+  export CODEX_REAL_BIN=$real_codex
+  exec "$smart_launcher" "$@"
+fi
 exec "$real_codex" "$@"

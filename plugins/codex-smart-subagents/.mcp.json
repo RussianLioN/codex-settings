@@ -8,6 +8,7 @@
       "cwd": ".",
       "env_vars": [
         "CODEX_ADAPTIVE_SESSION_ID",
+        "CODEX_ADAPTIVE_CATALOG",
         "CODEX_HOME",
         "XDG_STATE_HOME"
       ],

@@ -117,6 +117,7 @@ class PluginMetadataTests(unittest.TestCase):
             server["enabled_tools"],
         )
         self.assertGreaterEqual(server["tool_timeout_sec"], 60)
+        self.assertIn("CODEX_ADAPTIVE_CATALOG", server["env_vars"])
 
     def test_hook_config_has_only_supported_turn_events(self) -> None:
         hooks = json.loads(
@@ -134,6 +135,8 @@ class PluginMetadataTests(unittest.TestCase):
 
     def test_bundled_entrypoints_are_executable_regular_files(self) -> None:
         for relative in (
+            "bin/codex-smart",
+            "bin/codex-smart-subagents-controller",
             "bin/codex-smart-subagents-mcp",
             "bin/codex-smart-subagents-hook",
         ):
