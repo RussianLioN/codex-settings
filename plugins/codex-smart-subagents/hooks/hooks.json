@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$PLUGIN_ROOT/bin/codex-smart-subagents-hook\" user-prompt-submit",
+            "timeout": 2,
+            "statusMessage": "Подготовка умного маршрута"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$PLUGIN_ROOT/bin/codex-smart-subagents-hook\" stop",
+            "timeout": 2,
+            "statusMessage": "Проверка состояния умного маршрута"
+          }
+        ]
+      }
+    ]
+  }
+}
