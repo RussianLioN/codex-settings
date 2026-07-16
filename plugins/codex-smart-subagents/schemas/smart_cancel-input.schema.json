@@ -1,0 +1,36 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "reasonCode": {
+      "enum": [
+        "user_requested",
+        "superseded",
+        "timeout",
+        "session_shutdown"
+      ],
+      "maxLength": 4096,
+      "minLength": 0,
+      "type": "string"
+    },
+    "routeId": {
+      "maxLength": 47,
+      "minLength": 47,
+      "pattern": "^rt1_[A-Za-z0-9_-]{43}$",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "enum": [
+        "1"
+      ],
+      "maxLength": 4096,
+      "minLength": 0,
+      "type": "string"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "routeId",
+    "reasonCode"
+  ],
+  "type": "object"
+}

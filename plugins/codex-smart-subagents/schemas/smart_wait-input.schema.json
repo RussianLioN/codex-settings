@@ -1,0 +1,36 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "afterSequence": {
+      "maximum": 2147483647,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "routeId": {
+      "maxLength": 47,
+      "minLength": 47,
+      "pattern": "^rt1_[A-Za-z0-9_-]{43}$",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "enum": [
+        "1"
+      ],
+      "maxLength": 4096,
+      "minLength": 0,
+      "type": "string"
+    },
+    "timeoutSeconds": {
+      "maximum": 60,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "routeId",
+    "afterSequence",
+    "timeoutSeconds"
+  ],
+  "type": "object"
+}

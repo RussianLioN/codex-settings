@@ -1,0 +1,51 @@
+schema_version = 1
+algorithm_version = "route-v1"
+supported_codex_versions = ["0.144.4"]
+supported_platforms = ["darwin-arm64"]
+
+[models."gpt-5.6-luna"]
+rank = 0
+reasoning_efforts = ["low", "medium"]
+
+[models."gpt-5.6-terra"]
+rank = 1
+reasoning_efforts = ["medium", "high", "xhigh"]
+
+[models."gpt-5.6-sol"]
+rank = 2
+reasoning_efforts = ["high", "xhigh", "max"]
+
+[limits]
+global_processes = 20
+root_processes = 6
+sol_processes = 2
+queue_nodes = 100
+lease_seconds = 45
+heartbeat_seconds = 10
+recover_after_seconds = 60
+max_nodes = 20
+max_edges = 60
+max_depth = 4
+max_split_generation = 2
+
+[profiles.reader]
+permission_profile = "adaptive_reader"
+writer = false
+network = false
+
+[profiles.writer]
+permission_profile = "adaptive_writer"
+writer = true
+network = false
+
+[retention]
+success_days = 30
+failure_days = 90
+
+[validation.none]
+commands = []
+
+[validation.python]
+commands = [
+  ["/usr/bin/env", "python3", "-m", "unittest", "discover", "-v"],
+]

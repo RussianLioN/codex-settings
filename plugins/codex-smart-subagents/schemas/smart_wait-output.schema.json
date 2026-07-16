@@ -1,0 +1,144 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "maxLength": 64,
+      "minLength": 1,
+      "type": "string"
+    },
+    "events": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "event": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 1000,
+            "minLength": 0,
+            "type": "string"
+          },
+          "nodeId": {
+            "maxLength": 64,
+            "minLength": 0,
+            "type": "string"
+          },
+          "sequence": {
+            "maximum": 2147483647,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "state": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "sequence",
+          "event",
+          "state",
+          "nodeId",
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "maxItems": 100,
+      "minItems": 0,
+      "type": "array"
+    },
+    "message": {
+      "maxLength": 1000,
+      "minLength": 0,
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "routeId": {
+      "maxLength": 47,
+      "minLength": 0,
+      "type": "string"
+    },
+    "schemaVersion": {
+      "enum": [
+        "1"
+      ],
+      "maxLength": 4096,
+      "minLength": 0,
+      "type": "string"
+    },
+    "sequence": {
+      "maximum": 2147483647,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "state": {
+      "maxLength": 32,
+      "minLength": 1,
+      "type": "string"
+    },
+    "terminalResult": {
+      "additionalProperties": false,
+      "properties": {
+        "artifactId": {
+          "maxLength": 80,
+          "minLength": 3,
+          "type": "string"
+        },
+        "fingerprint": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "summary": {
+          "maxLength": 4000,
+          "minLength": 0,
+          "type": "string"
+        },
+        "validationState": {
+          "enum": [
+            "not_applicable",
+            "passed",
+            "failed",
+            "quarantined"
+          ],
+          "maxLength": 4096,
+          "minLength": 0,
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifactId",
+        "fingerprint",
+        "summary",
+        "validationState"
+      ],
+      "type": "object"
+    },
+    "truncated": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "ok",
+    "code",
+    "message",
+    "routeId",
+    "state",
+    "sequence",
+    "events",
+    "truncated"
+  ],
+  "type": "object"
+}

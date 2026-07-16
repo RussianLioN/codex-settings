@@ -6,6 +6,7 @@ import copy
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 
@@ -416,6 +417,29 @@ def validate_tool_output(name: str, payload: Any) -> dict[str, Any]:
     return json.loads(json.dumps(payload, ensure_ascii=False))
 
 
+def export_tool_schemas(destination: Path) -> None:
+    """Write canonical public tool schemas for review and packaging."""
+
+    destination.mkdir(parents=True, exist_ok=True)
+    for tool in get_tool_definitions():
+        for key, suffix in (
+            ("inputSchema", "input"),
+            ("outputSchema", "output"),
+        ):
+            path = destination / f"{tool['name']}-{suffix}.schema.json"
+            path.write_text(
+                json.dumps(
+                    tool[key],
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+
+
 def _validate(value: Any, schema: dict[str, Any], path: str) -> None:
     expected = schema.get("type")
     if expected == "object":
@@ -509,4 +533,3 @@ def _validate_plan_semantics(payload: dict[str, Any]) -> None:
 
 def _invalid(path: str, message: str) -> None:
     raise ContractError("INVALID_INPUT", message, path)
-
