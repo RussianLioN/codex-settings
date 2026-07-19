@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/activation-commit-receipt-v2.schema.json",
+  "title": "activation-commit-receipt-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "receiptKind", "installationId", "operationId", "frozenJournalFingerprint", "manifest", "activation", "database", "controllerIdentity", "completedStepIds", "receiptFingerprint", "completedAt"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "receiptKind": {"const": "activation-commit"},
+    "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"},
+    "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"},
+    "frozenJournalFingerprint": {"$ref": "#/$defs/sha256"},
+    "manifest": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "manifest-v2"}}},
+    "activation": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "activation-v2"}}},
+    "database": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "database-object-v2"}}},
+    "controllerIdentity": {"$ref": "#/$defs/sha256"},
+    "completedStepIds": {"type": "array", "maxItems": 128, "uniqueItems": true, "items": {"type": "string", "pattern": "^st2_[0-9a-f]{32}$"}},
+    "receiptFingerprint": {"$ref": "#/$defs/sha256"},
+    "completedAt": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

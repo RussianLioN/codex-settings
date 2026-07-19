@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/installation-tombstone-v2.schema.json",
+  "title": "installation-tombstone-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "installationId", "operationId", "uninstallReceipt", "absenceProof", "tombstoneFingerprint", "completedAt"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"},
+    "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"},
+    "uninstallReceipt": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "receipt-object-v2"}, "value": {"properties": {"receiptKind": {"const": "installation-uninstall"}}}}},
+    "absenceProof": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "absence-proof-v2"}}},
+    "tombstoneFingerprint": {"$ref": "#/$defs/sha256"},
+    "completedAt": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

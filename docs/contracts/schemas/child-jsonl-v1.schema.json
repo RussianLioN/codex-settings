@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/child-jsonl-v1.schema.json",
+  "title": "child-jsonl-v1-line",
+  "oneOf": [
+    {"$ref": "#/$defs/threadStarted"},
+    {"$ref": "#/$defs/turnStarted"},
+    {"$ref": "#/$defs/itemStarted"},
+    {"$ref": "#/$defs/itemUpdated"},
+    {"$ref": "#/$defs/itemCompleted"},
+    {"$ref": "#/$defs/turnCompleted"}
+  ],
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "threadStarted": {
+      "type": "object",
+      "required": ["type", "thread_id"],
+      "properties": {"type": {"const": "thread.started"}, "thread_id": {"$ref": "#/$defs/id"}}
+    },
+    "turnStarted": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {"type": {"const": "turn.started"}}
+    },
+    "itemStarted": {
+      "type": "object",
+      "required": ["type", "item"],
+      "properties": {"type": {"const": "item.started"}, "item": {"$ref": "#/$defs/item"}}
+    },
+    "itemUpdated": {
+      "type": "object",
+      "required": ["type", "item"],
+      "properties": {"type": {"const": "item.updated"}, "item": {"$ref": "#/$defs/item"}}
+    },
+    "itemCompleted": {
+      "type": "object",
+      "required": ["type", "item"],
+      "properties": {"type": {"const": "item.completed"}, "item": {"$ref": "#/$defs/item"}}
+    },
+    "turnCompleted": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {"const": "turn.completed"},
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "maxProperties": 16,
+          "patternProperties": {"^[a-z][a-z0-9_]{0,63}$": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}}
+        }
+      }
+    },
+    "item": {
+      "oneOf": [
+        {"$ref": "#/$defs/agentMessage"},
+        {"$ref": "#/$defs/reasoning"},
+        {"$ref": "#/$defs/commandExecution"},
+        {"$ref": "#/$defs/fileChange"}
+      ]
+    },
+    "agentMessage": {
+      "type": "object",
+      "required": ["id", "type", "text"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "agent_message"},
+        "text": {"type": "string", "maxLength": 1048576}
+      }
+    },
+    "reasoning": {
+      "type": "object",
+      "required": ["id", "type"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "type": {"const": "reasoning"}}
+    },
+    "commandExecution": {
+      "type": "object",
+      "required": ["id", "type", "command", "status"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "command_execution"},
+        "command": {"type": "string", "maxLength": 65536},
+        "status": {"enum": ["in_progress", "completed", "failed"]},
+        "aggregated_output": {"type": "string", "maxLength": 4194304},
+        "exit_code": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647}
+      }
+    },
+    "fileChange": {
+      "type": "object",
+      "required": ["id", "type", "changes"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "type": {"const": "file_change"},
+        "changes": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "object",
+            "required": ["path", "kind"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/"},
+              "kind": {"enum": ["add", "update", "delete"]}
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,1364 @@
+{
+  "schemaVersion": 1,
+  "profileDomain": "codex-smart/child-profile/v1",
+  "argvDomain": "codex-smart/argv/v2",
+  "environmentDomain": "codex-smart/environment/v1",
+  "secretDomain": "codex-smart/launch-secret/v1",
+  "resultSchemaResolution": {
+    "virtualRoot": "/private/schemas",
+    "repositoryRoot": "docs/contracts/schemas"
+  },
+  "syntheticSecretFixture": {
+    "purpose": "test-only-non-production",
+    "domain": "codex-smart/launch-secret/v1",
+    "syntheticSecretUtf8": "test-only-not-a-secret",
+    "secretSha256": "85ca20bbb5920a133e51b3d08c1079445ecb9fc4b40b328a3e73f1efbc34b36c"
+  },
+  "cases": [
+    {
+      "name": "classifier",
+      "profile": {
+        "schemaVersion": 1,
+        "contractVersion": "codex-child-profile-v1",
+        "role": "classifier",
+        "permissionProfileId": "codex-smart-classifier",
+        "sandboxMode": "read-only",
+        "resultSchemaId": "boundary-result-v1",
+        "argvTemplate": [
+          {
+            "slot": "snapshotPath",
+            "prefix": "",
+            "encoding": "raw"
+          },
+          {
+            "literal": "exec"
+          },
+          {
+            "literal": "--ignore-user-config"
+          },
+          {
+            "literal": "--ignore-rules"
+          },
+          {
+            "literal": "--strict-config"
+          },
+          {
+            "literal": "--ephemeral"
+          },
+          {
+            "literal": "--json"
+          },
+          {
+            "literal": "--skip-git-repo-check"
+          },
+          {
+            "literal": "--model"
+          },
+          {
+            "slot": "model",
+            "prefix": "",
+            "encoding": "raw"
+          },
+          {
+            "literal": "-C"
+          },
+          {
+            "slot": "workDir",
+            "prefix": "",
+            "encoding": "raw"
+          },
+          {
+            "literal": "--output-schema"
+          },
+          {
+            "slot": "resultSchemaPath",
+            "prefix": "",
+            "encoding": "raw"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "slot": "reasoningEffort",
+            "prefix": "model_reasoning_effort=",
+            "encoding": "json-string"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "approval_policy=\"never\""
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "default_permissions=\"codex-smart-classifier\""
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "project_root_markers=[]"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "project_doc_max_bytes=0"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "shell_environment_policy.inherit=\"none\""
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "slot": "shellEnvironmentSet",
+            "prefix": "shell_environment_policy.set=",
+            "encoding": "canonical-json"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "allow_login_shell=false"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "agents.max_threads=1"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "agents.max_depth=1"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "web_search=\"disabled\""
+          }
+        ],
+        "environmentTemplate": {
+          "CODEX_ADAPTIVE_CHILD": {
+            "literal": "1"
+          },
+          "CODEX_ADAPTIVE_SNAPSHOT_ROOT": {
+            "slot": "snapshotRoot"
+          },
+          "CODEX_HOME": {
+            "slot": "codexHome"
+          },
+          "CODEX_SQLITE_HOME": {
+            "slot": "codexSqliteHome"
+          },
+          "HOME": {
+            "slot": "home"
+          },
+          "LANG": {
+            "literal": "C"
+          },
+          "LC_ALL": {
+            "literal": "C"
+          },
+          "NO_COLOR": {
+            "literal": "1"
+          },
+          "PATH": {
+            "literal": "/usr/bin:/bin:/usr/sbin:/sbin"
+          },
+          "TMPDIR": {
+            "slot": "tmpDir"
+          },
+          "OTEL_EXPORTER_OTLP_ENDPOINT": {
+            "slot": "otelEndpoint"
+          },
+          "OTEL_EXPORTER_OTLP_HEADERS": {
+            "secretSlot": "otelHeaders"
+          }
+        },
+        "disabledFeatures": [
+          "apps",
+          "auth_elicitation",
+          "browser_use",
+          "browser_use_external",
+          "browser_use_full_cdp_access",
+          "code_mode_host",
+          "computer_use",
+          "enable_fanout",
+          "enable_mcp_apps",
+          "goals",
+          "hooks",
+          "image_generation",
+          "in_app_browser",
+          "memories",
+          "multi_agent",
+          "multi_agent_v2",
+          "plugins",
+          "remote_plugin",
+          "request_permissions_tool",
+          "shell_snapshot",
+          "shell_tool",
+          "skill_mcp_dependency_install",
+          "tool_call_mcp_elicitation",
+          "tool_suggest",
+          "unified_exec",
+          "workspace_dependencies"
+        ],
+        "negativeProbeIds": [
+          "classifier-no-login-shell",
+          "classifier-no-network",
+          "classifier-no-subagents",
+          "classifier-no-write",
+          "classifier-prompt-cannot-enable-feature",
+          "classifier-source-tree-unchanged",
+          "classifier-strict-unknown-config"
+        ]
+      },
+      "canonicalUtf8": "{\"argvTemplate\":[{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"snapshotPath\"},{\"literal\":\"exec\"},{\"literal\":\"--ignore-user-config\"},{\"literal\":\"--ignore-rules\"},{\"literal\":\"--strict-config\"},{\"literal\":\"--ephemeral\"},{\"literal\":\"--json\"},{\"literal\":\"--skip-git-repo-check\"},{\"literal\":\"--model\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"model\"},{\"literal\":\"-C\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"workDir\"},{\"literal\":\"--output-schema\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"resultSchemaPath\"},{\"literal\":\"-c\"},{\"encoding\":\"json-string\",\"prefix\":\"model_reasoning_effort=\",\"slot\":\"reasoningEffort\"},{\"literal\":\"-c\"},{\"literal\":\"approval_policy=\\\"never\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"default_permissions=\\\"codex-smart-classifier\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"project_root_markers=[]\"},{\"literal\":\"-c\"},{\"literal\":\"project_doc_max_bytes=0\"},{\"literal\":\"-c\"},{\"literal\":\"shell_environment_policy.inherit=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"canonical-json\",\"prefix\":\"shell_environment_policy.set=\",\"slot\":\"shellEnvironmentSet\"},{\"literal\":\"-c\"},{\"literal\":\"allow_login_shell=false\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_threads=1\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_depth=1\"},{\"literal\":\"-c\"},{\"literal\":\"web_search=\\\"disabled\\\"\"}],\"contractVersion\":\"codex-child-profile-v1\",\"disabledFeatures\":[\"apps\",\"auth_elicitation\",\"browser_use\",\"browser_use_external\",\"browser_use_full_cdp_access\",\"code_mode_host\",\"computer_use\",\"enable_fanout\",\"enable_mcp_apps\",\"goals\",\"hooks\",\"image_generation\",\"in_app_browser\",\"memories\",\"multi_agent\",\"multi_agent_v2\",\"plugins\",\"remote_plugin\",\"request_permissions_tool\",\"shell_snapshot\",\"shell_tool\",\"skill_mcp_dependency_install\",\"tool_call_mcp_elicitation\",\"tool_suggest\",\"unified_exec\",\"workspace_dependencies\"],\"environmentTemplate\":{\"CODEX_ADAPTIVE_CHILD\":{\"literal\":\"1\"},\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":{\"slot\":\"snapshotRoot\"},\"CODEX_HOME\":{\"slot\":\"codexHome\"},\"CODEX_SQLITE_HOME\":{\"slot\":\"codexSqliteHome\"},\"HOME\":{\"slot\":\"home\"},\"LANG\":{\"literal\":\"C\"},\"LC_ALL\":{\"literal\":\"C\"},\"NO_COLOR\":{\"literal\":\"1\"},\"OTEL_EXPORTER_OTLP_ENDPOINT\":{\"slot\":\"otelEndpoint\"},\"OTEL_EXPORTER_OTLP_HEADERS\":{\"secretSlot\":\"otelHeaders\"},\"PATH\":{\"literal\":\"/usr/bin:/bin:/usr/sbin:/sbin\"},\"TMPDIR\":{\"slot\":\"tmpDir\"}},\"negativeProbeIds\":[\"classifier-no-login-shell\",\"classifier-no-network\",\"classifier-no-subagents\",\"classifier-no-write\",\"classifier-prompt-cannot-enable-feature\",\"classifier-source-tree-unchanged\",\"classifier-strict-unknown-config\"],\"permissionProfileId\":\"codex-smart-classifier\",\"resultSchemaId\":\"boundary-result-v1\",\"role\":\"classifier\",\"sandboxMode\":\"read-only\",\"schemaVersion\":1}",
+      "fingerprint": "2279f006e7885a4526400d0fb87a0ca7718449a9489b88143e81409bfafaaca0"
+    },
+    {
+      "name": "reader",
+      "profile": {
+        "schemaVersion": 1,
+        "contractVersion": "codex-child-profile-v1",
+        "role": "reader",
+        "permissionProfileId": "codex-smart-reader",
+        "sandboxMode": "read-only",
+        "resultSchemaId": "reader-result-v1",
+        "argvTemplate": [
+          {
+            "slot": "snapshotPath",
+            "prefix": "",
+            "encoding": "raw"
+          },
+          {
+            "literal": "exec"
+          },
+          {
+            "literal": "--ignore-user-config"
+          },
+          {
+            "literal": "--ignore-rules"
+          },
+          {
+            "literal": "--strict-config"
+          },
+          {
+            "literal": "--ephemeral"
+          },
+          {
+            "literal": "--json"
+          },
+          {
+            "literal": "--skip-git-repo-check"
+          },
+          {
+            "literal": "--model"
+          },
+          {
+            "slot": "model",
+            "prefix": "",
+            "encoding": "raw"
+          },
+          {
+            "literal": "-C"
+          },
+          {
+            "slot": "workDir",
+            "prefix": "",
+            "encoding": "raw"
+          },
+          {
+            "literal": "--output-schema"
+          },
+          {
+            "slot": "resultSchemaPath",
+            "prefix": "",
+            "encoding": "raw"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "slot": "reasoningEffort",
+            "prefix": "model_reasoning_effort=",
+            "encoding": "json-string"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "approval_policy=\"never\""
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "default_permissions=\"codex-smart-reader\""
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "project_root_markers=[]"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "project_doc_max_bytes=0"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "shell_environment_policy.inherit=\"none\""
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "slot": "shellEnvironmentSet",
+            "prefix": "shell_environment_policy.set=",
+            "encoding": "canonical-json"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "allow_login_shell=false"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "agents.max_threads=1"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "agents.max_depth=1"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "web_search=\"disabled\""
+          }
+        ],
+        "environmentTemplate": {
+          "CODEX_ADAPTIVE_CHILD": {
+            "literal": "1"
+          },
+          "CODEX_ADAPTIVE_SNAPSHOT_ROOT": {
+            "slot": "snapshotRoot"
+          },
+          "CODEX_HOME": {
+            "slot": "codexHome"
+          },
+          "CODEX_SQLITE_HOME": {
+            "slot": "codexSqliteHome"
+          },
+          "HOME": {
+            "slot": "home"
+          },
+          "LANG": {
+            "literal": "C"
+          },
+          "LC_ALL": {
+            "literal": "C"
+          },
+          "NO_COLOR": {
+            "literal": "1"
+          },
+          "PATH": {
+            "literal": "/usr/bin:/bin:/usr/sbin:/sbin"
+          },
+          "TMPDIR": {
+            "slot": "tmpDir"
+          },
+          "OTEL_EXPORTER_OTLP_ENDPOINT": {
+            "slot": "otelEndpoint"
+          },
+          "OTEL_EXPORTER_OTLP_HEADERS": {
+            "secretSlot": "otelHeaders"
+          }
+        },
+        "disabledFeatures": [
+          "apps",
+          "browser_use",
+          "browser_use_external",
+          "browser_use_full_cdp_access",
+          "computer_use",
+          "enable_fanout",
+          "enable_mcp_apps",
+          "hooks",
+          "in_app_browser",
+          "memories",
+          "multi_agent",
+          "multi_agent_v2",
+          "plugins",
+          "remote_plugin",
+          "shell_snapshot",
+          "skill_mcp_dependency_install",
+          "workspace_dependencies"
+        ],
+        "negativeProbeIds": [
+          "reader-no-login-shell",
+          "reader-no-network",
+          "reader-no-subagents",
+          "reader-no-write",
+          "reader-prompt-cannot-enable-feature",
+          "reader-source-tree-unchanged",
+          "reader-strict-unknown-config"
+        ]
+      },
+      "canonicalUtf8": "{\"argvTemplate\":[{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"snapshotPath\"},{\"literal\":\"exec\"},{\"literal\":\"--ignore-user-config\"},{\"literal\":\"--ignore-rules\"},{\"literal\":\"--strict-config\"},{\"literal\":\"--ephemeral\"},{\"literal\":\"--json\"},{\"literal\":\"--skip-git-repo-check\"},{\"literal\":\"--model\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"model\"},{\"literal\":\"-C\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"workDir\"},{\"literal\":\"--output-schema\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"resultSchemaPath\"},{\"literal\":\"-c\"},{\"encoding\":\"json-string\",\"prefix\":\"model_reasoning_effort=\",\"slot\":\"reasoningEffort\"},{\"literal\":\"-c\"},{\"literal\":\"approval_policy=\\\"never\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"default_permissions=\\\"codex-smart-reader\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"project_root_markers=[]\"},{\"literal\":\"-c\"},{\"literal\":\"project_doc_max_bytes=0\"},{\"literal\":\"-c\"},{\"literal\":\"shell_environment_policy.inherit=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"canonical-json\",\"prefix\":\"shell_environment_policy.set=\",\"slot\":\"shellEnvironmentSet\"},{\"literal\":\"-c\"},{\"literal\":\"allow_login_shell=false\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_threads=1\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_depth=1\"},{\"literal\":\"-c\"},{\"literal\":\"web_search=\\\"disabled\\\"\"}],\"contractVersion\":\"codex-child-profile-v1\",\"disabledFeatures\":[\"apps\",\"browser_use\",\"browser_use_external\",\"browser_use_full_cdp_access\",\"computer_use\",\"enable_fanout\",\"enable_mcp_apps\",\"hooks\",\"in_app_browser\",\"memories\",\"multi_agent\",\"multi_agent_v2\",\"plugins\",\"remote_plugin\",\"shell_snapshot\",\"skill_mcp_dependency_install\",\"workspace_dependencies\"],\"environmentTemplate\":{\"CODEX_ADAPTIVE_CHILD\":{\"literal\":\"1\"},\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":{\"slot\":\"snapshotRoot\"},\"CODEX_HOME\":{\"slot\":\"codexHome\"},\"CODEX_SQLITE_HOME\":{\"slot\":\"codexSqliteHome\"},\"HOME\":{\"slot\":\"home\"},\"LANG\":{\"literal\":\"C\"},\"LC_ALL\":{\"literal\":\"C\"},\"NO_COLOR\":{\"literal\":\"1\"},\"OTEL_EXPORTER_OTLP_ENDPOINT\":{\"slot\":\"otelEndpoint\"},\"OTEL_EXPORTER_OTLP_HEADERS\":{\"secretSlot\":\"otelHeaders\"},\"PATH\":{\"literal\":\"/usr/bin:/bin:/usr/sbin:/sbin\"},\"TMPDIR\":{\"slot\":\"tmpDir\"}},\"negativeProbeIds\":[\"reader-no-login-shell\",\"reader-no-network\",\"reader-no-subagents\",\"reader-no-write\",\"reader-prompt-cannot-enable-feature\",\"reader-source-tree-unchanged\",\"reader-strict-unknown-config\"],\"permissionProfileId\":\"codex-smart-reader\",\"resultSchemaId\":\"reader-result-v1\",\"role\":\"reader\",\"sandboxMode\":\"read-only\",\"schemaVersion\":1}",
+      "fingerprint": "5e8b319872a53e0c59f49afb794228c2808c2273755f40e412c0a39f6a76ca5d"
+    },
+    {
+      "name": "writer",
+      "profile": {
+        "schemaVersion": 1,
+        "contractVersion": "codex-child-profile-v1",
+        "role": "writer",
+        "permissionProfileId": "codex-smart-writer",
+        "sandboxMode": "workspace-write",
+        "resultSchemaId": "writer-result-v1",
+        "argvTemplate": [
+          {
+            "slot": "snapshotPath",
+            "prefix": "",
+            "encoding": "raw"
+          },
+          {
+            "literal": "exec"
+          },
+          {
+            "literal": "--ignore-user-config"
+          },
+          {
+            "literal": "--ignore-rules"
+          },
+          {
+            "literal": "--strict-config"
+          },
+          {
+            "literal": "--ephemeral"
+          },
+          {
+            "literal": "--json"
+          },
+          {
+            "literal": "--skip-git-repo-check"
+          },
+          {
+            "literal": "--model"
+          },
+          {
+            "slot": "model",
+            "prefix": "",
+            "encoding": "raw"
+          },
+          {
+            "literal": "-C"
+          },
+          {
+            "slot": "workDir",
+            "prefix": "",
+            "encoding": "raw"
+          },
+          {
+            "literal": "--output-schema"
+          },
+          {
+            "slot": "resultSchemaPath",
+            "prefix": "",
+            "encoding": "raw"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "slot": "reasoningEffort",
+            "prefix": "model_reasoning_effort=",
+            "encoding": "json-string"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "approval_policy=\"never\""
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "default_permissions=\"codex-smart-writer\""
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "project_root_markers=[]"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "project_doc_max_bytes=0"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "shell_environment_policy.inherit=\"none\""
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "slot": "shellEnvironmentSet",
+            "prefix": "shell_environment_policy.set=",
+            "encoding": "canonical-json"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "allow_login_shell=false"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "agents.max_threads=1"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "agents.max_depth=1"
+          },
+          {
+            "literal": "-c"
+          },
+          {
+            "literal": "web_search=\"disabled\""
+          }
+        ],
+        "environmentTemplate": {
+          "CODEX_ADAPTIVE_CHILD": {
+            "literal": "1"
+          },
+          "CODEX_ADAPTIVE_SNAPSHOT_ROOT": {
+            "slot": "snapshotRoot"
+          },
+          "CODEX_HOME": {
+            "slot": "codexHome"
+          },
+          "CODEX_SQLITE_HOME": {
+            "slot": "codexSqliteHome"
+          },
+          "HOME": {
+            "slot": "home"
+          },
+          "LANG": {
+            "literal": "C"
+          },
+          "LC_ALL": {
+            "literal": "C"
+          },
+          "NO_COLOR": {
+            "literal": "1"
+          },
+          "PATH": {
+            "literal": "/usr/bin:/bin:/usr/sbin:/sbin"
+          },
+          "TMPDIR": {
+            "slot": "tmpDir"
+          },
+          "CODEX_ADAPTIVE_WORKSPACE_ROOT": {
+            "slot": "workspaceRoot"
+          },
+          "OTEL_EXPORTER_OTLP_ENDPOINT": {
+            "slot": "otelEndpoint"
+          },
+          "OTEL_EXPORTER_OTLP_HEADERS": {
+            "secretSlot": "otelHeaders"
+          }
+        },
+        "disabledFeatures": [
+          "apps",
+          "browser_use",
+          "browser_use_external",
+          "browser_use_full_cdp_access",
+          "computer_use",
+          "enable_fanout",
+          "enable_mcp_apps",
+          "hooks",
+          "in_app_browser",
+          "memories",
+          "multi_agent",
+          "multi_agent_v2",
+          "plugins",
+          "remote_plugin",
+          "shell_snapshot",
+          "skill_mcp_dependency_install",
+          "workspace_dependencies"
+        ],
+        "negativeProbeIds": [
+          "writer-no-login-shell",
+          "writer-no-network",
+          "writer-no-subagents",
+          "writer-no-write-outside-quarantine",
+          "writer-prompt-cannot-enable-feature",
+          "writer-source-tree-unchanged",
+          "writer-strict-unknown-config"
+        ]
+      },
+      "canonicalUtf8": "{\"argvTemplate\":[{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"snapshotPath\"},{\"literal\":\"exec\"},{\"literal\":\"--ignore-user-config\"},{\"literal\":\"--ignore-rules\"},{\"literal\":\"--strict-config\"},{\"literal\":\"--ephemeral\"},{\"literal\":\"--json\"},{\"literal\":\"--skip-git-repo-check\"},{\"literal\":\"--model\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"model\"},{\"literal\":\"-C\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"workDir\"},{\"literal\":\"--output-schema\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"resultSchemaPath\"},{\"literal\":\"-c\"},{\"encoding\":\"json-string\",\"prefix\":\"model_reasoning_effort=\",\"slot\":\"reasoningEffort\"},{\"literal\":\"-c\"},{\"literal\":\"approval_policy=\\\"never\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"default_permissions=\\\"codex-smart-writer\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"project_root_markers=[]\"},{\"literal\":\"-c\"},{\"literal\":\"project_doc_max_bytes=0\"},{\"literal\":\"-c\"},{\"literal\":\"shell_environment_policy.inherit=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"canonical-json\",\"prefix\":\"shell_environment_policy.set=\",\"slot\":\"shellEnvironmentSet\"},{\"literal\":\"-c\"},{\"literal\":\"allow_login_shell=false\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_threads=1\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_depth=1\"},{\"literal\":\"-c\"},{\"literal\":\"web_search=\\\"disabled\\\"\"}],\"contractVersion\":\"codex-child-profile-v1\",\"disabledFeatures\":[\"apps\",\"browser_use\",\"browser_use_external\",\"browser_use_full_cdp_access\",\"computer_use\",\"enable_fanout\",\"enable_mcp_apps\",\"hooks\",\"in_app_browser\",\"memories\",\"multi_agent\",\"multi_agent_v2\",\"plugins\",\"remote_plugin\",\"shell_snapshot\",\"skill_mcp_dependency_install\",\"workspace_dependencies\"],\"environmentTemplate\":{\"CODEX_ADAPTIVE_CHILD\":{\"literal\":\"1\"},\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":{\"slot\":\"snapshotRoot\"},\"CODEX_ADAPTIVE_WORKSPACE_ROOT\":{\"slot\":\"workspaceRoot\"},\"CODEX_HOME\":{\"slot\":\"codexHome\"},\"CODEX_SQLITE_HOME\":{\"slot\":\"codexSqliteHome\"},\"HOME\":{\"slot\":\"home\"},\"LANG\":{\"literal\":\"C\"},\"LC_ALL\":{\"literal\":\"C\"},\"NO_COLOR\":{\"literal\":\"1\"},\"OTEL_EXPORTER_OTLP_ENDPOINT\":{\"slot\":\"otelEndpoint\"},\"OTEL_EXPORTER_OTLP_HEADERS\":{\"secretSlot\":\"otelHeaders\"},\"PATH\":{\"literal\":\"/usr/bin:/bin:/usr/sbin:/sbin\"},\"TMPDIR\":{\"slot\":\"tmpDir\"}},\"negativeProbeIds\":[\"writer-no-login-shell\",\"writer-no-network\",\"writer-no-subagents\",\"writer-no-write-outside-quarantine\",\"writer-prompt-cannot-enable-feature\",\"writer-source-tree-unchanged\",\"writer-strict-unknown-config\"],\"permissionProfileId\":\"codex-smart-writer\",\"resultSchemaId\":\"writer-result-v1\",\"role\":\"writer\",\"sandboxMode\":\"workspace-write\",\"schemaVersion\":1}",
+      "fingerprint": "6fc2875d32c21d9bf93eaff59569555231a1765a284d75baf574347f4533cc62"
+    }
+  ],
+  "concreteLaunch": {
+    "schemaRef": "child-profile-v1.schema.json#/$defs/launchBinding",
+    "trustedContextSchemaRef": "child-profile-v1.schema.json#/$defs/trustedLaunchContext",
+    "profileResolution": "InterfaceEvidence.semantic.childProfiles[role]",
+    "shellEnvironmentSetProjection": "all nonSecretEnvironment entries in canonical-json-v1 order; OTEL_EXPORTER_OTLP_HEADERS is forbidden",
+    "positiveRoles": {
+      "classifier": {
+        "trustedContext": {
+          "schemaVersion": 1,
+          "contractVersion": "codex-trusted-launch-context-v1",
+          "role": "classifier",
+          "compatibilityFingerprint": "de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e",
+          "selectedPair": {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          "resultSchemaPath": "/private/schemas/boundary-result-v1.schema.json",
+          "workDir": "/private/work",
+          "environmentSlotValues": {
+            "snapshotRoot": "/private/snapshot-root",
+            "codexHome": "/private/codex-home",
+            "codexSqliteHome": "/private/sqlite-home",
+            "home": "/private/home",
+            "tmpDir": "/private/tmp",
+            "otelEndpoint": "http://127.0.0.1:4318/fixture"
+          },
+          "secretSlotFingerprints": {
+            "otelHeaders": "85ca20bbb5920a133e51b3d08c1079445ecb9fc4b40b328a3e73f1efbc34b36c"
+          }
+        },
+        "binding": {
+          "schemaVersion": 1,
+          "contractVersion": "codex-child-launch-v1",
+          "role": "classifier",
+          "compatibilityFingerprint": "de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e",
+          "arguments": {
+            "snapshotPath": "/private/codex",
+            "model": "gpt-5.6-luna",
+            "workDir": "/private/work",
+            "resultSchemaPath": "/private/schemas/boundary-result-v1.schema.json",
+            "reasoningEffort": "medium"
+          },
+          "concreteArgv": [
+            "/private/codex",
+            "exec",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--strict-config",
+            "--ephemeral",
+            "--json",
+            "--skip-git-repo-check",
+            "--model",
+            "gpt-5.6-luna",
+            "-C",
+            "/private/work",
+            "--output-schema",
+            "/private/schemas/boundary-result-v1.schema.json",
+            "-c",
+            "model_reasoning_effort=\"medium\"",
+            "-c",
+            "approval_policy=\"never\"",
+            "-c",
+            "default_permissions=\"codex-smart-classifier\"",
+            "-c",
+            "project_root_markers=[]",
+            "-c",
+            "project_doc_max_bytes=0",
+            "-c",
+            "shell_environment_policy.inherit=\"none\"",
+            "-c",
+            "shell_environment_policy.set={\"CODEX_ADAPTIVE_CHILD\":\"1\",\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":\"/private/snapshot-root\",\"CODEX_HOME\":\"/private/codex-home\",\"CODEX_SQLITE_HOME\":\"/private/sqlite-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"OTEL_EXPORTER_OTLP_ENDPOINT\":\"http://127.0.0.1:4318/fixture\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"}",
+            "-c",
+            "allow_login_shell=false",
+            "-c",
+            "agents.max_threads=1",
+            "-c",
+            "agents.max_depth=1",
+            "-c",
+            "web_search=\"disabled\"",
+            "--disable",
+            "apps",
+            "--disable",
+            "auth_elicitation",
+            "--disable",
+            "browser_use",
+            "--disable",
+            "browser_use_external",
+            "--disable",
+            "browser_use_full_cdp_access",
+            "--disable",
+            "code_mode_host",
+            "--disable",
+            "computer_use",
+            "--disable",
+            "enable_fanout",
+            "--disable",
+            "enable_mcp_apps",
+            "--disable",
+            "goals",
+            "--disable",
+            "hooks",
+            "--disable",
+            "image_generation",
+            "--disable",
+            "in_app_browser",
+            "--disable",
+            "memories",
+            "--disable",
+            "multi_agent",
+            "--disable",
+            "multi_agent_v2",
+            "--disable",
+            "plugins",
+            "--disable",
+            "remote_plugin",
+            "--disable",
+            "request_permissions_tool",
+            "--disable",
+            "shell_snapshot",
+            "--disable",
+            "shell_tool",
+            "--disable",
+            "skill_mcp_dependency_install",
+            "--disable",
+            "tool_call_mcp_elicitation",
+            "--disable",
+            "tool_suggest",
+            "--disable",
+            "unified_exec",
+            "--disable",
+            "workspace_dependencies"
+          ],
+          "nonSecretEnvironment": {
+            "CODEX_ADAPTIVE_CHILD": "1",
+            "CODEX_ADAPTIVE_SNAPSHOT_ROOT": "/private/snapshot-root",
+            "CODEX_HOME": "/private/codex-home",
+            "CODEX_SQLITE_HOME": "/private/sqlite-home",
+            "HOME": "/private/home",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "NO_COLOR": "1",
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "TMPDIR": "/private/tmp",
+            "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318/fixture"
+          },
+          "argvFingerprint": "4de36f964ec1b578fd3b75ed9a41da645040ab10786c0a1cad8dbae12a579cc8",
+          "environmentFingerprint": "7d6517765e832554ef5655f5daede4cd91dd8c248387596f191bf2c0a18488a9",
+          "secretSha256": "85ca20bbb5920a133e51b3d08c1079445ecb9fc4b40b328a3e73f1efbc34b36c"
+        }
+      },
+      "reader": {
+        "trustedContext": {
+          "schemaVersion": 1,
+          "contractVersion": "codex-trusted-launch-context-v1",
+          "role": "reader",
+          "compatibilityFingerprint": "de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e",
+          "selectedPair": {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          "resultSchemaPath": "/private/schemas/reader-result-v1.schema.json",
+          "workDir": "/private/work",
+          "environmentSlotValues": {
+            "snapshotRoot": "/private/snapshot-root",
+            "codexHome": "/private/codex-home",
+            "codexSqliteHome": "/private/sqlite-home",
+            "home": "/private/home",
+            "tmpDir": "/private/tmp",
+            "otelEndpoint": "http://127.0.0.1:4318/fixture"
+          },
+          "secretSlotFingerprints": {
+            "otelHeaders": "85ca20bbb5920a133e51b3d08c1079445ecb9fc4b40b328a3e73f1efbc34b36c"
+          }
+        },
+        "binding": {
+          "schemaVersion": 1,
+          "contractVersion": "codex-child-launch-v1",
+          "role": "reader",
+          "compatibilityFingerprint": "de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e",
+          "arguments": {
+            "snapshotPath": "/private/codex",
+            "model": "gpt-5.6-luna",
+            "workDir": "/private/work",
+            "resultSchemaPath": "/private/schemas/reader-result-v1.schema.json",
+            "reasoningEffort": "medium"
+          },
+          "concreteArgv": [
+            "/private/codex",
+            "exec",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--strict-config",
+            "--ephemeral",
+            "--json",
+            "--skip-git-repo-check",
+            "--model",
+            "gpt-5.6-luna",
+            "-C",
+            "/private/work",
+            "--output-schema",
+            "/private/schemas/reader-result-v1.schema.json",
+            "-c",
+            "model_reasoning_effort=\"medium\"",
+            "-c",
+            "approval_policy=\"never\"",
+            "-c",
+            "default_permissions=\"codex-smart-reader\"",
+            "-c",
+            "project_root_markers=[]",
+            "-c",
+            "project_doc_max_bytes=0",
+            "-c",
+            "shell_environment_policy.inherit=\"none\"",
+            "-c",
+            "shell_environment_policy.set={\"CODEX_ADAPTIVE_CHILD\":\"1\",\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":\"/private/snapshot-root\",\"CODEX_HOME\":\"/private/codex-home\",\"CODEX_SQLITE_HOME\":\"/private/sqlite-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"OTEL_EXPORTER_OTLP_ENDPOINT\":\"http://127.0.0.1:4318/fixture\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"}",
+            "-c",
+            "allow_login_shell=false",
+            "-c",
+            "agents.max_threads=1",
+            "-c",
+            "agents.max_depth=1",
+            "-c",
+            "web_search=\"disabled\"",
+            "--disable",
+            "apps",
+            "--disable",
+            "browser_use",
+            "--disable",
+            "browser_use_external",
+            "--disable",
+            "browser_use_full_cdp_access",
+            "--disable",
+            "computer_use",
+            "--disable",
+            "enable_fanout",
+            "--disable",
+            "enable_mcp_apps",
+            "--disable",
+            "hooks",
+            "--disable",
+            "in_app_browser",
+            "--disable",
+            "memories",
+            "--disable",
+            "multi_agent",
+            "--disable",
+            "multi_agent_v2",
+            "--disable",
+            "plugins",
+            "--disable",
+            "remote_plugin",
+            "--disable",
+            "shell_snapshot",
+            "--disable",
+            "skill_mcp_dependency_install",
+            "--disable",
+            "workspace_dependencies"
+          ],
+          "nonSecretEnvironment": {
+            "CODEX_ADAPTIVE_CHILD": "1",
+            "CODEX_ADAPTIVE_SNAPSHOT_ROOT": "/private/snapshot-root",
+            "CODEX_HOME": "/private/codex-home",
+            "CODEX_SQLITE_HOME": "/private/sqlite-home",
+            "HOME": "/private/home",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "NO_COLOR": "1",
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "TMPDIR": "/private/tmp",
+            "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318/fixture"
+          },
+          "argvFingerprint": "c50821e314ce88afa22963cc1856a4124f4df50cd487fbbb0510ad9663b3de9c",
+          "environmentFingerprint": "7d6517765e832554ef5655f5daede4cd91dd8c248387596f191bf2c0a18488a9",
+          "secretSha256": "85ca20bbb5920a133e51b3d08c1079445ecb9fc4b40b328a3e73f1efbc34b36c"
+        }
+      },
+      "writer": {
+        "trustedContext": {
+          "schemaVersion": 1,
+          "contractVersion": "codex-trusted-launch-context-v1",
+          "role": "writer",
+          "compatibilityFingerprint": "de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e",
+          "selectedPair": {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          "resultSchemaPath": "/private/schemas/writer-result-v1.schema.json",
+          "workDir": "/private/work",
+          "environmentSlotValues": {
+            "snapshotRoot": "/private/snapshot-root",
+            "codexHome": "/private/codex-home",
+            "codexSqliteHome": "/private/sqlite-home",
+            "home": "/private/home",
+            "tmpDir": "/private/tmp",
+            "otelEndpoint": "http://127.0.0.1:4318/fixture",
+            "workspaceRoot": "/private/workspace"
+          },
+          "secretSlotFingerprints": {
+            "otelHeaders": "85ca20bbb5920a133e51b3d08c1079445ecb9fc4b40b328a3e73f1efbc34b36c"
+          }
+        },
+        "binding": {
+          "schemaVersion": 1,
+          "contractVersion": "codex-child-launch-v1",
+          "role": "writer",
+          "compatibilityFingerprint": "de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e",
+          "arguments": {
+            "snapshotPath": "/private/codex",
+            "model": "gpt-5.6-terra",
+            "workDir": "/private/work",
+            "resultSchemaPath": "/private/schemas/writer-result-v1.schema.json",
+            "reasoningEffort": "high"
+          },
+          "concreteArgv": [
+            "/private/codex",
+            "exec",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--strict-config",
+            "--ephemeral",
+            "--json",
+            "--skip-git-repo-check",
+            "--model",
+            "gpt-5.6-terra",
+            "-C",
+            "/private/work",
+            "--output-schema",
+            "/private/schemas/writer-result-v1.schema.json",
+            "-c",
+            "model_reasoning_effort=\"high\"",
+            "-c",
+            "approval_policy=\"never\"",
+            "-c",
+            "default_permissions=\"codex-smart-writer\"",
+            "-c",
+            "project_root_markers=[]",
+            "-c",
+            "project_doc_max_bytes=0",
+            "-c",
+            "shell_environment_policy.inherit=\"none\"",
+            "-c",
+            "shell_environment_policy.set={\"CODEX_ADAPTIVE_CHILD\":\"1\",\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":\"/private/snapshot-root\",\"CODEX_ADAPTIVE_WORKSPACE_ROOT\":\"/private/workspace\",\"CODEX_HOME\":\"/private/codex-home\",\"CODEX_SQLITE_HOME\":\"/private/sqlite-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"OTEL_EXPORTER_OTLP_ENDPOINT\":\"http://127.0.0.1:4318/fixture\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"}",
+            "-c",
+            "allow_login_shell=false",
+            "-c",
+            "agents.max_threads=1",
+            "-c",
+            "agents.max_depth=1",
+            "-c",
+            "web_search=\"disabled\"",
+            "--disable",
+            "apps",
+            "--disable",
+            "browser_use",
+            "--disable",
+            "browser_use_external",
+            "--disable",
+            "browser_use_full_cdp_access",
+            "--disable",
+            "computer_use",
+            "--disable",
+            "enable_fanout",
+            "--disable",
+            "enable_mcp_apps",
+            "--disable",
+            "hooks",
+            "--disable",
+            "in_app_browser",
+            "--disable",
+            "memories",
+            "--disable",
+            "multi_agent",
+            "--disable",
+            "multi_agent_v2",
+            "--disable",
+            "plugins",
+            "--disable",
+            "remote_plugin",
+            "--disable",
+            "shell_snapshot",
+            "--disable",
+            "skill_mcp_dependency_install",
+            "--disable",
+            "workspace_dependencies"
+          ],
+          "nonSecretEnvironment": {
+            "CODEX_ADAPTIVE_CHILD": "1",
+            "CODEX_ADAPTIVE_SNAPSHOT_ROOT": "/private/snapshot-root",
+            "CODEX_HOME": "/private/codex-home",
+            "CODEX_SQLITE_HOME": "/private/sqlite-home",
+            "HOME": "/private/home",
+            "LANG": "C",
+            "LC_ALL": "C",
+            "NO_COLOR": "1",
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "TMPDIR": "/private/tmp",
+            "CODEX_ADAPTIVE_WORKSPACE_ROOT": "/private/workspace",
+            "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318/fixture"
+          },
+          "argvFingerprint": "004bc7c211ac481fb4f4853be214cbc57ca570bffbffc7264cbe23c028f2fed2",
+          "environmentFingerprint": "3fd5586f502caf82c047d5f84f79f02d0833b119acd70b632c4d7d0e6b22e712",
+          "secretSha256": "85ca20bbb5920a133e51b3d08c1079445ecb9fc4b40b328a3e73f1efbc34b36c"
+        }
+      }
+    },
+    "projectionRules": {
+      "argvFingerprint": "domain(argvDomain, canonical-json-v1(concreteArgv))",
+      "environmentFingerprint": "domain(environmentDomain, canonical-json-v1({variables:nonSecretEnvironment,secretBindings:{OTEL_EXPORTER_OTLP_HEADERS:secretSha256}}))",
+      "secretSha256": "domain(secretDomain, utf8(secret)); raw secret is never stored",
+      "profileMatch": "resolve role through InterfaceEvidence.semantic.childProfiles, materialize that exact profile, append exact disable pairs, compare concreteArgv byte-for-byte"
+    }
+  },
+  "negativeCases": [
+    {
+      "name": "profile-argv-reordered",
+      "target": "profile:reader",
+      "mutation": {
+        "kind": "swap-array-items",
+        "pointer": "/argvTemplate",
+        "first": 1,
+        "second": 2
+      },
+      "expected": "profile-schema-invalid"
+    },
+    {
+      "name": "profile-required-argument-removed",
+      "target": "profile:reader",
+      "mutation": {
+        "kind": "remove-array-item",
+        "pointer": "/argvTemplate",
+        "index": 4
+      },
+      "expected": "profile-schema-invalid"
+    },
+    {
+      "name": "profile-dangerous-argument-added",
+      "target": "profile:reader",
+      "mutation": {
+        "kind": "append-array-item",
+        "pointer": "/argvTemplate",
+        "value": {
+          "literal": "--dangerously-bypass-approvals-and-sandbox"
+        }
+      },
+      "expected": "profile-schema-invalid"
+    },
+    {
+      "name": "profile-disabled-features-changed",
+      "target": "profile:reader",
+      "mutation": {
+        "kind": "append-array-item",
+        "pointer": "/disabledFeatures",
+        "value": "future_feature"
+      },
+      "expected": "profile-schema-invalid"
+    },
+    {
+      "name": "profile-negative-probe-id-changed",
+      "target": "profile:reader",
+      "mutation": {
+        "kind": "append-array-item",
+        "pointer": "/negativeProbeIds",
+        "value": "future-probe"
+      },
+      "expected": "profile-schema-invalid"
+    },
+    {
+      "name": "secret-injected-into-shell-environment-set",
+      "target": "concreteLaunch.positiveRoles.reader.binding",
+      "mutation": {
+        "kind": "add-shell-environment-key",
+        "key": "OTEL_EXPORTER_OTLP_HEADERS",
+        "value": "forbidden"
+      },
+      "expected": "profile-resolution-invalid"
+    },
+    {
+      "name": "secret-added-to-non-secret-environment",
+      "target": "concreteLaunch.positiveRoles.reader.binding",
+      "mutation": {
+        "kind": "add",
+        "pointer": "/nonSecretEnvironment/OTEL_EXPORTER_OTLP_HEADERS",
+        "value": "forbidden"
+      },
+      "expected": "launch-schema-invalid"
+    },
+    {
+      "name": "role-changed-with-reader-argv",
+      "target": "concreteLaunch.positiveRoles.reader.binding",
+      "mutation": {
+        "kind": "replace",
+        "pointer": "/role",
+        "value": "classifier"
+      },
+      "expected": "profile-resolution-invalid"
+    },
+    {
+      "name": "interface-profile-reference-mismatch",
+      "target": "interface.semantic.childProfiles",
+      "mutation": {
+        "kind": "replace",
+        "pointer": "/reader",
+        "value": "2279f006e7885a4526400d0fb87a0ca7718449a9489b88143e81409bfafaaca0"
+      },
+      "expected": "profile-resolution-invalid"
+    },
+    {
+      "name": "profile-fingerprint-added-to-binding",
+      "target": "concreteLaunch.positiveRoles.reader.binding",
+      "mutation": {
+        "kind": "add",
+        "pointer": "/profileFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "launch-schema-invalid"
+    },
+    {
+      "name": "trusted-context-snapshot-path-mismatch",
+      "target": "concreteLaunch.positiveRoles.reader.binding",
+      "mutation": {
+        "kind": "replace-argument-and-rematerialize",
+        "argument": "snapshotPath",
+        "value": "/private/codex-other"
+      },
+      "rematerialized": {
+        "argvIndex": 0,
+        "argvValue": "/private/codex-other",
+        "argvFingerprint": "fb308ddce89cd05d99204dcd03d1206030556d63b260aa47decea2304b790879"
+      },
+      "expected": "launch-schema-valid-context-invalid"
+    },
+    {
+      "name": "trusted-context-model-mismatch",
+      "target": "concreteLaunch.positiveRoles.reader.binding",
+      "mutation": {
+        "kind": "replace-argument-and-rematerialize",
+        "argument": "model",
+        "value": "gpt-5.6-terra"
+      },
+      "rematerialized": {
+        "argvIndex": 9,
+        "argvValue": "gpt-5.6-terra",
+        "argvFingerprint": "98df84b7fdb4ae26d8af20bd0eb83b3fe8a68fbc8dd498d9496ee85d7b86c99f"
+      },
+      "expected": "launch-schema-valid-context-invalid"
+    },
+    {
+      "name": "trusted-context-reasoning-effort-mismatch",
+      "target": "concreteLaunch.positiveRoles.reader.binding",
+      "mutation": {
+        "kind": "replace-argument-and-rematerialize",
+        "argument": "reasoningEffort",
+        "value": "low"
+      },
+      "rematerialized": {
+        "argvIndex": 15,
+        "argvValue": "model_reasoning_effort=\"low\"",
+        "argvFingerprint": "f26ad9fa799aca2748cb72241a4761ce234a18eb3fddadb6140ded20b9a5be0c"
+      },
+      "expected": "launch-schema-valid-context-invalid"
+    },
+    {
+      "name": "trusted-context-result-schema-path-mismatch",
+      "target": "concreteLaunch.positiveRoles.reader.binding",
+      "mutation": {
+        "kind": "replace-argument-and-rematerialize",
+        "argument": "resultSchemaPath",
+        "value": "/private/schemas/reader-result-v1-copy.schema.json"
+      },
+      "rematerialized": {
+        "argvIndex": 13,
+        "argvValue": "/private/schemas/reader-result-v1-copy.schema.json",
+        "argvFingerprint": "5643f4f5256e0218ce88f8b3245a8e29cda9a49f2d8cb09c670ec8bb37b26edf"
+      },
+      "expected": "launch-schema-valid-context-invalid"
+    },
+    {
+      "name": "trusted-context-work-dir-mismatch",
+      "target": "concreteLaunch.positiveRoles.reader.binding",
+      "mutation": {
+        "kind": "replace-argument-and-rematerialize",
+        "argument": "workDir",
+        "value": "/private/other-work"
+      },
+      "rematerialized": {
+        "argvIndex": 11,
+        "argvValue": "/private/other-work",
+        "argvFingerprint": "b8ce38576be3359ec18b254e14633be52a2c7f120fecbd0c63a918c339d06d5b"
+      },
+      "expected": "launch-schema-valid-context-invalid"
+    }
+  ],
+  "environmentNegativeCases": [
+    {
+      "name": "snapshot-root-mismatch",
+      "role": "reader",
+      "kind": "regular-slot",
+      "slot": "snapshotRoot",
+      "before": "/private/snapshot-root",
+      "value": "/private/snapshot-root-other",
+      "expected": {
+        "argvFingerprint": "c532f807e9ec7fb09c9d5b8ca86f88f995b9682062ec8e0960d67dd12d42d254",
+        "environmentFingerprint": "19cf3dbe7f2e0e69b15cb8f16af0fe611795bc48feed68f68814fc410e5bd1ca",
+        "fingerprintDelta": {
+          "argvFingerprint": "changed",
+          "environmentFingerprint": "changed"
+        },
+        "verification": "trusted-context-invalid"
+      }
+    },
+    {
+      "name": "codex-home-mismatch",
+      "role": "reader",
+      "kind": "regular-slot",
+      "slot": "codexHome",
+      "before": "/private/codex-home",
+      "value": "/private/codex-home-other",
+      "expected": {
+        "argvFingerprint": "47fca985acc630845506d6a9e7659908742633ddf3ffb1a5c4f069e6ad19e579",
+        "environmentFingerprint": "167b78d283f79f4f47df3025f9cbca8f0a180123a8c0535ff887235473b52781",
+        "fingerprintDelta": {
+          "argvFingerprint": "changed",
+          "environmentFingerprint": "changed"
+        },
+        "verification": "trusted-context-invalid"
+      }
+    },
+    {
+      "name": "codex-sqlite-home-mismatch",
+      "role": "reader",
+      "kind": "regular-slot",
+      "slot": "codexSqliteHome",
+      "before": "/private/sqlite-home",
+      "value": "/private/sqlite-home-other",
+      "expected": {
+        "argvFingerprint": "57aa185e735ac1c7a23206ef89db2d7d65670b38402c32ccefc751a618ac1685",
+        "environmentFingerprint": "9a9da8cf0ff5e6781c20011f1a68ac35b655b4bfdf773f030647792040ffdda2",
+        "fingerprintDelta": {
+          "argvFingerprint": "changed",
+          "environmentFingerprint": "changed"
+        },
+        "verification": "trusted-context-invalid"
+      }
+    },
+    {
+      "name": "home-mismatch",
+      "role": "reader",
+      "kind": "regular-slot",
+      "slot": "home",
+      "before": "/private/home",
+      "value": "/private/home-other",
+      "expected": {
+        "argvFingerprint": "c51cd50f850f20da2f157689d8f1d33426712f37598f12504cb761e701d8affc",
+        "environmentFingerprint": "5ae7ec5a8094549978043fbf8dcccef3a23a6bd05ba4311bb678922c171b7cbb",
+        "fingerprintDelta": {
+          "argvFingerprint": "changed",
+          "environmentFingerprint": "changed"
+        },
+        "verification": "trusted-context-invalid"
+      }
+    },
+    {
+      "name": "tmp-dir-mismatch",
+      "role": "reader",
+      "kind": "regular-slot",
+      "slot": "tmpDir",
+      "before": "/private/tmp",
+      "value": "/private/tmp-other",
+      "expected": {
+        "argvFingerprint": "b14508d8a86319cb0fe57da1fc4225e639742c20484cce926526f4029817ce11",
+        "environmentFingerprint": "88446c7368f99f13bc698a3597c5fef1be681e8a735b8f11e2656a5ff18717a3",
+        "fingerprintDelta": {
+          "argvFingerprint": "changed",
+          "environmentFingerprint": "changed"
+        },
+        "verification": "trusted-context-invalid"
+      }
+    },
+    {
+      "name": "otel-endpoint-mismatch",
+      "role": "reader",
+      "kind": "regular-slot",
+      "slot": "otelEndpoint",
+      "before": "http://127.0.0.1:4318/fixture",
+      "value": "http://127.0.0.1:4319/fixture",
+      "expected": {
+        "argvFingerprint": "0bdc48627bf2c81289389304ad9dacf6e95a25bba1754657c847c2ae159b52ae",
+        "environmentFingerprint": "fbc62d67adc03842b4075dfd4967dd711fbdc6b243c3c9c3a61ab7cc4b13a444",
+        "fingerprintDelta": {
+          "argvFingerprint": "changed",
+          "environmentFingerprint": "changed"
+        },
+        "verification": "trusted-context-invalid"
+      }
+    },
+    {
+      "name": "workspace-root-mismatch",
+      "role": "writer",
+      "kind": "regular-slot",
+      "slot": "workspaceRoot",
+      "before": "/private/workspace",
+      "value": "/private/workspace-other",
+      "expected": {
+        "argvFingerprint": "cc0a284fd24c85953baf6ab30100844887162f1c45123422287b91fdd87fef4c",
+        "environmentFingerprint": "bc140fee82aaf445290f74a248565ee82517948aa02d39816d465f13a731ef20",
+        "fingerprintDelta": {
+          "argvFingerprint": "changed",
+          "environmentFingerprint": "changed"
+        },
+        "verification": "trusted-context-invalid"
+      }
+    },
+    {
+      "name": "otel-headers-fingerprint-mismatch",
+      "role": "reader",
+      "kind": "secret-slot-fingerprint",
+      "slot": "otelHeaders",
+      "before": "85ca20bbb5920a133e51b3d08c1079445ecb9fc4b40b328a3e73f1efbc34b36c",
+      "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "expected": {
+        "argvFingerprint": "c50821e314ce88afa22963cc1856a4124f4df50cd487fbbb0510ad9663b3de9c",
+        "environmentFingerprint": "f5f03f60b5866c30fb0b895ca5b9342f397f6e03074e5166d91a4584d3b37d90",
+        "fingerprintDelta": {
+          "argvFingerprint": "unchanged",
+          "environmentFingerprint": "changed"
+        },
+        "verification": "trusted-context-invalid"
+      }
+    }
+  ]
+}

@@ -1,0 +1,3134 @@
+{
+  "schemaVersion": 2,
+  "domain": "codex-smart/routing-policy/v2",
+  "policy": {
+    "schemaVersion": 2,
+    "contractVersion": "codex-routing-policy-v2",
+    "fingerprintDomain": "codex-smart/routing-policy/v2",
+    "coordinator": {
+      "model": "gpt-5.6-terra",
+      "reasoningEffort": "medium"
+    },
+    "factors": [
+      "q",
+      "p",
+      "v",
+      "o"
+    ],
+    "factorRange": {
+      "min": 0,
+      "max": 2
+    },
+    "scoreRange": {
+      "min": 0,
+      "max": 8
+    },
+    "tiers": [
+      {
+        "name": "luna",
+        "scoreMin": 0,
+        "scoreMax": 2,
+        "model": "gpt-5.6-luna",
+        "minimumEffort": "low"
+      },
+      {
+        "name": "terra",
+        "scoreMin": 3,
+        "scoreMax": 5,
+        "model": "gpt-5.6-terra",
+        "minimumEffort": "medium"
+      },
+      {
+        "name": "sol",
+        "scoreMin": 6,
+        "scoreMax": 8,
+        "model": "gpt-5.6-sol",
+        "minimumEffort": "high"
+      }
+    ],
+    "effortByScore": [
+      {
+        "score": 0,
+        "reasoningEffort": "low"
+      },
+      {
+        "score": 1,
+        "reasoningEffort": "low"
+      },
+      {
+        "score": 2,
+        "reasoningEffort": "medium"
+      },
+      {
+        "score": 3,
+        "reasoningEffort": "medium"
+      },
+      {
+        "score": 4,
+        "reasoningEffort": "medium"
+      },
+      {
+        "score": 5,
+        "reasoningEffort": "high"
+      },
+      {
+        "score": 6,
+        "reasoningEffort": "high"
+      },
+      {
+        "score": 7,
+        "reasoningEffort": "xhigh"
+      },
+      {
+        "score": 8,
+        "reasoningEffort": "max"
+      }
+    ],
+    "effortOrder": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "defaults": {
+      "hardFloor": "none",
+      "intervalPoint": "max",
+      "unavailablePair": "reject",
+      "reassessment": "promote-only"
+    },
+    "factorDefinitions": {
+      "resolution": {
+        "criterionStates": [
+          "false",
+          "true",
+          "unknown",
+          "conflict"
+        ],
+        "missingCriterionState": "unknown",
+        "unknownCriterionId": "reject",
+        "lowerStates": [
+          "true"
+        ],
+        "upperStates": [
+          "true",
+          "unknown",
+          "conflict"
+        ],
+        "identityValue": 0,
+        "lowerOperation": "maximum-criterion-level",
+        "upperOperation": "maximum-of-lower-and-criterion-level",
+        "selectedBound": "max"
+      },
+      "q": {
+        "meaning": "Сложность зависимых рассуждений и согласования ограничений",
+        "level0Rule": "ни один критерий уровня 1 или 2 не доказан",
+        "criteria": [
+          {
+            "id": "q1-dependent-chain",
+            "level": 1,
+            "meaning": "требуются не менее двух зависимых выводов"
+          },
+          {
+            "id": "q1-bounded-tradeoff",
+            "level": 1,
+            "meaning": "сравниваются не менее двух вариантов по не менее чем двум ограничениям внутри одной границы"
+          },
+          {
+            "id": "q2-cross-boundary-invariant",
+            "level": 2,
+            "meaning": "нужно сохранить инвариант через две или более границы"
+          },
+          {
+            "id": "q2-adversarial-concurrency",
+            "level": 2,
+            "meaning": "нужен контрпример для безопасности, доверия, конкурентности, атомарности, восстановления или отката"
+          },
+          {
+            "id": "q2-conflict-synthesis",
+            "level": 2,
+            "meaning": "нужно разрешить конфликт доказательств или нормативных требований"
+          }
+        ]
+      },
+      "p": {
+        "meaning": "Размер адресуемой работы, число границ и независимых потоков",
+        "unitDefinitions": {
+          "scopeUnit": "отдельно адресуемый файл, схема, страница, набор данных, результат команды или выход",
+          "workUnit": "одно независимо проверяемое изменение или исследование",
+          "boundary": "репозиторий, независимо развёртываемый процесс, внешний сервис или учётная среда",
+          "workstream": "независимая ветвь работы до общего синтеза"
+        },
+        "level0Rule": "scopeUnits<=1 и workUnits<=1 и boundaries<=1 и workstreams<=1",
+        "criteria": [
+          {
+            "id": "p1-scope-2-to-5",
+            "level": 1,
+            "meaning": "max(scopeUnits,workUnits) от 2 до 5 при одной границе и одном потоке"
+          },
+          {
+            "id": "p2-scope-6-plus",
+            "level": 2,
+            "meaning": "scopeUnits или workUnits не менее 6"
+          },
+          {
+            "id": "p2-boundaries-2-plus",
+            "level": 2,
+            "meaning": "границ не менее 2"
+          },
+          {
+            "id": "p2-workstreams-2-plus",
+            "level": 2,
+            "meaning": "независимых потоков не менее 2"
+          }
+        ]
+      },
+      "v": {
+        "meaning": "Цена ошибки и сила требуемого доказательства отката",
+        "level0Rule": "только чтение, совет или удаляемый временный результат без внешнего последствия",
+        "criteria": [
+          {
+            "id": "v1-reversible-persistent",
+            "level": 1,
+            "meaning": "изменяется сохраняемое состояние с доказанным откатом"
+          },
+          {
+            "id": "v1-user-visible-isolated",
+            "level": 1,
+            "meaning": "есть изолированное видимое пользователю изменение"
+          },
+          {
+            "id": "v2-shared-or-production",
+            "level": 2,
+            "meaning": "затрагивается совместное или производственное состояние"
+          },
+          {
+            "id": "v2-destructive-or-unproven-rollback",
+            "level": 2,
+            "meaning": "действие разрушительно либо откат не доказан"
+          },
+          {
+            "id": "v2-trust-secret-permission",
+            "level": 2,
+            "meaning": "затрагиваются доверие, секреты или разрешения"
+          },
+          {
+            "id": "v2-high-stakes",
+            "level": 2,
+            "meaning": "ошибка имеет медицинские, юридические, финансовые или иные критические последствия"
+          },
+          {
+            "id": "v2-release-or-migration",
+            "level": 2,
+            "meaning": "выполняется выпуск, публикация или миграция"
+          }
+        ]
+      },
+      "o": {
+        "meaning": "Неопределённость, изменчивость и согласованность доказательств",
+        "level0Rule": "все обязательные факты подтверждены, воспроизводимы и согласованы",
+        "criteria": [
+          {
+            "id": "o1-discoverable-missing-fact",
+            "level": 1,
+            "meaning": "недостающий факт можно получить безопасным чтением"
+          },
+          {
+            "id": "o1-mutable-current-state",
+            "level": 1,
+            "meaning": "решение зависит от изменяемого текущего состояния"
+          },
+          {
+            "id": "o1-explicit-reversible-assumption",
+            "level": 1,
+            "meaning": "нужна явно отмеченная обратимая гипотеза"
+          },
+          {
+            "id": "o2-authority-conflict",
+            "level": 2,
+            "meaning": "источники полномочий или требования конфликтуют"
+          },
+          {
+            "id": "o2-undiscoverable-required-fact",
+            "level": 2,
+            "meaning": "обязательный факт недоступен либо требует решения владельца"
+          },
+          {
+            "id": "o2-unreproducible-conflict",
+            "level": 2,
+            "meaning": "конфликт доказательств нельзя воспроизвести и разрешить чтением"
+          },
+          {
+            "id": "o2-uncontracted-interface",
+            "level": 2,
+            "meaning": "решение зависит от незафиксированного интерфейса"
+          }
+        ]
+      }
+    },
+    "hardFloorDefinitions": {
+      "selection": "highest-triggered",
+      "unknownReason": "reject",
+      "levels": [
+        {
+          "name": "none",
+          "minimumTier": "luna",
+          "reasons": []
+        },
+        {
+          "name": "terra",
+          "minimumTier": "terra",
+          "reasons": [
+            "architecture-decision",
+            "public-contract",
+            "risky-migration",
+            "security-sensitive"
+          ]
+        },
+        {
+          "name": "sol",
+          "minimumTier": "sol",
+          "reasons": [
+            "critical-incident",
+            "final-author-review-before-publish",
+            "irreversible-action",
+            "rollback-unproven"
+          ]
+        }
+      ]
+    },
+    "allowedPairs": [
+      {
+        "model": "gpt-5.6-luna",
+        "reasoningEffort": "low"
+      },
+      {
+        "model": "gpt-5.6-luna",
+        "reasoningEffort": "medium"
+      },
+      {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      },
+      {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "high"
+      },
+      {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high"
+      },
+      {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "xhigh"
+      },
+      {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "max"
+      }
+    ]
+  },
+  "canonicalUtf8": "{\"allowedPairs\":[{\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"low\"},{\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"medium\"},{\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":\"medium\"},{\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":\"high\"},{\"model\":\"gpt-5.6-sol\",\"reasoningEffort\":\"high\"},{\"model\":\"gpt-5.6-sol\",\"reasoningEffort\":\"xhigh\"},{\"model\":\"gpt-5.6-sol\",\"reasoningEffort\":\"max\"}],\"contractVersion\":\"codex-routing-policy-v2\",\"coordinator\":{\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":\"medium\"},\"defaults\":{\"hardFloor\":\"none\",\"intervalPoint\":\"max\",\"reassessment\":\"promote-only\",\"unavailablePair\":\"reject\"},\"effortByScore\":[{\"reasoningEffort\":\"low\",\"score\":0},{\"reasoningEffort\":\"low\",\"score\":1},{\"reasoningEffort\":\"medium\",\"score\":2},{\"reasoningEffort\":\"medium\",\"score\":3},{\"reasoningEffort\":\"medium\",\"score\":4},{\"reasoningEffort\":\"high\",\"score\":5},{\"reasoningEffort\":\"high\",\"score\":6},{\"reasoningEffort\":\"xhigh\",\"score\":7},{\"reasoningEffort\":\"max\",\"score\":8}],\"effortOrder\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"],\"factorDefinitions\":{\"o\":{\"criteria\":[{\"id\":\"o1-discoverable-missing-fact\",\"level\":1,\"meaning\":\"недостающий факт можно получить безопасным чтением\"},{\"id\":\"o1-mutable-current-state\",\"level\":1,\"meaning\":\"решение зависит от изменяемого текущего состояния\"},{\"id\":\"o1-explicit-reversible-assumption\",\"level\":1,\"meaning\":\"нужна явно отмеченная обратимая гипотеза\"},{\"id\":\"o2-authority-conflict\",\"level\":2,\"meaning\":\"источники полномочий или требования конфликтуют\"},{\"id\":\"o2-undiscoverable-required-fact\",\"level\":2,\"meaning\":\"обязательный факт недоступен либо требует решения владельца\"},{\"id\":\"o2-unreproducible-conflict\",\"level\":2,\"meaning\":\"конфликт доказательств нельзя воспроизвести и разрешить чтением\"},{\"id\":\"o2-uncontracted-interface\",\"level\":2,\"meaning\":\"решение зависит от незафиксированного интерфейса\"}],\"level0Rule\":\"все обязательные факты подтверждены, воспроизводимы и согласованы\",\"meaning\":\"Неопределённость, изменчивость и согласованность доказательств\"},\"p\":{\"criteria\":[{\"id\":\"p1-scope-2-to-5\",\"level\":1,\"meaning\":\"max(scopeUnits,workUnits) от 2 до 5 при одной границе и одном потоке\"},{\"id\":\"p2-scope-6-plus\",\"level\":2,\"meaning\":\"scopeUnits или workUnits не менее 6\"},{\"id\":\"p2-boundaries-2-plus\",\"level\":2,\"meaning\":\"границ не менее 2\"},{\"id\":\"p2-workstreams-2-plus\",\"level\":2,\"meaning\":\"независимых потоков не менее 2\"}],\"level0Rule\":\"scopeUnits<=1 и workUnits<=1 и boundaries<=1 и workstreams<=1\",\"meaning\":\"Размер адресуемой работы, число границ и независимых потоков\",\"unitDefinitions\":{\"boundary\":\"репозиторий, независимо развёртываемый процесс, внешний сервис или учётная среда\",\"scopeUnit\":\"отдельно адресуемый файл, схема, страница, набор данных, результат команды или выход\",\"workUnit\":\"одно независимо проверяемое изменение или исследование\",\"workstream\":\"независимая ветвь работы до общего синтеза\"}},\"q\":{\"criteria\":[{\"id\":\"q1-dependent-chain\",\"level\":1,\"meaning\":\"требуются не менее двух зависимых выводов\"},{\"id\":\"q1-bounded-tradeoff\",\"level\":1,\"meaning\":\"сравниваются не менее двух вариантов по не менее чем двум ограничениям внутри одной границы\"},{\"id\":\"q2-cross-boundary-invariant\",\"level\":2,\"meaning\":\"нужно сохранить инвариант через две или более границы\"},{\"id\":\"q2-adversarial-concurrency\",\"level\":2,\"meaning\":\"нужен контрпример для безопасности, доверия, конкурентности, атомарности, восстановления или отката\"},{\"id\":\"q2-conflict-synthesis\",\"level\":2,\"meaning\":\"нужно разрешить конфликт доказательств или нормативных требований\"}],\"level0Rule\":\"ни один критерий уровня 1 или 2 не доказан\",\"meaning\":\"Сложность зависимых рассуждений и согласования ограничений\"},\"resolution\":{\"criterionStates\":[\"false\",\"true\",\"unknown\",\"conflict\"],\"identityValue\":0,\"lowerOperation\":\"maximum-criterion-level\",\"lowerStates\":[\"true\"],\"missingCriterionState\":\"unknown\",\"selectedBound\":\"max\",\"unknownCriterionId\":\"reject\",\"upperOperation\":\"maximum-of-lower-and-criterion-level\",\"upperStates\":[\"true\",\"unknown\",\"conflict\"]},\"v\":{\"criteria\":[{\"id\":\"v1-reversible-persistent\",\"level\":1,\"meaning\":\"изменяется сохраняемое состояние с доказанным откатом\"},{\"id\":\"v1-user-visible-isolated\",\"level\":1,\"meaning\":\"есть изолированное видимое пользователю изменение\"},{\"id\":\"v2-shared-or-production\",\"level\":2,\"meaning\":\"затрагивается совместное или производственное состояние\"},{\"id\":\"v2-destructive-or-unproven-rollback\",\"level\":2,\"meaning\":\"действие разрушительно либо откат не доказан\"},{\"id\":\"v2-trust-secret-permission\",\"level\":2,\"meaning\":\"затрагиваются доверие, секреты или разрешения\"},{\"id\":\"v2-high-stakes\",\"level\":2,\"meaning\":\"ошибка имеет медицинские, юридические, финансовые или иные критические последствия\"},{\"id\":\"v2-release-or-migration\",\"level\":2,\"meaning\":\"выполняется выпуск, публикация или миграция\"}],\"level0Rule\":\"только чтение, совет или удаляемый временный результат без внешнего последствия\",\"meaning\":\"Цена ошибки и сила требуемого доказательства отката\"}},\"factorRange\":{\"max\":2,\"min\":0},\"factors\":[\"q\",\"p\",\"v\",\"o\"],\"fingerprintDomain\":\"codex-smart/routing-policy/v2\",\"hardFloorDefinitions\":{\"levels\":[{\"minimumTier\":\"luna\",\"name\":\"none\",\"reasons\":[]},{\"minimumTier\":\"terra\",\"name\":\"terra\",\"reasons\":[\"architecture-decision\",\"public-contract\",\"risky-migration\",\"security-sensitive\"]},{\"minimumTier\":\"sol\",\"name\":\"sol\",\"reasons\":[\"critical-incident\",\"final-author-review-before-publish\",\"irreversible-action\",\"rollback-unproven\"]}],\"selection\":\"highest-triggered\",\"unknownReason\":\"reject\"},\"schemaVersion\":2,\"scoreRange\":{\"max\":8,\"min\":0},\"tiers\":[{\"minimumEffort\":\"low\",\"model\":\"gpt-5.6-luna\",\"name\":\"luna\",\"scoreMax\":2,\"scoreMin\":0},{\"minimumEffort\":\"medium\",\"model\":\"gpt-5.6-terra\",\"name\":\"terra\",\"scoreMax\":5,\"scoreMin\":3},{\"minimumEffort\":\"high\",\"model\":\"gpt-5.6-sol\",\"name\":\"sol\",\"scoreMax\":8,\"scoreMin\":6}]}",
+  "fingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+  "normalizationCases": [
+    {
+      "name": "defaults-are-materialized",
+      "source": {},
+      "expected": {
+        "status": "normalized",
+        "normalized": {
+          "hardFloor": "none",
+          "intervalPoint": "max",
+          "unavailablePair": "reject",
+          "reassessment": "promote-only"
+        }
+      }
+    },
+    {
+      "name": "unknown-policy-field",
+      "source": {
+        "fallbackModel": "gpt-5.6-terra"
+      },
+      "expected": {
+        "status": "rejected",
+        "phase": "structure",
+        "errorCode": "ROUTING_POLICY_MALFORMED"
+      }
+    }
+  ],
+  "criterionCases": [
+    {
+      "name": "q-value-0",
+      "factor": "q",
+      "criterionStates": {
+        "q1-dependent-chain": "false",
+        "q1-bounded-tradeoff": "false",
+        "q2-cross-boundary-invariant": "false",
+        "q2-adversarial-concurrency": "false",
+        "q2-conflict-synthesis": "false"
+      },
+      "expected": {
+        "min": 0,
+        "max": 0,
+        "selected": 0
+      }
+    },
+    {
+      "name": "q-value-1",
+      "factor": "q",
+      "criterionStates": {
+        "q1-dependent-chain": "true",
+        "q1-bounded-tradeoff": "false",
+        "q2-cross-boundary-invariant": "false",
+        "q2-adversarial-concurrency": "false",
+        "q2-conflict-synthesis": "false"
+      },
+      "expected": {
+        "min": 1,
+        "max": 1,
+        "selected": 1
+      }
+    },
+    {
+      "name": "q-value-2",
+      "factor": "q",
+      "criterionStates": {
+        "q1-dependent-chain": "false",
+        "q1-bounded-tradeoff": "false",
+        "q2-cross-boundary-invariant": "true",
+        "q2-adversarial-concurrency": "false",
+        "q2-conflict-synthesis": "false"
+      },
+      "expected": {
+        "min": 2,
+        "max": 2,
+        "selected": 2
+      }
+    },
+    {
+      "name": "q-ambiguous",
+      "factor": "q",
+      "criterionStates": {
+        "q1-dependent-chain": "unknown",
+        "q1-bounded-tradeoff": "unknown",
+        "q2-cross-boundary-invariant": "unknown",
+        "q2-adversarial-concurrency": "unknown",
+        "q2-conflict-synthesis": "unknown"
+      },
+      "expected": {
+        "min": 0,
+        "max": 2,
+        "selected": 2
+      }
+    },
+    {
+      "name": "p-value-0",
+      "factor": "p",
+      "criterionStates": {
+        "p1-scope-2-to-5": "false",
+        "p2-scope-6-plus": "false",
+        "p2-boundaries-2-plus": "false",
+        "p2-workstreams-2-plus": "false"
+      },
+      "expected": {
+        "min": 0,
+        "max": 0,
+        "selected": 0
+      }
+    },
+    {
+      "name": "p-value-1",
+      "factor": "p",
+      "criterionStates": {
+        "p1-scope-2-to-5": "true",
+        "p2-scope-6-plus": "false",
+        "p2-boundaries-2-plus": "false",
+        "p2-workstreams-2-plus": "false"
+      },
+      "expected": {
+        "min": 1,
+        "max": 1,
+        "selected": 1
+      }
+    },
+    {
+      "name": "p-value-2",
+      "factor": "p",
+      "criterionStates": {
+        "p1-scope-2-to-5": "false",
+        "p2-scope-6-plus": "true",
+        "p2-boundaries-2-plus": "false",
+        "p2-workstreams-2-plus": "false"
+      },
+      "expected": {
+        "min": 2,
+        "max": 2,
+        "selected": 2
+      }
+    },
+    {
+      "name": "p-ambiguous",
+      "factor": "p",
+      "criterionStates": {
+        "p1-scope-2-to-5": "unknown",
+        "p2-scope-6-plus": "unknown",
+        "p2-boundaries-2-plus": "unknown",
+        "p2-workstreams-2-plus": "unknown"
+      },
+      "expected": {
+        "min": 0,
+        "max": 2,
+        "selected": 2
+      }
+    },
+    {
+      "name": "v-value-0",
+      "factor": "v",
+      "criterionStates": {
+        "v1-reversible-persistent": "false",
+        "v1-user-visible-isolated": "false",
+        "v2-shared-or-production": "false",
+        "v2-destructive-or-unproven-rollback": "false",
+        "v2-trust-secret-permission": "false",
+        "v2-high-stakes": "false",
+        "v2-release-or-migration": "false"
+      },
+      "expected": {
+        "min": 0,
+        "max": 0,
+        "selected": 0
+      }
+    },
+    {
+      "name": "v-value-1",
+      "factor": "v",
+      "criterionStates": {
+        "v1-reversible-persistent": "true",
+        "v1-user-visible-isolated": "false",
+        "v2-shared-or-production": "false",
+        "v2-destructive-or-unproven-rollback": "false",
+        "v2-trust-secret-permission": "false",
+        "v2-high-stakes": "false",
+        "v2-release-or-migration": "false"
+      },
+      "expected": {
+        "min": 1,
+        "max": 1,
+        "selected": 1
+      }
+    },
+    {
+      "name": "v-value-2",
+      "factor": "v",
+      "criterionStates": {
+        "v1-reversible-persistent": "false",
+        "v1-user-visible-isolated": "false",
+        "v2-shared-or-production": "true",
+        "v2-destructive-or-unproven-rollback": "false",
+        "v2-trust-secret-permission": "false",
+        "v2-high-stakes": "false",
+        "v2-release-or-migration": "false"
+      },
+      "expected": {
+        "min": 2,
+        "max": 2,
+        "selected": 2
+      }
+    },
+    {
+      "name": "v-ambiguous",
+      "factor": "v",
+      "criterionStates": {
+        "v1-reversible-persistent": "unknown",
+        "v1-user-visible-isolated": "unknown",
+        "v2-shared-or-production": "unknown",
+        "v2-destructive-or-unproven-rollback": "unknown",
+        "v2-trust-secret-permission": "unknown",
+        "v2-high-stakes": "unknown",
+        "v2-release-or-migration": "unknown"
+      },
+      "expected": {
+        "min": 0,
+        "max": 2,
+        "selected": 2
+      }
+    },
+    {
+      "name": "o-value-0",
+      "factor": "o",
+      "criterionStates": {
+        "o1-discoverable-missing-fact": "false",
+        "o1-mutable-current-state": "false",
+        "o1-explicit-reversible-assumption": "false",
+        "o2-authority-conflict": "false",
+        "o2-undiscoverable-required-fact": "false",
+        "o2-unreproducible-conflict": "false",
+        "o2-uncontracted-interface": "false"
+      },
+      "expected": {
+        "min": 0,
+        "max": 0,
+        "selected": 0
+      }
+    },
+    {
+      "name": "o-value-1",
+      "factor": "o",
+      "criterionStates": {
+        "o1-discoverable-missing-fact": "true",
+        "o1-mutable-current-state": "false",
+        "o1-explicit-reversible-assumption": "false",
+        "o2-authority-conflict": "false",
+        "o2-undiscoverable-required-fact": "false",
+        "o2-unreproducible-conflict": "false",
+        "o2-uncontracted-interface": "false"
+      },
+      "expected": {
+        "min": 1,
+        "max": 1,
+        "selected": 1
+      }
+    },
+    {
+      "name": "o-value-2",
+      "factor": "o",
+      "criterionStates": {
+        "o1-discoverable-missing-fact": "false",
+        "o1-mutable-current-state": "false",
+        "o1-explicit-reversible-assumption": "false",
+        "o2-authority-conflict": "true",
+        "o2-undiscoverable-required-fact": "false",
+        "o2-unreproducible-conflict": "false",
+        "o2-uncontracted-interface": "false"
+      },
+      "expected": {
+        "min": 2,
+        "max": 2,
+        "selected": 2
+      }
+    },
+    {
+      "name": "o-ambiguous",
+      "factor": "o",
+      "criterionStates": {
+        "o1-discoverable-missing-fact": "unknown",
+        "o1-mutable-current-state": "unknown",
+        "o1-explicit-reversible-assumption": "unknown",
+        "o2-authority-conflict": "unknown",
+        "o2-undiscoverable-required-fact": "unknown",
+        "o2-unreproducible-conflict": "unknown",
+        "o2-uncontracted-interface": "unknown"
+      },
+      "expected": {
+        "min": 0,
+        "max": 2,
+        "selected": 2
+      }
+    },
+    {
+      "name": "q-conflict",
+      "factor": "q",
+      "criterionStates": {
+        "q1-dependent-chain": "conflict",
+        "q1-bounded-tradeoff": "false",
+        "q2-cross-boundary-invariant": "false",
+        "q2-adversarial-concurrency": "false",
+        "q2-conflict-synthesis": "false"
+      },
+      "expected": {
+        "min": 0,
+        "max": 1,
+        "selected": 1
+      }
+    },
+    {
+      "name": "p-conflict",
+      "factor": "p",
+      "criterionStates": {
+        "p1-scope-2-to-5": "false",
+        "p2-scope-6-plus": "false",
+        "p2-boundaries-2-plus": "conflict",
+        "p2-workstreams-2-plus": "false"
+      },
+      "expected": {
+        "min": 0,
+        "max": 2,
+        "selected": 2
+      }
+    },
+    {
+      "name": "v-conflict",
+      "factor": "v",
+      "criterionStates": {
+        "v1-reversible-persistent": "conflict",
+        "v1-user-visible-isolated": "false",
+        "v2-shared-or-production": "false",
+        "v2-destructive-or-unproven-rollback": "false",
+        "v2-trust-secret-permission": "false",
+        "v2-high-stakes": "false",
+        "v2-release-or-migration": "false"
+      },
+      "expected": {
+        "min": 0,
+        "max": 1,
+        "selected": 1
+      }
+    },
+    {
+      "name": "o-conflict",
+      "factor": "o",
+      "criterionStates": {
+        "o1-discoverable-missing-fact": "false",
+        "o1-mutable-current-state": "false",
+        "o1-explicit-reversible-assumption": "false",
+        "o2-authority-conflict": "conflict",
+        "o2-undiscoverable-required-fact": "false",
+        "o2-unreproducible-conflict": "false",
+        "o2-uncontracted-interface": "false"
+      },
+      "expected": {
+        "min": 0,
+        "max": 2,
+        "selected": 2
+      }
+    }
+  ],
+  "scoreCases": [
+    {
+      "name": "score-0",
+      "factors": {
+        "q": 0,
+        "p": 0,
+        "v": 0,
+        "o": 0
+      },
+      "score": 0,
+      "expected": {
+        "tier": "luna",
+        "model": "gpt-5.6-luna",
+        "reasoningEffort": "low"
+      }
+    },
+    {
+      "name": "score-1",
+      "factors": {
+        "q": 1,
+        "p": 0,
+        "v": 0,
+        "o": 0
+      },
+      "score": 1,
+      "expected": {
+        "tier": "luna",
+        "model": "gpt-5.6-luna",
+        "reasoningEffort": "low"
+      }
+    },
+    {
+      "name": "score-2",
+      "factors": {
+        "q": 2,
+        "p": 0,
+        "v": 0,
+        "o": 0
+      },
+      "score": 2,
+      "expected": {
+        "tier": "luna",
+        "model": "gpt-5.6-luna",
+        "reasoningEffort": "medium"
+      }
+    },
+    {
+      "name": "score-3",
+      "factors": {
+        "q": 2,
+        "p": 1,
+        "v": 0,
+        "o": 0
+      },
+      "score": 3,
+      "expected": {
+        "tier": "terra",
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      }
+    },
+    {
+      "name": "score-4",
+      "factors": {
+        "q": 2,
+        "p": 2,
+        "v": 0,
+        "o": 0
+      },
+      "score": 4,
+      "expected": {
+        "tier": "terra",
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      }
+    },
+    {
+      "name": "score-5",
+      "factors": {
+        "q": 2,
+        "p": 2,
+        "v": 1,
+        "o": 0
+      },
+      "score": 5,
+      "expected": {
+        "tier": "terra",
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "high"
+      }
+    },
+    {
+      "name": "score-6",
+      "factors": {
+        "q": 2,
+        "p": 2,
+        "v": 2,
+        "o": 0
+      },
+      "score": 6,
+      "expected": {
+        "tier": "sol",
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high"
+      }
+    },
+    {
+      "name": "score-7",
+      "factors": {
+        "q": 2,
+        "p": 2,
+        "v": 2,
+        "o": 1
+      },
+      "score": 7,
+      "expected": {
+        "tier": "sol",
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "xhigh"
+      }
+    },
+    {
+      "name": "score-8",
+      "factors": {
+        "q": 2,
+        "p": 2,
+        "v": 2,
+        "o": 2
+      },
+      "score": 8,
+      "expected": {
+        "tier": "sol",
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "max"
+      }
+    }
+  ],
+  "hardFloorCases": [
+    {
+      "name": "no-floor-reason",
+      "reasons": [],
+      "score": 0,
+      "expected": {
+        "tier": "luna",
+        "model": "gpt-5.6-luna",
+        "reasoningEffort": "low"
+      }
+    },
+    {
+      "name": "terra-floor",
+      "reasons": [
+        "public-contract"
+      ],
+      "score": 0,
+      "expected": {
+        "tier": "terra",
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      }
+    },
+    {
+      "name": "sol-floor",
+      "reasons": [
+        "rollback-unproven"
+      ],
+      "score": 0,
+      "expected": {
+        "tier": "sol",
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high"
+      }
+    },
+    {
+      "name": "sol-floor-does-not-lower-score-8",
+      "reasons": [
+        "rollback-unproven"
+      ],
+      "score": 8,
+      "expected": {
+        "tier": "sol",
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "max"
+      }
+    },
+    {
+      "name": "unknown-floor-reason",
+      "reasons": [
+        "future-reason"
+      ],
+      "expected": "schema-invalid"
+    }
+  ],
+  "availabilityCases": [
+    {
+      "name": "exact-intersection-success",
+      "selectedPair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "xhigh"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "expectedError": null
+    },
+    {
+      "name": "exact-absent-policy",
+      "selectedPair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "xhigh"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "expectedError": "ROUTING_PAIR_UNAVAILABLE"
+    },
+    {
+      "name": "exact-absent-bundled",
+      "selectedPair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "xhigh"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "expectedError": "ROUTING_PAIR_UNAVAILABLE"
+    },
+    {
+      "name": "exact-absent-account",
+      "selectedPair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "xhigh"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "expectedError": "ROUTING_PAIR_UNAVAILABLE"
+    },
+    {
+      "name": "no-splice-policy",
+      "selectedPair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "xhigh"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "xhigh"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "expectedError": "ROUTING_PAIR_UNAVAILABLE"
+    },
+    {
+      "name": "no-splice-bundled",
+      "selectedPair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "xhigh"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "xhigh"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "expectedError": "ROUTING_PAIR_UNAVAILABLE"
+    },
+    {
+      "name": "no-splice-account",
+      "selectedPair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "xhigh"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "xhigh"
+          }
+        ]
+      },
+      "expectedError": "ROUTING_PAIR_UNAVAILABLE"
+    }
+  ],
+  "reassessmentCases": [
+    {
+      "name": "promotion-available",
+      "currentPair": {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      },
+      "candidatePair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "expected": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high"
+      },
+      "catalogFingerprintCheck": {
+        "before": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        },
+        "after": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        }
+      }
+    },
+    {
+      "name": "promotion-missing-policy",
+      "currentPair": {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      },
+      "candidatePair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "expectedError": "ROUTING_PAIR_UNAVAILABLE",
+      "catalogFingerprintCheck": {
+        "before": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        },
+        "after": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        }
+      }
+    },
+    {
+      "name": "promotion-missing-bundled",
+      "currentPair": {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      },
+      "candidatePair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "expectedError": "ROUTING_PAIR_UNAVAILABLE",
+      "catalogFingerprintCheck": {
+        "before": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        },
+        "after": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        }
+      }
+    },
+    {
+      "name": "promotion-missing-account",
+      "currentPair": {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      },
+      "candidatePair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "expectedError": "ROUTING_PAIR_UNAVAILABLE",
+      "catalogFingerprintCheck": {
+        "before": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        },
+        "after": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        }
+      }
+    },
+    {
+      "name": "never-lower",
+      "currentPair": {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      },
+      "candidatePair": {
+        "model": "gpt-5.6-luna",
+        "reasoningEffort": "low"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "expected": {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      },
+      "catalogFingerprintCheck": {
+        "before": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        },
+        "after": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        }
+      }
+    },
+    {
+      "name": "current-pair-disappears",
+      "currentPair": {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      },
+      "candidatePair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "expectedError": "STALE",
+      "catalogFingerprintCheck": {
+        "before": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        },
+        "after": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        }
+      }
+    },
+    {
+      "name": "current-missing-higher-present",
+      "currentPair": {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      },
+      "candidatePair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "expectedError": "STALE",
+      "catalogFingerprintCheck": {
+        "before": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        },
+        "after": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        }
+      }
+    },
+    {
+      "name": "policy-fingerprint-changed",
+      "currentPair": {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      },
+      "candidatePair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "catalogFingerprintCheck": {
+        "before": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        },
+        "after": {
+          "policyFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        }
+      },
+      "expectedError": "STALE"
+    },
+    {
+      "name": "bundled-snapshot-fingerprint-changed",
+      "currentPair": {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      },
+      "candidatePair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "catalogFingerprintCheck": {
+        "before": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        },
+        "after": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        }
+      },
+      "expectedError": "STALE"
+    },
+    {
+      "name": "catalog-fingerprint-changed",
+      "currentPair": {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      },
+      "candidatePair": {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high"
+      },
+      "catalogs": {
+        "policyPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "bundledSnapshotPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ],
+        "accountPairs": [
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "low"
+          },
+          {
+            "model": "gpt-5.6-luna",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "high"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "xhigh"
+          },
+          {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "max"
+          }
+        ]
+      },
+      "expectedError": "STALE",
+      "catalogFingerprintCheck": {
+        "before": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
+        },
+        "after": {
+          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "accountFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      }
+    }
+  ],
+  "boundaryCases": [
+    {
+      "name": "ordered-interval",
+      "value": {
+        "criterionStates": {
+          "q": {
+            "q1-dependent-chain": "unknown",
+            "q1-bounded-tradeoff": "unknown",
+            "q2-cross-boundary-invariant": "unknown",
+            "q2-adversarial-concurrency": "unknown",
+            "q2-conflict-synthesis": "unknown"
+          },
+          "p": {
+            "p1-scope-2-to-5": "true",
+            "p2-scope-6-plus": "false",
+            "p2-boundaries-2-plus": "false",
+            "p2-workstreams-2-plus": "false"
+          },
+          "v": {
+            "v1-reversible-persistent": "false",
+            "v1-user-visible-isolated": "false",
+            "v2-shared-or-production": "true",
+            "v2-destructive-or-unproven-rollback": "false",
+            "v2-trust-secret-permission": "false",
+            "v2-high-stakes": "false",
+            "v2-release-or-migration": "false"
+          },
+          "o": {
+            "o1-discoverable-missing-fact": "false",
+            "o1-mutable-current-state": "false",
+            "o1-explicit-reversible-assumption": "false",
+            "o2-authority-conflict": "false",
+            "o2-undiscoverable-required-fact": "false",
+            "o2-unreproducible-conflict": "false",
+            "o2-uncontracted-interface": "false"
+          }
+        },
+        "q": {
+          "min": 0,
+          "max": 2
+        },
+        "p": {
+          "min": 1,
+          "max": 1
+        },
+        "v": {
+          "min": 2,
+          "max": 2
+        },
+        "o": {
+          "min": 0,
+          "max": 0
+        },
+        "hardFloorReasons": [],
+        "hardFloor": "none",
+        "hardBan": "none"
+      },
+      "expected": "schema-and-policy-valid"
+    },
+    {
+      "name": "reversed-interval",
+      "value": {
+        "criterionStates": {
+          "q": {
+            "q1-dependent-chain": "unknown",
+            "q1-bounded-tradeoff": "unknown",
+            "q2-cross-boundary-invariant": "unknown",
+            "q2-adversarial-concurrency": "unknown",
+            "q2-conflict-synthesis": "unknown"
+          },
+          "p": {
+            "p1-scope-2-to-5": "true",
+            "p2-scope-6-plus": "false",
+            "p2-boundaries-2-plus": "false",
+            "p2-workstreams-2-plus": "false"
+          },
+          "v": {
+            "v1-reversible-persistent": "false",
+            "v1-user-visible-isolated": "false",
+            "v2-shared-or-production": "true",
+            "v2-destructive-or-unproven-rollback": "false",
+            "v2-trust-secret-permission": "false",
+            "v2-high-stakes": "false",
+            "v2-release-or-migration": "false"
+          },
+          "o": {
+            "o1-discoverable-missing-fact": "false",
+            "o1-mutable-current-state": "false",
+            "o1-explicit-reversible-assumption": "false",
+            "o2-authority-conflict": "false",
+            "o2-undiscoverable-required-fact": "false",
+            "o2-unreproducible-conflict": "false",
+            "o2-uncontracted-interface": "false"
+          }
+        },
+        "q": {
+          "min": 2,
+          "max": 1
+        },
+        "p": {
+          "min": 1,
+          "max": 1
+        },
+        "v": {
+          "min": 2,
+          "max": 2
+        },
+        "o": {
+          "min": 0,
+          "max": 0
+        },
+        "hardFloorReasons": [],
+        "hardFloor": "none",
+        "hardBan": "none"
+      },
+      "expected": "schema-invalid"
+    },
+    {
+      "name": "missing-criterion",
+      "value": {
+        "criterionStates": {
+          "q": {
+            "q1-bounded-tradeoff": "unknown",
+            "q2-cross-boundary-invariant": "unknown",
+            "q2-adversarial-concurrency": "unknown",
+            "q2-conflict-synthesis": "unknown"
+          },
+          "p": {
+            "p1-scope-2-to-5": "true",
+            "p2-scope-6-plus": "false",
+            "p2-boundaries-2-plus": "false",
+            "p2-workstreams-2-plus": "false"
+          },
+          "v": {
+            "v1-reversible-persistent": "false",
+            "v1-user-visible-isolated": "false",
+            "v2-shared-or-production": "true",
+            "v2-destructive-or-unproven-rollback": "false",
+            "v2-trust-secret-permission": "false",
+            "v2-high-stakes": "false",
+            "v2-release-or-migration": "false"
+          },
+          "o": {
+            "o1-discoverable-missing-fact": "false",
+            "o1-mutable-current-state": "false",
+            "o1-explicit-reversible-assumption": "false",
+            "o2-authority-conflict": "false",
+            "o2-undiscoverable-required-fact": "false",
+            "o2-unreproducible-conflict": "false",
+            "o2-uncontracted-interface": "false"
+          }
+        },
+        "q": {
+          "min": 0,
+          "max": 2
+        },
+        "p": {
+          "min": 1,
+          "max": 1
+        },
+        "v": {
+          "min": 2,
+          "max": 2
+        },
+        "o": {
+          "min": 0,
+          "max": 0
+        },
+        "hardFloorReasons": [],
+        "hardFloor": "none",
+        "hardBan": "none"
+      },
+      "expected": "schema-invalid"
+    },
+    {
+      "name": "unknown-criterion",
+      "value": {
+        "criterionStates": {
+          "q": {
+            "q1-dependent-chain": "unknown",
+            "q1-bounded-tradeoff": "unknown",
+            "q2-cross-boundary-invariant": "unknown",
+            "q2-adversarial-concurrency": "unknown",
+            "q2-conflict-synthesis": "unknown",
+            "q9-future": "true"
+          },
+          "p": {
+            "p1-scope-2-to-5": "true",
+            "p2-scope-6-plus": "false",
+            "p2-boundaries-2-plus": "false",
+            "p2-workstreams-2-plus": "false"
+          },
+          "v": {
+            "v1-reversible-persistent": "false",
+            "v1-user-visible-isolated": "false",
+            "v2-shared-or-production": "true",
+            "v2-destructive-or-unproven-rollback": "false",
+            "v2-trust-secret-permission": "false",
+            "v2-high-stakes": "false",
+            "v2-release-or-migration": "false"
+          },
+          "o": {
+            "o1-discoverable-missing-fact": "false",
+            "o1-mutable-current-state": "false",
+            "o1-explicit-reversible-assumption": "false",
+            "o2-authority-conflict": "false",
+            "o2-undiscoverable-required-fact": "false",
+            "o2-unreproducible-conflict": "false",
+            "o2-uncontracted-interface": "false"
+          }
+        },
+        "q": {
+          "min": 0,
+          "max": 2
+        },
+        "p": {
+          "min": 1,
+          "max": 1
+        },
+        "v": {
+          "min": 2,
+          "max": 2
+        },
+        "o": {
+          "min": 0,
+          "max": 0
+        },
+        "hardFloorReasons": [],
+        "hardFloor": "none",
+        "hardBan": "none"
+      },
+      "expected": "schema-invalid"
+    },
+    {
+      "name": "interval-does-not-match-states",
+      "value": {
+        "criterionStates": {
+          "q": {
+            "q1-dependent-chain": "false",
+            "q1-bounded-tradeoff": "false",
+            "q2-cross-boundary-invariant": "false",
+            "q2-adversarial-concurrency": "false",
+            "q2-conflict-synthesis": "false"
+          },
+          "p": {
+            "p1-scope-2-to-5": "true",
+            "p2-scope-6-plus": "false",
+            "p2-boundaries-2-plus": "false",
+            "p2-workstreams-2-plus": "false"
+          },
+          "v": {
+            "v1-reversible-persistent": "false",
+            "v1-user-visible-isolated": "false",
+            "v2-shared-or-production": "true",
+            "v2-destructive-or-unproven-rollback": "false",
+            "v2-trust-secret-permission": "false",
+            "v2-high-stakes": "false",
+            "v2-release-or-migration": "false"
+          },
+          "o": {
+            "o1-discoverable-missing-fact": "false",
+            "o1-mutable-current-state": "false",
+            "o1-explicit-reversible-assumption": "false",
+            "o2-authority-conflict": "false",
+            "o2-undiscoverable-required-fact": "false",
+            "o2-unreproducible-conflict": "false",
+            "o2-uncontracted-interface": "false"
+          }
+        },
+        "q": {
+          "min": 1,
+          "max": 1
+        },
+        "p": {
+          "min": 1,
+          "max": 1
+        },
+        "v": {
+          "min": 2,
+          "max": 2
+        },
+        "o": {
+          "min": 0,
+          "max": 0
+        },
+        "hardFloorReasons": [],
+        "hardFloor": "none",
+        "hardBan": "none"
+      },
+      "expected": "policy-invalid"
+    },
+    {
+      "name": "hard-floor-does-not-match-reasons",
+      "value": {
+        "criterionStates": {
+          "q": {
+            "q1-dependent-chain": "unknown",
+            "q1-bounded-tradeoff": "unknown",
+            "q2-cross-boundary-invariant": "unknown",
+            "q2-adversarial-concurrency": "unknown",
+            "q2-conflict-synthesis": "unknown"
+          },
+          "p": {
+            "p1-scope-2-to-5": "true",
+            "p2-scope-6-plus": "false",
+            "p2-boundaries-2-plus": "false",
+            "p2-workstreams-2-plus": "false"
+          },
+          "v": {
+            "v1-reversible-persistent": "false",
+            "v1-user-visible-isolated": "false",
+            "v2-shared-or-production": "true",
+            "v2-destructive-or-unproven-rollback": "false",
+            "v2-trust-secret-permission": "false",
+            "v2-high-stakes": "false",
+            "v2-release-or-migration": "false"
+          },
+          "o": {
+            "o1-discoverable-missing-fact": "false",
+            "o1-mutable-current-state": "false",
+            "o1-explicit-reversible-assumption": "false",
+            "o2-authority-conflict": "false",
+            "o2-undiscoverable-required-fact": "false",
+            "o2-unreproducible-conflict": "false",
+            "o2-uncontracted-interface": "false"
+          }
+        },
+        "q": {
+          "min": 0,
+          "max": 2
+        },
+        "p": {
+          "min": 1,
+          "max": 1
+        },
+        "v": {
+          "min": 2,
+          "max": 2
+        },
+        "o": {
+          "min": 0,
+          "max": 0
+        },
+        "hardFloorReasons": [
+          "public-contract"
+        ],
+        "hardFloor": "none",
+        "hardBan": "none"
+      },
+      "expected": "policy-invalid"
+    },
+    {
+      "name": "conflict-consistent",
+      "value": {
+        "criterionStates": {
+          "q": {
+            "q1-dependent-chain": "conflict",
+            "q1-bounded-tradeoff": "false",
+            "q2-cross-boundary-invariant": "false",
+            "q2-adversarial-concurrency": "false",
+            "q2-conflict-synthesis": "false"
+          },
+          "p": {
+            "p1-scope-2-to-5": "true",
+            "p2-scope-6-plus": "false",
+            "p2-boundaries-2-plus": "false",
+            "p2-workstreams-2-plus": "false"
+          },
+          "v": {
+            "v1-reversible-persistent": "false",
+            "v1-user-visible-isolated": "false",
+            "v2-shared-or-production": "true",
+            "v2-destructive-or-unproven-rollback": "false",
+            "v2-trust-secret-permission": "false",
+            "v2-high-stakes": "false",
+            "v2-release-or-migration": "false"
+          },
+          "o": {
+            "o1-discoverable-missing-fact": "false",
+            "o1-mutable-current-state": "false",
+            "o1-explicit-reversible-assumption": "false",
+            "o2-authority-conflict": "false",
+            "o2-undiscoverable-required-fact": "false",
+            "o2-unreproducible-conflict": "false",
+            "o2-uncontracted-interface": "false"
+          }
+        },
+        "q": {
+          "min": 0,
+          "max": 1
+        },
+        "p": {
+          "min": 1,
+          "max": 1
+        },
+        "v": {
+          "min": 2,
+          "max": 2
+        },
+        "o": {
+          "min": 0,
+          "max": 0
+        },
+        "hardFloorReasons": [],
+        "hardFloor": "none",
+        "hardBan": "none"
+      },
+      "expected": "schema-and-policy-valid"
+    },
+    {
+      "name": "conflict-interval-mismatch",
+      "value": {
+        "criterionStates": {
+          "q": {
+            "q1-dependent-chain": "conflict",
+            "q1-bounded-tradeoff": "false",
+            "q2-cross-boundary-invariant": "false",
+            "q2-adversarial-concurrency": "false",
+            "q2-conflict-synthesis": "false"
+          },
+          "p": {
+            "p1-scope-2-to-5": "true",
+            "p2-scope-6-plus": "false",
+            "p2-boundaries-2-plus": "false",
+            "p2-workstreams-2-plus": "false"
+          },
+          "v": {
+            "v1-reversible-persistent": "false",
+            "v1-user-visible-isolated": "false",
+            "v2-shared-or-production": "true",
+            "v2-destructive-or-unproven-rollback": "false",
+            "v2-trust-secret-permission": "false",
+            "v2-high-stakes": "false",
+            "v2-release-or-migration": "false"
+          },
+          "o": {
+            "o1-discoverable-missing-fact": "false",
+            "o1-mutable-current-state": "false",
+            "o1-explicit-reversible-assumption": "false",
+            "o2-authority-conflict": "false",
+            "o2-undiscoverable-required-fact": "false",
+            "o2-unreproducible-conflict": "false",
+            "o2-uncontracted-interface": "false"
+          }
+        },
+        "q": {
+          "min": 0,
+          "max": 0
+        },
+        "p": {
+          "min": 1,
+          "max": 1
+        },
+        "v": {
+          "min": 2,
+          "max": 2
+        },
+        "o": {
+          "min": 0,
+          "max": 0
+        },
+        "hardFloorReasons": [],
+        "hardFloor": "none",
+        "hardBan": "none"
+      },
+      "expected": "policy-invalid"
+    }
+  ]
+}

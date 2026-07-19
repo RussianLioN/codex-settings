@@ -1,0 +1,565 @@
+{
+  "schemaVersion": 1,
+  "canonicalJsonV1Cases": {
+    "positive": [
+      {
+        "name": "control-backspace",
+        "value": "\b",
+        "canonicalUtf8": "\"\\u0008\""
+      },
+      {
+        "name": "control-tab",
+        "value": "\t",
+        "canonicalUtf8": "\"\\u0009\""
+      },
+      {
+        "name": "control-line-feed",
+        "value": "\n",
+        "canonicalUtf8": "\"\\u000a\""
+      },
+      {
+        "name": "control-form-feed",
+        "value": "\f",
+        "canonicalUtf8": "\"\\u000c\""
+      },
+      {
+        "name": "control-carriage-return",
+        "value": "\r",
+        "canonicalUtf8": "\"\\u000d\""
+      },
+      {
+        "name": "quote-backslash-slash",
+        "value": "\"\\/",
+        "canonicalUtf8": "\"\\\"\\\\/\""
+      },
+      {
+        "name": "safe-integer-bounds",
+        "value": [
+          -9007199254740991,
+          9007199254740991
+        ],
+        "canonicalUtf8": "[-9007199254740991,9007199254740991]"
+      },
+      {
+        "name": "utf8-key-order-and-array-order",
+        "value": {
+          "é": [
+            2,
+            1
+          ],
+          "z": true
+        },
+        "canonicalUtf8": "{\"z\":true,\"é\":[2,1]}"
+      }
+    ],
+    "negativeConstructions": [
+      {
+        "name": "float",
+        "construction": "float"
+      },
+      {
+        "name": "nan",
+        "construction": "nan"
+      },
+      {
+        "name": "positive-infinity",
+        "construction": "positive-infinity"
+      },
+      {
+        "name": "negative-infinity",
+        "construction": "negative-infinity"
+      },
+      {
+        "name": "safe-integer-over",
+        "construction": "safe-integer-over"
+      },
+      {
+        "name": "safe-integer-under",
+        "construction": "safe-integer-under"
+      },
+      {
+        "name": "unpaired-high-surrogate",
+        "construction": "unpaired-high-surrogate"
+      },
+      {
+        "name": "unpaired-low-surrogate",
+        "construction": "unpaired-low-surrogate"
+      },
+      {
+        "name": "tuple",
+        "construction": "tuple"
+      },
+      {
+        "name": "bytes",
+        "construction": "bytes"
+      },
+      {
+        "name": "non-string-object-key",
+        "construction": "non-string-object-key"
+      }
+    ]
+  },
+  "bundledCatalogFixture": {
+    "purpose": "test-only-safe-projection",
+    "domain": "codex-smart/bundled-catalog/v1",
+    "projection": {
+      "models": [
+        {
+          "model": "gpt-5.6-luna",
+          "reasoningEfforts": [
+            "low",
+            "medium"
+          ]
+        },
+        {
+          "model": "gpt-5.6-sol",
+          "reasoningEfforts": [
+            "high",
+            "max",
+            "xhigh"
+          ]
+        },
+        {
+          "model": "gpt-5.6-terra",
+          "reasoningEfforts": [
+            "high",
+            "medium"
+          ]
+        }
+      ]
+    },
+    "canonicalUtf8": "{\"models\":[{\"model\":\"gpt-5.6-luna\",\"reasoningEfforts\":[\"low\",\"medium\"]},{\"model\":\"gpt-5.6-sol\",\"reasoningEfforts\":[\"high\",\"max\",\"xhigh\"]},{\"model\":\"gpt-5.6-terra\",\"reasoningEfforts\":[\"high\",\"medium\"]}]}",
+    "fingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445"
+  },
+  "base": {
+    "schemaVersion": 1,
+    "contractVersion": "codex-interface-v1",
+    "subject": {
+      "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "snapshotPath": "/private/codex",
+      "size": 1,
+      "mode": 320,
+      "uid": 501,
+      "device": 1,
+      "inode": 2,
+      "mtimeNs": 3,
+      "version": "codex-cli 0.144.5",
+      "platform": "darwin",
+      "architecture": "arm64",
+      "signatureIdentifier": "codex",
+      "teamIdentifier": "2DC432GLL2",
+      "cdHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sourceLocator": "/opt/homebrew/bin/codex",
+      "sourceObservedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "semantic": {
+      "extensionRelease": "0.2.0",
+      "contractVersion": "codex-interface-v1",
+      "platformAdapter": "darwin-arm64-v1",
+      "commands": [
+        "app-server"
+      ],
+      "options": [
+        "--json"
+      ],
+      "appServerMethods": [
+        "model/list"
+      ],
+      "machineSchemas": {
+        "account-evidence-v1": {
+          "schemaId": "account-evidence-v1",
+          "schemaSha256": "35fe24653fe033295c98eefed4650d23d83afc3edfdd04ecf1aaeec4940c21c4"
+        },
+        "boundary-result-v1": {
+          "schemaId": "boundary-result-v1",
+          "schemaSha256": "6744a24ed94a48d20805485b961c7b029ada9d572a57158fe8850d492b803786"
+        },
+        "child-jsonl-v1": {
+          "schemaId": "child-jsonl-v1",
+          "schemaSha256": "8ab243b4227dfc15330e6c11bc72148701049441a4973bab3c13842acf58f101"
+        },
+        "child-profile-v1": {
+          "schemaId": "child-profile-v1",
+          "schemaSha256": "c9cd3739129b340258b5bc88f9f680cec3001cae91bf97c0490c599c57febf36"
+        },
+        "config-requirements-normalized-v1": {
+          "schemaId": "config-requirements-normalized-v1",
+          "schemaSha256": "3b89c1072dc1679388004908d74b170d9691ae1c91a5a108d450a4526d6da987"
+        },
+        "config-requirements-vector-recipe-v1": {
+          "schemaId": "config-requirements-vector-recipe-v1",
+          "schemaSha256": "91b9b770bc4370ae125c5b892d4ed1d7b1cdcef3b8fdb5996c1955fca59b2068"
+        },
+        "interface-evidence-v1": {
+          "schemaId": "interface-evidence-v1",
+          "schemaSha256": "dd54db0a86274a3110c4bee758c54a181a351b7129927fb1eab79d42923e2627"
+        },
+        "otel-logs-v1": {
+          "schemaId": "otel-logs-v1",
+          "schemaSha256": "fced1969a64ec84c4dfd0baeca88ae41595abfb6f3144a5b71ffc22419d1c388"
+        },
+        "reader-result-v1": {
+          "schemaId": "reader-result-v1",
+          "schemaSha256": "2d87d9d810f0b640ead4bcfaf75b093c72b53abdc38925ad606c7e2554854bb8"
+        },
+        "routing-policy-v2": {
+          "schemaId": "routing-policy-v2",
+          "schemaSha256": "3aceac0be99dc3d58f18c4ab91848c08ae88c6179b683ebd4abce90e0792ba05"
+        },
+        "writer-result-v1": {
+          "schemaId": "writer-result-v1",
+          "schemaSha256": "c61c228c534819576116a76fb78269e2d7df405ddd6284e25c299c81eaa97f66"
+        }
+      },
+      "probeBudgets": {
+        "full": 300
+      },
+      "negativeProbeIds": [
+        "unknown-event"
+      ],
+      "arg0AdapterVersion": "arg0-v1",
+      "routingPolicyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+      "bundledCatalogFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+      "childProfiles": {
+        "classifier": "2279f006e7885a4526400d0fb87a0ca7718449a9489b88143e81409bfafaaca0",
+        "reader": "5e8b319872a53e0c59f49afb794228c2808c2273755f40e412c0a39f6a76ca5d",
+        "writer": "6fc2875d32c21d9bf93eaff59569555231a1765a284d75baf574347f4533cc62"
+      }
+    },
+    "subjectFingerprint": "c7a60f70c3c0c976bbe4ed83c88c7e718bf0a187e0c3f5657e5ba9dd1795db0f",
+    "semanticFingerprint": "7341a7541a8066d325a2af89cc699c6631a5ba5ad776f9bb6ac573fcaeed032a",
+    "compatibilityFingerprint": "de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e"
+  },
+  "canonical": {
+    "subjectUtf8": "{\"architecture\":\"arm64\",\"cdHash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"device\":1,\"inode\":2,\"mode\":320,\"mtimeNs\":3,\"platform\":\"darwin\",\"signatureIdentifier\":\"codex\",\"size\":1,\"snapshotPath\":\"/private/codex\",\"snapshotSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sourceLocator\":\"/opt/homebrew/bin/codex\",\"sourceObservedSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"teamIdentifier\":\"2DC432GLL2\",\"uid\":501,\"version\":\"codex-cli 0.144.5\"}",
+    "semanticUtf8": "{\"appServerMethods\":[\"model/list\"],\"arg0AdapterVersion\":\"arg0-v1\",\"bundledCatalogFingerprint\":\"737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445\",\"childProfiles\":{\"classifier\":\"2279f006e7885a4526400d0fb87a0ca7718449a9489b88143e81409bfafaaca0\",\"reader\":\"5e8b319872a53e0c59f49afb794228c2808c2273755f40e412c0a39f6a76ca5d\",\"writer\":\"6fc2875d32c21d9bf93eaff59569555231a1765a284d75baf574347f4533cc62\"},\"commands\":[\"app-server\"],\"contractVersion\":\"codex-interface-v1\",\"extensionRelease\":\"0.2.0\",\"machineSchemas\":{\"account-evidence-v1\":{\"schemaId\":\"account-evidence-v1\",\"schemaSha256\":\"35fe24653fe033295c98eefed4650d23d83afc3edfdd04ecf1aaeec4940c21c4\"},\"boundary-result-v1\":{\"schemaId\":\"boundary-result-v1\",\"schemaSha256\":\"6744a24ed94a48d20805485b961c7b029ada9d572a57158fe8850d492b803786\"},\"child-jsonl-v1\":{\"schemaId\":\"child-jsonl-v1\",\"schemaSha256\":\"8ab243b4227dfc15330e6c11bc72148701049441a4973bab3c13842acf58f101\"},\"child-profile-v1\":{\"schemaId\":\"child-profile-v1\",\"schemaSha256\":\"c9cd3739129b340258b5bc88f9f680cec3001cae91bf97c0490c599c57febf36\"},\"config-requirements-normalized-v1\":{\"schemaId\":\"config-requirements-normalized-v1\",\"schemaSha256\":\"3b89c1072dc1679388004908d74b170d9691ae1c91a5a108d450a4526d6da987\"},\"config-requirements-vector-recipe-v1\":{\"schemaId\":\"config-requirements-vector-recipe-v1\",\"schemaSha256\":\"91b9b770bc4370ae125c5b892d4ed1d7b1cdcef3b8fdb5996c1955fca59b2068\"},\"interface-evidence-v1\":{\"schemaId\":\"interface-evidence-v1\",\"schemaSha256\":\"dd54db0a86274a3110c4bee758c54a181a351b7129927fb1eab79d42923e2627\"},\"otel-logs-v1\":{\"schemaId\":\"otel-logs-v1\",\"schemaSha256\":\"fced1969a64ec84c4dfd0baeca88ae41595abfb6f3144a5b71ffc22419d1c388\"},\"reader-result-v1\":{\"schemaId\":\"reader-result-v1\",\"schemaSha256\":\"2d87d9d810f0b640ead4bcfaf75b093c72b53abdc38925ad606c7e2554854bb8\"},\"routing-policy-v2\":{\"schemaId\":\"routing-policy-v2\",\"schemaSha256\":\"3aceac0be99dc3d58f18c4ab91848c08ae88c6179b683ebd4abce90e0792ba05\"},\"writer-result-v1\":{\"schemaId\":\"writer-result-v1\",\"schemaSha256\":\"c61c228c534819576116a76fb78269e2d7df405ddd6284e25c299c81eaa97f66\"}},\"negativeProbeIds\":[\"unknown-event\"],\"options\":[\"--json\"],\"platformAdapter\":\"darwin-arm64-v1\",\"probeBudgets\":{\"full\":300},\"routingPolicyFingerprint\":\"c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6\"}",
+    "compatibilityUtf8": "{\"contractVersion\":\"codex-interface-v1\",\"semanticFingerprint\":\"7341a7541a8066d325a2af89cc699c6631a5ba5ad776f9bb6ac573fcaeed032a\",\"subjectFingerprint\":\"c7a60f70c3c0c976bbe4ed83c88c7e718bf0a187e0c3f5657e5ba9dd1795db0f\"}"
+  },
+  "mutations": [
+    {
+      "name": "root-extension-does-not-change-projections",
+      "operation": {
+        "kind": "add-member",
+        "pointer": "/extensions",
+        "value": {
+          "note": "diagnostic"
+        }
+      },
+      "expected": {
+        "kind": "schema-valid",
+        "fingerprintDelta": {
+          "subjectFingerprint": "unchanged",
+          "semanticFingerprint": "unchanged",
+          "compatibilityFingerprint": "unchanged"
+        },
+        "storedFingerprints": "consistent"
+      }
+    },
+    {
+      "name": "dynamic-account-catalog-forbidden-in-semantic",
+      "operation": {
+        "kind": "add-member",
+        "pointer": "/semantic/accountCatalogFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": {
+        "kind": "schema-invalid"
+      }
+    },
+    {
+      "name": "subject-extra-field",
+      "operation": {
+        "kind": "add-member",
+        "pointer": "/subject/pathResolvedAgain",
+        "value": "/private/codex"
+      },
+      "expected": {
+        "kind": "schema-invalid"
+      }
+    },
+    {
+      "name": "routing-policy-change",
+      "operation": {
+        "kind": "replace-value",
+        "pointer": "/semantic/routingPolicyFingerprint",
+        "before": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": {
+        "kind": "schema-valid",
+        "fingerprintDelta": {
+          "subjectFingerprint": "unchanged",
+          "semanticFingerprint": "changed",
+          "compatibilityFingerprint": "changed"
+        },
+        "storedFingerprints": "inconsistent"
+      }
+    },
+    {
+      "name": "bundled-catalog-change",
+      "operation": {
+        "kind": "replace-value",
+        "pointer": "/semantic/bundledCatalogFingerprint",
+        "before": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+        "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "expected": {
+        "kind": "schema-valid",
+        "fingerprintDelta": {
+          "subjectFingerprint": "unchanged",
+          "semanticFingerprint": "changed",
+          "compatibilityFingerprint": "changed"
+        },
+        "storedFingerprints": "inconsistent"
+      }
+    },
+    {
+      "name": "child-profile-role-swap",
+      "operation": {
+        "kind": "swap-values",
+        "firstPointer": "/semantic/childProfiles/reader",
+        "secondPointer": "/semantic/childProfiles/writer",
+        "firstBefore": "5e8b319872a53e0c59f49afb794228c2808c2273755f40e412c0a39f6a76ca5d",
+        "secondBefore": "6fc2875d32c21d9bf93eaff59569555231a1765a284d75baf574347f4533cc62"
+      },
+      "expected": {
+        "kind": "schema-valid",
+        "fingerprintDelta": {
+          "subjectFingerprint": "unchanged",
+          "semanticFingerprint": "changed",
+          "compatibilityFingerprint": "changed"
+        },
+        "storedFingerprints": "inconsistent"
+      }
+    },
+    {
+      "name": "unknown-child-profile-role",
+      "operation": {
+        "kind": "add-member",
+        "pointer": "/semantic/childProfiles/reviewer",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": {
+        "kind": "schema-invalid"
+      }
+    },
+    {
+      "name": "source-path-change",
+      "operation": {
+        "kind": "replace-value",
+        "pointer": "/subject/sourceLocator",
+        "before": "/opt/homebrew/bin/codex",
+        "value": "/private/source/codex"
+      },
+      "expected": {
+        "kind": "schema-valid",
+        "fingerprintDelta": {
+          "subjectFingerprint": "changed",
+          "semanticFingerprint": "unchanged",
+          "compatibilityFingerprint": "changed"
+        },
+        "storedFingerprints": "inconsistent"
+      }
+    },
+    {
+      "name": "unknown-machine-schema-field",
+      "operation": {
+        "kind": "add-member",
+        "pointer": "/semantic/machineSchemas/reader-result-v1/note",
+        "value": "diagnostic"
+      },
+      "expected": {
+        "kind": "schema-invalid"
+      }
+    }
+  ],
+  "oracleMutantCases": [
+    {
+      "name": "interface-no-op-accepted",
+      "operation": {
+        "kind": "replace-value",
+        "pointer": "/contractVersion",
+        "before": "codex-interface-v1",
+        "value": "codex-interface-v1"
+      },
+      "expected": {
+        "kind": "operation-invalid"
+      }
+    }
+  ],
+  "hookOutputCases": [
+    {
+      "name": "user-prompt-submit-block-with-reason",
+      "event": "UserPromptSubmit",
+      "value": {
+        "decision": "block",
+        "reason": "Нужна подтверждённая рабочая копия"
+      },
+      "expected": "valid"
+    },
+    {
+      "name": "user-prompt-submit-additional-context-utf8-2048",
+      "event": "UserPromptSubmit",
+      "value": {
+        "hookSpecificOutput": {
+          "hookEventName": "UserPromptSubmit",
+          "additionalContext": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+        }
+      },
+      "expectedUtf8Bytes": 2048,
+      "expected": "valid"
+    },
+    {
+      "name": "user-prompt-submit-additional-context-number",
+      "event": "UserPromptSubmit",
+      "value": {
+        "hookSpecificOutput": {
+          "hookEventName": "UserPromptSubmit",
+          "additionalContext": 2048
+        }
+      },
+      "expected": "invalid-additional-context-type"
+    },
+    {
+      "name": "user-prompt-submit-additional-context-utf8-2049",
+      "event": "UserPromptSubmit",
+      "value": {
+        "hookSpecificOutput": {
+          "hookEventName": "UserPromptSubmit",
+          "additionalContext": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééa"
+        }
+      },
+      "expectedUtf8Bytes": 2049,
+      "expected": "invalid-additional-context-size"
+    },
+    {
+      "name": "user-prompt-submit-block-whitespace-reason",
+      "event": "UserPromptSubmit",
+      "value": {
+        "decision": "block",
+        "reason": " \t\n "
+      },
+      "expected": "invalid-empty-trimmed-reason"
+    },
+    {
+      "name": "stop-hook-specific-output-forbidden",
+      "event": "Stop",
+      "value": {
+        "hookSpecificOutput": {
+          "hookEventName": "UserPromptSubmit"
+        }
+      },
+      "expected": "schema-invalid"
+    }
+  ],
+  "utf8BoundaryCases": [
+    {
+      "name": "semantic-string-256-bytes",
+      "byteLimit": 256,
+      "utf8Bytes": 256,
+      "operation": {
+        "kind": "replace-value",
+        "pointer": "/semantic/commands/0",
+        "before": "app-server",
+        "value": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+      },
+      "recalculateStoredFingerprints": true,
+      "expected": {
+        "schema": "valid",
+        "byteValidation": "accepted",
+        "artifactConsistency": "consistent",
+        "recalculatedCanonical": {
+          "subjectUtf8": "{\"architecture\":\"arm64\",\"cdHash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"device\":1,\"inode\":2,\"mode\":320,\"mtimeNs\":3,\"platform\":\"darwin\",\"signatureIdentifier\":\"codex\",\"size\":1,\"snapshotPath\":\"/private/codex\",\"snapshotSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sourceLocator\":\"/opt/homebrew/bin/codex\",\"sourceObservedSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"teamIdentifier\":\"2DC432GLL2\",\"uid\":501,\"version\":\"codex-cli 0.144.5\"}",
+          "semanticUtf8": "{\"appServerMethods\":[\"model/list\"],\"arg0AdapterVersion\":\"arg0-v1\",\"bundledCatalogFingerprint\":\"737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445\",\"childProfiles\":{\"classifier\":\"2279f006e7885a4526400d0fb87a0ca7718449a9489b88143e81409bfafaaca0\",\"reader\":\"5e8b319872a53e0c59f49afb794228c2808c2273755f40e412c0a39f6a76ca5d\",\"writer\":\"6fc2875d32c21d9bf93eaff59569555231a1765a284d75baf574347f4533cc62\"},\"commands\":[\"éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\"],\"contractVersion\":\"codex-interface-v1\",\"extensionRelease\":\"0.2.0\",\"machineSchemas\":{\"account-evidence-v1\":{\"schemaId\":\"account-evidence-v1\",\"schemaSha256\":\"35fe24653fe033295c98eefed4650d23d83afc3edfdd04ecf1aaeec4940c21c4\"},\"boundary-result-v1\":{\"schemaId\":\"boundary-result-v1\",\"schemaSha256\":\"6744a24ed94a48d20805485b961c7b029ada9d572a57158fe8850d492b803786\"},\"child-jsonl-v1\":{\"schemaId\":\"child-jsonl-v1\",\"schemaSha256\":\"8ab243b4227dfc15330e6c11bc72148701049441a4973bab3c13842acf58f101\"},\"child-profile-v1\":{\"schemaId\":\"child-profile-v1\",\"schemaSha256\":\"c9cd3739129b340258b5bc88f9f680cec3001cae91bf97c0490c599c57febf36\"},\"config-requirements-normalized-v1\":{\"schemaId\":\"config-requirements-normalized-v1\",\"schemaSha256\":\"3b89c1072dc1679388004908d74b170d9691ae1c91a5a108d450a4526d6da987\"},\"config-requirements-vector-recipe-v1\":{\"schemaId\":\"config-requirements-vector-recipe-v1\",\"schemaSha256\":\"91b9b770bc4370ae125c5b892d4ed1d7b1cdcef3b8fdb5996c1955fca59b2068\"},\"interface-evidence-v1\":{\"schemaId\":\"interface-evidence-v1\",\"schemaSha256\":\"dd54db0a86274a3110c4bee758c54a181a351b7129927fb1eab79d42923e2627\"},\"otel-logs-v1\":{\"schemaId\":\"otel-logs-v1\",\"schemaSha256\":\"fced1969a64ec84c4dfd0baeca88ae41595abfb6f3144a5b71ffc22419d1c388\"},\"reader-result-v1\":{\"schemaId\":\"reader-result-v1\",\"schemaSha256\":\"2d87d9d810f0b640ead4bcfaf75b093c72b53abdc38925ad606c7e2554854bb8\"},\"routing-policy-v2\":{\"schemaId\":\"routing-policy-v2\",\"schemaSha256\":\"3aceac0be99dc3d58f18c4ab91848c08ae88c6179b683ebd4abce90e0792ba05\"},\"writer-result-v1\":{\"schemaId\":\"writer-result-v1\",\"schemaSha256\":\"c61c228c534819576116a76fb78269e2d7df405ddd6284e25c299c81eaa97f66\"}},\"negativeProbeIds\":[\"unknown-event\"],\"options\":[\"--json\"],\"platformAdapter\":\"darwin-arm64-v1\",\"probeBudgets\":{\"full\":300},\"routingPolicyFingerprint\":\"c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6\"}",
+          "compatibilityUtf8": "{\"contractVersion\":\"codex-interface-v1\",\"semanticFingerprint\":\"8903cf1799026072c7ce975db25d963beb0670e4207a1d7a46653c81147c6541\",\"subjectFingerprint\":\"c7a60f70c3c0c976bbe4ed83c88c7e718bf0a187e0c3f5657e5ba9dd1795db0f\"}"
+        },
+        "recalculatedFingerprints": {
+          "subjectFingerprint": "c7a60f70c3c0c976bbe4ed83c88c7e718bf0a187e0c3f5657e5ba9dd1795db0f",
+          "semanticFingerprint": "8903cf1799026072c7ce975db25d963beb0670e4207a1d7a46653c81147c6541",
+          "compatibilityFingerprint": "5b167a65549adeab590bd3334af032defc4ac280d5e21ee8f1657eb891b88e12"
+        }
+      }
+    },
+    {
+      "name": "semantic-string-257-bytes",
+      "byteLimit": 256,
+      "utf8Bytes": 257,
+      "operation": {
+        "kind": "replace-value",
+        "pointer": "/semantic/commands/0",
+        "before": "app-server",
+        "value": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééa"
+      },
+      "recalculateStoredFingerprints": true,
+      "expected": {
+        "schema": "valid",
+        "byteValidation": "rejected",
+        "artifactConsistency": "consistent",
+        "recalculatedCanonical": {
+          "subjectUtf8": "{\"architecture\":\"arm64\",\"cdHash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"device\":1,\"inode\":2,\"mode\":320,\"mtimeNs\":3,\"platform\":\"darwin\",\"signatureIdentifier\":\"codex\",\"size\":1,\"snapshotPath\":\"/private/codex\",\"snapshotSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sourceLocator\":\"/opt/homebrew/bin/codex\",\"sourceObservedSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"teamIdentifier\":\"2DC432GLL2\",\"uid\":501,\"version\":\"codex-cli 0.144.5\"}",
+          "semanticUtf8": "{\"appServerMethods\":[\"model/list\"],\"arg0AdapterVersion\":\"arg0-v1\",\"bundledCatalogFingerprint\":\"737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445\",\"childProfiles\":{\"classifier\":\"2279f006e7885a4526400d0fb87a0ca7718449a9489b88143e81409bfafaaca0\",\"reader\":\"5e8b319872a53e0c59f49afb794228c2808c2273755f40e412c0a39f6a76ca5d\",\"writer\":\"6fc2875d32c21d9bf93eaff59569555231a1765a284d75baf574347f4533cc62\"},\"commands\":[\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééa\"],\"contractVersion\":\"codex-interface-v1\",\"extensionRelease\":\"0.2.0\",\"machineSchemas\":{\"account-evidence-v1\":{\"schemaId\":\"account-evidence-v1\",\"schemaSha256\":\"35fe24653fe033295c98eefed4650d23d83afc3edfdd04ecf1aaeec4940c21c4\"},\"boundary-result-v1\":{\"schemaId\":\"boundary-result-v1\",\"schemaSha256\":\"6744a24ed94a48d20805485b961c7b029ada9d572a57158fe8850d492b803786\"},\"child-jsonl-v1\":{\"schemaId\":\"child-jsonl-v1\",\"schemaSha256\":\"8ab243b4227dfc15330e6c11bc72148701049441a4973bab3c13842acf58f101\"},\"child-profile-v1\":{\"schemaId\":\"child-profile-v1\",\"schemaSha256\":\"c9cd3739129b340258b5bc88f9f680cec3001cae91bf97c0490c599c57febf36\"},\"config-requirements-normalized-v1\":{\"schemaId\":\"config-requirements-normalized-v1\",\"schemaSha256\":\"3b89c1072dc1679388004908d74b170d9691ae1c91a5a108d450a4526d6da987\"},\"config-requirements-vector-recipe-v1\":{\"schemaId\":\"config-requirements-vector-recipe-v1\",\"schemaSha256\":\"91b9b770bc4370ae125c5b892d4ed1d7b1cdcef3b8fdb5996c1955fca59b2068\"},\"interface-evidence-v1\":{\"schemaId\":\"interface-evidence-v1\",\"schemaSha256\":\"dd54db0a86274a3110c4bee758c54a181a351b7129927fb1eab79d42923e2627\"},\"otel-logs-v1\":{\"schemaId\":\"otel-logs-v1\",\"schemaSha256\":\"fced1969a64ec84c4dfd0baeca88ae41595abfb6f3144a5b71ffc22419d1c388\"},\"reader-result-v1\":{\"schemaId\":\"reader-result-v1\",\"schemaSha256\":\"2d87d9d810f0b640ead4bcfaf75b093c72b53abdc38925ad606c7e2554854bb8\"},\"routing-policy-v2\":{\"schemaId\":\"routing-policy-v2\",\"schemaSha256\":\"3aceac0be99dc3d58f18c4ab91848c08ae88c6179b683ebd4abce90e0792ba05\"},\"writer-result-v1\":{\"schemaId\":\"writer-result-v1\",\"schemaSha256\":\"c61c228c534819576116a76fb78269e2d7df405ddd6284e25c299c81eaa97f66\"}},\"negativeProbeIds\":[\"unknown-event\"],\"options\":[\"--json\"],\"platformAdapter\":\"darwin-arm64-v1\",\"probeBudgets\":{\"full\":300},\"routingPolicyFingerprint\":\"c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6\"}",
+          "compatibilityUtf8": "{\"contractVersion\":\"codex-interface-v1\",\"semanticFingerprint\":\"830a1b839fc0b189410b797587763375755a411b2ae9b2d3698c6122ee5a6e4f\",\"subjectFingerprint\":\"c7a60f70c3c0c976bbe4ed83c88c7e718bf0a187e0c3f5657e5ba9dd1795db0f\"}"
+        },
+        "recalculatedFingerprints": {
+          "subjectFingerprint": "c7a60f70c3c0c976bbe4ed83c88c7e718bf0a187e0c3f5657e5ba9dd1795db0f",
+          "semanticFingerprint": "830a1b839fc0b189410b797587763375755a411b2ae9b2d3698c6122ee5a6e4f",
+          "compatibilityFingerprint": "be3e6a388588e58120cc60efd5fd84eb171e8c45c21ea9d9e24df84ccab446d7"
+        }
+      }
+    },
+    {
+      "name": "subject-path-4096-bytes",
+      "byteLimit": 4096,
+      "utf8Bytes": 4096,
+      "operation": {
+        "kind": "replace-value",
+        "pointer": "/subject/sourceLocator",
+        "before": "/opt/homebrew/bin/codex",
+        "value": "/éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééa"
+      },
+      "recalculateStoredFingerprints": true,
+      "expected": {
+        "schema": "valid",
+        "byteValidation": "accepted",
+        "artifactConsistency": "consistent",
+        "recalculatedCanonical": {
+          "subjectUtf8": "{\"architecture\":\"arm64\",\"cdHash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"device\":1,\"inode\":2,\"mode\":320,\"mtimeNs\":3,\"platform\":\"darwin\",\"signatureIdentifier\":\"codex\",\"size\":1,\"snapshotPath\":\"/private/codex\",\"snapshotSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sourceLocator\":\"/éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééa\",\"sourceObservedSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"teamIdentifier\":\"2DC432GLL2\",\"uid\":501,\"version\":\"codex-cli 0.144.5\"}",
+          "semanticUtf8": "{\"appServerMethods\":[\"model/list\"],\"arg0AdapterVersion\":\"arg0-v1\",\"bundledCatalogFingerprint\":\"737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445\",\"childProfiles\":{\"classifier\":\"2279f006e7885a4526400d0fb87a0ca7718449a9489b88143e81409bfafaaca0\",\"reader\":\"5e8b319872a53e0c59f49afb794228c2808c2273755f40e412c0a39f6a76ca5d\",\"writer\":\"6fc2875d32c21d9bf93eaff59569555231a1765a284d75baf574347f4533cc62\"},\"commands\":[\"app-server\"],\"contractVersion\":\"codex-interface-v1\",\"extensionRelease\":\"0.2.0\",\"machineSchemas\":{\"account-evidence-v1\":{\"schemaId\":\"account-evidence-v1\",\"schemaSha256\":\"35fe24653fe033295c98eefed4650d23d83afc3edfdd04ecf1aaeec4940c21c4\"},\"boundary-result-v1\":{\"schemaId\":\"boundary-result-v1\",\"schemaSha256\":\"6744a24ed94a48d20805485b961c7b029ada9d572a57158fe8850d492b803786\"},\"child-jsonl-v1\":{\"schemaId\":\"child-jsonl-v1\",\"schemaSha256\":\"8ab243b4227dfc15330e6c11bc72148701049441a4973bab3c13842acf58f101\"},\"child-profile-v1\":{\"schemaId\":\"child-profile-v1\",\"schemaSha256\":\"c9cd3739129b340258b5bc88f9f680cec3001cae91bf97c0490c599c57febf36\"},\"config-requirements-normalized-v1\":{\"schemaId\":\"config-requirements-normalized-v1\",\"schemaSha256\":\"3b89c1072dc1679388004908d74b170d9691ae1c91a5a108d450a4526d6da987\"},\"config-requirements-vector-recipe-v1\":{\"schemaId\":\"config-requirements-vector-recipe-v1\",\"schemaSha256\":\"91b9b770bc4370ae125c5b892d4ed1d7b1cdcef3b8fdb5996c1955fca59b2068\"},\"interface-evidence-v1\":{\"schemaId\":\"interface-evidence-v1\",\"schemaSha256\":\"dd54db0a86274a3110c4bee758c54a181a351b7129927fb1eab79d42923e2627\"},\"otel-logs-v1\":{\"schemaId\":\"otel-logs-v1\",\"schemaSha256\":\"fced1969a64ec84c4dfd0baeca88ae41595abfb6f3144a5b71ffc22419d1c388\"},\"reader-result-v1\":{\"schemaId\":\"reader-result-v1\",\"schemaSha256\":\"2d87d9d810f0b640ead4bcfaf75b093c72b53abdc38925ad606c7e2554854bb8\"},\"routing-policy-v2\":{\"schemaId\":\"routing-policy-v2\",\"schemaSha256\":\"3aceac0be99dc3d58f18c4ab91848c08ae88c6179b683ebd4abce90e0792ba05\"},\"writer-result-v1\":{\"schemaId\":\"writer-result-v1\",\"schemaSha256\":\"c61c228c534819576116a76fb78269e2d7df405ddd6284e25c299c81eaa97f66\"}},\"negativeProbeIds\":[\"unknown-event\"],\"options\":[\"--json\"],\"platformAdapter\":\"darwin-arm64-v1\",\"probeBudgets\":{\"full\":300},\"routingPolicyFingerprint\":\"c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6\"}",
+          "compatibilityUtf8": "{\"contractVersion\":\"codex-interface-v1\",\"semanticFingerprint\":\"7341a7541a8066d325a2af89cc699c6631a5ba5ad776f9bb6ac573fcaeed032a\",\"subjectFingerprint\":\"c567bb500234e7bafefdc394ff666ea910590279c80b8c6bfe27b8e3c6895bf2\"}"
+        },
+        "recalculatedFingerprints": {
+          "subjectFingerprint": "c567bb500234e7bafefdc394ff666ea910590279c80b8c6bfe27b8e3c6895bf2",
+          "semanticFingerprint": "7341a7541a8066d325a2af89cc699c6631a5ba5ad776f9bb6ac573fcaeed032a",
+          "compatibilityFingerprint": "921fa3f8538c42767fe714097bafff4c430797fb4f313215b414f60c8968f28c"
+        }
+      }
+    },
+    {
+      "name": "subject-path-4097-bytes",
+      "byteLimit": 4096,
+      "utf8Bytes": 4097,
+      "operation": {
+        "kind": "replace-value",
+        "pointer": "/subject/sourceLocator",
+        "before": "/opt/homebrew/bin/codex",
+        "value": "/éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+      },
+      "recalculateStoredFingerprints": true,
+      "expected": {
+        "schema": "valid",
+        "byteValidation": "rejected",
+        "artifactConsistency": "consistent",
+        "recalculatedCanonical": {
+          "subjectUtf8": "{\"architecture\":\"arm64\",\"cdHash\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"device\":1,\"inode\":2,\"mode\":320,\"mtimeNs\":3,\"platform\":\"darwin\",\"signatureIdentifier\":\"codex\",\"size\":1,\"snapshotPath\":\"/private/codex\",\"snapshotSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sourceLocator\":\"/éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\",\"sourceObservedSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"teamIdentifier\":\"2DC432GLL2\",\"uid\":501,\"version\":\"codex-cli 0.144.5\"}",
+          "semanticUtf8": "{\"appServerMethods\":[\"model/list\"],\"arg0AdapterVersion\":\"arg0-v1\",\"bundledCatalogFingerprint\":\"737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445\",\"childProfiles\":{\"classifier\":\"2279f006e7885a4526400d0fb87a0ca7718449a9489b88143e81409bfafaaca0\",\"reader\":\"5e8b319872a53e0c59f49afb794228c2808c2273755f40e412c0a39f6a76ca5d\",\"writer\":\"6fc2875d32c21d9bf93eaff59569555231a1765a284d75baf574347f4533cc62\"},\"commands\":[\"app-server\"],\"contractVersion\":\"codex-interface-v1\",\"extensionRelease\":\"0.2.0\",\"machineSchemas\":{\"account-evidence-v1\":{\"schemaId\":\"account-evidence-v1\",\"schemaSha256\":\"35fe24653fe033295c98eefed4650d23d83afc3edfdd04ecf1aaeec4940c21c4\"},\"boundary-result-v1\":{\"schemaId\":\"boundary-result-v1\",\"schemaSha256\":\"6744a24ed94a48d20805485b961c7b029ada9d572a57158fe8850d492b803786\"},\"child-jsonl-v1\":{\"schemaId\":\"child-jsonl-v1\",\"schemaSha256\":\"8ab243b4227dfc15330e6c11bc72148701049441a4973bab3c13842acf58f101\"},\"child-profile-v1\":{\"schemaId\":\"child-profile-v1\",\"schemaSha256\":\"c9cd3739129b340258b5bc88f9f680cec3001cae91bf97c0490c599c57febf36\"},\"config-requirements-normalized-v1\":{\"schemaId\":\"config-requirements-normalized-v1\",\"schemaSha256\":\"3b89c1072dc1679388004908d74b170d9691ae1c91a5a108d450a4526d6da987\"},\"config-requirements-vector-recipe-v1\":{\"schemaId\":\"config-requirements-vector-recipe-v1\",\"schemaSha256\":\"91b9b770bc4370ae125c5b892d4ed1d7b1cdcef3b8fdb5996c1955fca59b2068\"},\"interface-evidence-v1\":{\"schemaId\":\"interface-evidence-v1\",\"schemaSha256\":\"dd54db0a86274a3110c4bee758c54a181a351b7129927fb1eab79d42923e2627\"},\"otel-logs-v1\":{\"schemaId\":\"otel-logs-v1\",\"schemaSha256\":\"fced1969a64ec84c4dfd0baeca88ae41595abfb6f3144a5b71ffc22419d1c388\"},\"reader-result-v1\":{\"schemaId\":\"reader-result-v1\",\"schemaSha256\":\"2d87d9d810f0b640ead4bcfaf75b093c72b53abdc38925ad606c7e2554854bb8\"},\"routing-policy-v2\":{\"schemaId\":\"routing-policy-v2\",\"schemaSha256\":\"3aceac0be99dc3d58f18c4ab91848c08ae88c6179b683ebd4abce90e0792ba05\"},\"writer-result-v1\":{\"schemaId\":\"writer-result-v1\",\"schemaSha256\":\"c61c228c534819576116a76fb78269e2d7df405ddd6284e25c299c81eaa97f66\"}},\"negativeProbeIds\":[\"unknown-event\"],\"options\":[\"--json\"],\"platformAdapter\":\"darwin-arm64-v1\",\"probeBudgets\":{\"full\":300},\"routingPolicyFingerprint\":\"c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6\"}",
+          "compatibilityUtf8": "{\"contractVersion\":\"codex-interface-v1\",\"semanticFingerprint\":\"7341a7541a8066d325a2af89cc699c6631a5ba5ad776f9bb6ac573fcaeed032a\",\"subjectFingerprint\":\"3cff620164c73cf15858251d3bca8c4788a06b4468226decff23460ca7cf7be4\"}"
+        },
+        "recalculatedFingerprints": {
+          "subjectFingerprint": "3cff620164c73cf15858251d3bca8c4788a06b4468226decff23460ca7cf7be4",
+          "semanticFingerprint": "7341a7541a8066d325a2af89cc699c6631a5ba5ad776f9bb6ac573fcaeed032a",
+          "compatibilityFingerprint": "c6fb3050f5d4d62f958630f64c17f4ea572b38b361fec5a6470b2b40e4baac39"
+        }
+      }
+    }
+  ]
+}

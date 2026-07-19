@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/config-requirements-vector-case-v1.schema.json",
+  "title": "config-requirements-vector-case-v1",
+  "$ref": "#/$defs/case",
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "selectedPair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "reasoningEffort"],
+      "properties": {
+        "model": {"type": "string", "minLength": 1, "maxLength": 128},
+        "reasoningEffort": {"enum": ["low", "medium", "high", "xhigh", "max"]}
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profileCase", "selectedPair"],
+      "properties": {
+        "profileCase": {"enum": ["classifier", "reader", "writer"]},
+        "selectedPair": {"$ref": "#/$defs/selectedPair"}
+      }
+    },
+    "source": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": {"const": "parsed"},
+            "value": true
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": {"const": "raw-utf8"},
+            "value": {"type": "string"}
+          }
+        }
+      ]
+    },
+    "normalizationComplete": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "normalized", "canonicalUtf8", "fingerprint"],
+      "properties": {
+        "status": {"const": "complete"},
+        "normalized": true,
+        "canonicalUtf8": {"type": "string"},
+        "fingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "normalizationRejected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "phase", "errorCode"],
+      "properties": {
+        "status": {"const": "rejected"},
+        "phase": {
+          "enum": [
+            "strict-parse",
+            "raw-guards",
+            "envelope",
+            "structure",
+            "normalization",
+            "normalized-guards",
+            "canonicalization"
+          ]
+        },
+        "errorCode": {
+          "enum": ["MANAGED_REQUIREMENT_MALFORMED", "MANAGED_REQUIREMENT_UNSUPPORTED"]
+        }
+      }
+    },
+    "compatibilityCompatible": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {"status": {"const": "compatible"}}
+    },
+    "compatibilityRejected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "errorCode"],
+      "properties": {
+        "status": {"const": "rejected"},
+        "errorCode": {
+          "enum": ["MANAGED_REQUIREMENT_INCOMPATIBLE", "MANAGED_REQUIREMENT_UNSUPPORTED"]
+        }
+      }
+    },
+    "compatibilityNotRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {"status": {"const": "not-run"}}
+    },
+    "expected": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["normalization", "compatibility"],
+          "properties": {
+            "normalization": {"$ref": "#/$defs/normalizationComplete"},
+            "compatibility": {"$ref": "#/$defs/compatibilityCompatible"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["normalization", "compatibility"],
+          "properties": {
+            "normalization": {"$ref": "#/$defs/normalizationComplete"},
+            "compatibility": {"$ref": "#/$defs/compatibilityRejected"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["normalization", "compatibility"],
+          "properties": {
+            "normalization": {"$ref": "#/$defs/normalizationRejected"},
+            "compatibility": {"$ref": "#/$defs/compatibilityNotRun"}
+          }
+        }
+      ]
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "source", "contextRef", "expected"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "source": {"$ref": "#/$defs/source"},
+        "contextRef": {"type": "string", "minLength": 1},
+        "expected": {"$ref": "#/$defs/expected"}
+      }
+    }
+  }
+}

@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/lifecycle-vector-suite-v2.schema.json",
+  "title": "lifecycle-vector-suite-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "fixtures", "positiveCases", "negativeCases", "stepCoherenceRules", "semanticMutants", "semanticChecks"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "fixtures": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["automaton", "fingerprintRegistry", "databaseProjection", "runtimeQuiescenceProjection", "legacyQuiescenceProjection", "externalCommandProjection", "shutdownIntentProjection", "terminalJournalFreezeStep", "shutdownSocketCleanupStep", "recoveryResumeCleanupStep", "recoveryAbsenceSyncStep", "legacySigtermStep", "legacyGatewayFenceStep", "externalProcessObserveStep", "watchdogSpawnStep", "watchdogArmStep", "watchdogDisarmStep", "controllerCandidateSpawnStep", "launcherInstallStep", "activationLinkStep", "commitReceiptPublishStep", "legacyBridgeSwapStep", "legacyBridgeSwapRestoreStep", "migrationDiscoveredJournal", "migrationExitPendingJournal", "migrationFencedJournal", "activationFencedJournal", "abortReversibleJournal", "abortTerminalJournal", "recoveryOverlayJournal", "recoveryAppendOnlyScenario", "cleanupBoundaryJournal", "activationCommitReceipt", "cleanupReceipt", "cleanupBoundaryReceipt", "installationTombstone", "healthRequest", "smartStartRequest", "reserveLaunchPermitRequest", "commitLaunchPermitRequest", "healthResponse", "shutdownRequest", "shutdownResponse", "errorResponse", "replayReceiptResponse", "controllerMutationExchanges", "controllerReplayExchange", "activationBindingScenario"],
+      "properties": {
+        "automaton": {"$ref": "lifecycle-automaton-v2.schema.json"},
+        "fingerprintRegistry": {"$ref": "lifecycle-fingerprint-registry-v2.schema.json"},
+        "databaseProjection": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "database-object-v2"}}},
+        "runtimeQuiescenceProjection": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "quiescence-proof-v2"}, "value": {"properties": {"proofKind": {"const": "runtime-v2"}}}}},
+        "legacyQuiescenceProjection": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "quiescence-proof-v2"}, "value": {"properties": {"proofKind": {"const": "legacy-migration"}}}}},
+        "externalCommandProjection": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "external-command-v2"}}},
+        "shutdownIntentProjection": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "shutdown-intent-v2"}}},
+        "terminalJournalFreezeStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "terminal_journal_freeze"}}},
+        "shutdownSocketCleanupStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "shutdown_socket_cleanup"}}},
+        "recoveryResumeCleanupStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "recovery_resume_operation"}}},
+        "recoveryAbsenceSyncStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "recovery_absence_verify"}}},
+        "legacySigtermStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "legacy_sigterm"}}},
+        "legacyGatewayFenceStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "legacy_gateway_fence"}}},
+        "externalProcessObserveStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "external_process_observe"}}},
+        "watchdogSpawnStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "watchdog_spawn"}}},
+        "watchdogArmStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "watchdog_arm"}}},
+        "watchdogDisarmStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "watchdog_disarm"}}},
+        "controllerCandidateSpawnStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "controller_candidate_spawn"}}},
+        "launcherInstallStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "launchers"}}},
+        "activationLinkStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "activation_link"}}},
+        "commitReceiptPublishStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "commit_receipt_publish"}}},
+        "legacyBridgeSwapStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "legacy_bridge_swap"}}},
+        "legacyBridgeSwapRestoreStep": {"$ref": "operation-step-v2.schema.json", "properties": {"kind": {"const": "legacy_bridge_swap_restore"}}},
+        "migrationDiscoveredJournal": {"$ref": "operation-journal-v2.schema.json", "properties": {"kind": {"const": "legacy-migration"}, "phase": {"const": "DISCOVERED"}}},
+        "migrationExitPendingJournal": {"$ref": "operation-journal-v2.schema.json", "properties": {"kind": {"const": "legacy-migration"}, "phase": {"const": "LEGACY_EXIT_PENDING"}}},
+        "migrationFencedJournal": {"$ref": "operation-journal-v2.schema.json", "properties": {"kind": {"const": "legacy-migration"}, "phase": {"const": "FENCED"}}},
+        "activationFencedJournal": {"$ref": "operation-journal-v2.schema.json", "properties": {"kind": {"const": "activation"}, "phase": {"const": "FENCED"}}},
+        "abortReversibleJournal": {"$ref": "operation-journal-v2.schema.json", "properties": {"phase": {"const": "ABORTING"}, "recoveryPolicy": {"const": "REVERSIBLE"}}},
+        "abortTerminalJournal": {"$ref": "operation-journal-v2.schema.json", "properties": {"phase": {"const": "TERMINAL_FROZEN"}, "recoveryPolicy": {"const": "REVERSIBLE"}, "terminalDeleteIntent": {"properties": {"terminalKind": {"const": "ABORT"}}}}},
+        "recoveryOverlayJournal": {"$ref": "operation-journal-v2.schema.json", "properties": {"recoveryPlans": {"minItems": 2}}},
+        "recoveryAppendOnlyScenario": {"$ref": "#/$defs/recoveryAppendOnlyScenario"},
+        "cleanupBoundaryJournal": {"$ref": "cleanup-journal-v2.schema.json", "properties": {"objects": {"minItems": 127}, "steps": {"minItems": 128}}},
+        "activationCommitReceipt": {"$ref": "activation-commit-receipt-v2.schema.json"},
+        "cleanupReceipt": {"$ref": "cleanup-receipt-v2.schema.json"},
+        "cleanupBoundaryReceipt": {"$ref": "cleanup-receipt-v2.schema.json", "properties": {"removedObjects": {"minItems": 127}}},
+        "installationTombstone": {"$ref": "installation-tombstone-v2.schema.json"},
+        "healthRequest": {"$ref": "controller-protocol-v2.schema.json", "properties": {"messageType": {"const": "request"}, "method": {"const": "health"}}},
+        "smartStartRequest": {"$ref": "controller-protocol-v2.schema.json", "properties": {"messageType": {"const": "request"}, "method": {"const": "smart_start"}}},
+        "reserveLaunchPermitRequest": {"$ref": "controller-protocol-v2.schema.json", "properties": {"messageType": {"const": "request"}, "method": {"const": "reserve_launch_permit"}}},
+        "commitLaunchPermitRequest": {"$ref": "controller-protocol-v2.schema.json", "properties": {"messageType": {"const": "request"}, "method": {"const": "commit_launch_permit"}}},
+        "healthResponse": {"$ref": "controller-protocol-v2.schema.json", "properties": {"messageType": {"const": "response"}, "responseKind": {"const": "HEALTH"}}},
+        "shutdownRequest": {"$ref": "controller-protocol-v2.schema.json", "properties": {"messageType": {"const": "request"}, "method": {"const": "shutdown"}}},
+        "shutdownResponse": {"$ref": "controller-protocol-v2.schema.json", "properties": {"messageType": {"const": "response"}, "method": {"const": "shutdown"}, "responseKind": {"const": "SUCCESS"}}},
+        "errorResponse": {"$ref": "controller-protocol-v2.schema.json", "properties": {"messageType": {"const": "response"}, "responseKind": {"const": "ERROR"}}},
+        "replayReceiptResponse": {"$ref": "controller-protocol-v2.schema.json", "properties": {"messageType": {"const": "response"}, "responseKind": {"const": "REPLAY_RECEIPT"}}},
+        "controllerMutationExchanges": {"$ref": "#/$defs/controllerMutationExchanges"},
+        "controllerReplayExchange": {"$ref": "#/$defs/controllerReplayExchange"},
+        "activationBindingScenario": {"$ref": "#/$defs/activationBindingScenario"}
+      }
+    },
+    "positiveCases": {
+      "type": "array",
+      "minItems": 18,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/positiveCase"}
+    },
+    "negativeCases": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/negativeCase"}
+    },
+    "stepCoherenceRules": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/coherenceRule"},
+      "required": ["gate_close", "stage", "verify_staged", "maintenance_begin", "wait_runtime_quiescent", "maintenance_strengthen", "controller_shutdown", "shutdown_socket_cleanup", "database_prepare", "activation_link", "recovery_forward_only", "marketplace_registry", "plugin_registry", "launchers", "controller_candidate_spawn", "controller_accept", "controller_recover", "verify_candidate", "manifest_commit", "maintenance_resume", "terminal_journal_freeze", "commit_receipt_publish", "gate_open", "legacy_gateway_fence", "legacy_bridge_prepare", "legacy_bridge_swap", "legacy_marketplace_archive", "watchdog_spawn", "watchdog_arm", "watchdog_disarm", "legacy_sigstop", "legacy_quiescence", "migration_forward_only", "legacy_sigterm", "legacy_sigcont", "external_process_observe", "legacy_socket_cleanup", "legacy_fenced_snapshot_commit", "legacy_marketplace_unarchive", "legacy_bridge_swap_restore", "legacy_bridge_remove", "legacy_gateway_restore", "activation_link_restore", "registry_restore", "launchers_restore", "controller_previous_accept", "manifest_restore", "database_candidate_retire", "staged_generation_retire", "abort_receipt_publish", "abort_journal_close", "uninstall_plugin_remove", "uninstall_marketplace_remove", "uninstall_launchers_restore", "uninstall_activation_link_remove", "uninstall_database_remove", "uninstall_activation_remove", "uninstall_manifest_remove", "uninstall_fallback_remove", "uninstall_admin_remove", "uninstall_receipt_publish", "uninstall_tombstone_publish", "uninstall_journal_close", "cleanup_object_delete", "cleanup_receipt_publish", "cleanup_journal_close", "recovery_inspect", "recovery_resume_operation", "recovery_receipt_publish", "recovery_journal_close", "recovery_absence_verify", "external_exit_recheck"],
+      "propertyNames": {"enum": ["gate_close", "stage", "verify_staged", "maintenance_begin", "wait_runtime_quiescent", "maintenance_strengthen", "controller_shutdown", "shutdown_socket_cleanup", "database_prepare", "activation_link", "recovery_forward_only", "marketplace_registry", "plugin_registry", "launchers", "controller_candidate_spawn", "controller_accept", "controller_recover", "verify_candidate", "manifest_commit", "maintenance_resume", "terminal_journal_freeze", "commit_receipt_publish", "gate_open", "legacy_gateway_fence", "legacy_bridge_prepare", "legacy_bridge_swap", "legacy_marketplace_archive", "watchdog_spawn", "watchdog_arm", "watchdog_disarm", "legacy_sigstop", "legacy_quiescence", "migration_forward_only", "legacy_sigterm", "legacy_sigcont", "external_process_observe", "legacy_socket_cleanup", "legacy_fenced_snapshot_commit", "legacy_marketplace_unarchive", "legacy_bridge_swap_restore", "legacy_bridge_remove", "legacy_gateway_restore", "activation_link_restore", "registry_restore", "launchers_restore", "controller_previous_accept", "manifest_restore", "database_candidate_retire", "staged_generation_retire", "abort_receipt_publish", "abort_journal_close", "uninstall_plugin_remove", "uninstall_marketplace_remove", "uninstall_launchers_restore", "uninstall_activation_link_remove", "uninstall_database_remove", "uninstall_activation_remove", "uninstall_manifest_remove", "uninstall_fallback_remove", "uninstall_admin_remove", "uninstall_receipt_publish", "uninstall_tombstone_publish", "uninstall_journal_close", "cleanup_object_delete", "cleanup_receipt_publish", "cleanup_journal_close", "recovery_inspect", "recovery_resume_operation", "recovery_receipt_publish", "recovery_journal_close", "recovery_absence_verify", "external_exit_recheck"]},
+      "minProperties": 72,
+      "maxProperties": 72
+    },
+    "semanticMutants": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/semanticMutant"}
+    },
+    "semanticChecks": {
+      "const": [
+        "fingerprint-domains-unique",
+        "fingerprint-projections-nonrecursive",
+        "controller-command-result-fingerprint-nonrecursive",
+        "step-kinds-bidirectionally-covered",
+        "mutable-journal-steps-have-two-crash-windows",
+        "atomic-and-post-freeze-carriers-have-explicit-recovery",
+        "operation-journal-existence-implies-completed-gate-close",
+        "cleanup-journal-creation-boundary-exact",
+        "terminal-presence-matrix-complete",
+        "terminal-journal-immutable-after-freeze",
+        "journal-absence-complete-only-after-parent-sync",
+        "activation-receipt-has-no-epoch-or-instance",
+        "database-sidecars-role-stable",
+        "migration-desired-null-before-fenced",
+        "migration-same-journal-populates-fenced-before-and-desired",
+        "smart-start-reserve-commit-gates-identical",
+        "shutdown-increments-epoch-by-one",
+        "socket-cleanup-follows-shutdown",
+        "socket-cleanup-requires-exit-and-lock-proofs",
+        "step-action-projection-coherence",
+        "shutdown-intent-process-group-and-command-bound",
+        "legacy-swap-pair-forward-restore-mirror-exact",
+        "controller-health-state-mode-operation-coherent",
+        "controller-quiescent-implies-zero-work-counts",
+        "controller-mutating-epoch-receipt-bindings-exact",
+        "controller-replay-receipt-does-not-increment-epoch",
+        "execution-plan-selected-once-before-first-effect",
+        "operation-steps-bind-frozen-plan-ordinals",
+        "recovery-plans-append-only-and-closed",
+        "recovery-overlay-status-cursor-exact",
+        "abort-branches-reverse-reached-prefix-only",
+        "terminal-post-freeze-actions-use-frozen-executor",
+        "recovery-phase-and-external-branches-exact",
+        "uninstall-tombstone-recovery-matrix-complete",
+        "receipt-role-bindings-exact",
+        "cleanup-ordinal-cap-consistent",
+        "cleanup-127-boundary-and-receipt-exact",
+        "activation-commit-cross-artifact-bindings-exact",
+        "database-cross-artifact-bindings-exact",
+        "receipt-frozen-intent-bindings-exact",
+        "uninstall-emergency-artifacts-last",
+        "candidate-and-watchdog-registration-phases-exact",
+        "watchdog-disarmed-after-target-resumed-or-exited",
+        "legacy-signals-bind-pid-marker-group",
+        "external-observer-finite-sigterm-only"
+      ]
+    }
+  },
+  "$defs": {
+    "controllerMutationExchanges": {
+      "type": "array", "minItems": 6, "maxItems": 6,
+      "allOf": [
+        {"contains": {"properties": {"method": {"const": "maintenance_begin"}}, "required": ["method"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"method": {"const": "maintenance_strengthen"}}, "required": ["method"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"method": {"const": "shutdown"}}, "required": ["method"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"method": {"const": "controller_accept"}}, "required": ["method"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"method": {"const": "controller_recover"}}, "required": ["method"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"properties": {"method": {"const": "maintenance_resume"}}, "required": ["method"]}, "minContains": 1, "maxContains": 1}
+      ],
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["method", "request", "response"],
+        "properties": {
+          "method": {"enum": ["maintenance_begin", "maintenance_strengthen", "shutdown", "controller_accept", "controller_recover", "maintenance_resume"]},
+          "request": {"$ref": "controller-protocol-v2.schema.json", "properties": {"messageType": {"const": "request"}}},
+          "response": {"$ref": "controller-protocol-v2.schema.json", "properties": {"messageType": {"const": "response"}, "responseKind": {"enum": ["SUCCESS", "REPLAY_RECEIPT"]}}}
+        },
+        "oneOf": [
+          {"properties": {"method": {"const": "maintenance_begin"}, "request": {"properties": {"method": {"const": "maintenance_begin"}}}, "response": {"properties": {"method": {"const": "maintenance_begin"}}}}},
+          {"properties": {"method": {"const": "maintenance_strengthen"}, "request": {"properties": {"method": {"const": "maintenance_strengthen"}}}, "response": {"properties": {"method": {"const": "maintenance_strengthen"}}}}},
+          {"properties": {"method": {"const": "shutdown"}, "request": {"properties": {"method": {"const": "shutdown"}}}, "response": {"properties": {"method": {"const": "shutdown"}}}}},
+          {"properties": {"method": {"const": "controller_accept"}, "request": {"properties": {"method": {"const": "controller_accept"}}}, "response": {"properties": {"method": {"const": "controller_accept"}}}}},
+          {"properties": {"method": {"const": "controller_recover"}, "request": {"properties": {"method": {"const": "controller_recover"}}}, "response": {"properties": {"method": {"const": "controller_recover"}}}}},
+          {"properties": {"method": {"const": "maintenance_resume"}, "request": {"properties": {"method": {"const": "maintenance_resume"}}}, "response": {"properties": {"method": {"const": "maintenance_resume"}}}}}
+        ]
+      }
+    },
+    "controllerReplayExchange": {
+      "type": "object", "additionalProperties": false,
+      "required": ["request", "response"],
+      "properties": {
+        "request": {"$ref": "controller-protocol-v2.schema.json", "properties": {"messageType": {"const": "request"}, "commandId": {"type": "string"}}},
+        "response": {"$ref": "controller-protocol-v2.schema.json", "properties": {"messageType": {"const": "response"}, "responseKind": {"const": "REPLAY_RECEIPT"}}}
+      }
+    },
+    "activationBindingScenario": {
+      "type": "object", "additionalProperties": false,
+      "required": ["receipt", "manifest", "activation", "database", "controller", "terminalDeleteIntent"],
+      "properties": {
+        "receipt": {"$ref": "activation-commit-receipt-v2.schema.json"},
+        "manifest": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "manifest-v2"}}},
+        "activation": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "activation-v2"}}},
+        "database": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "database-object-v2"}}},
+        "controller": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "controller-state-v2"}}},
+        "terminalDeleteIntent": {"$ref": "operation-journal-v2.schema.json#/$defs/terminalDeleteIntent", "properties": {"terminalKind": {"const": "COMMIT"}}}
+      }
+    },
+    "recoveryAppendOnlyScenario": {
+      "type": "object", "additionalProperties": false,
+      "required": ["beforeJournal", "afterJournal"],
+      "properties": {
+        "beforeJournal": {"$ref": "operation-journal-v2.schema.json", "properties": {"recoveryPlans": {"minItems": 1, "maxItems": 1}}},
+        "afterJournal": {"$ref": "operation-journal-v2.schema.json", "properties": {"recoveryPlans": {"minItems": 2}}}
+      }
+    },
+    "coherenceRule": {"enum": ["NO_CROSS_FIELD_EQUALITY", "IMMUTABLE_PROJECTION_BINDING", "JOURNAL_PATH_BINDING", "FILE_TARGET_BINDING", "CONTROLLER_OPERATION_EPOCH_BINDING", "SOCKET_IDENTITY_AND_ABSENCE_BINDING", "LEGACY_SOCKET_IDENTITY_AND_ABSENCE_BINDING", "SHUTDOWN_INTENT_BINDING", "SWAP_PAIR_BINDING", "DATABASE_PATH_ID_BINDING", "SYMLINK_PATH_TARGET_BINDING", "EXTERNAL_COMMAND_ID_ARGV_BINDING", "EXTERNAL_STATE_TRANSITION_BINDING", "RECEIPT_PATH_KIND_BINDING", "RUNTIME_QUIESCENCE_BINDING", "LEGACY_QUIESCENCE_BINDING", "LAUNCHER_SET_BINDING", "CONTROLLER_CANDIDATE_SPAWN_BINDING", "CONTROLLER_CANDIDATE_ACCEPT_BINDING", "WATCHDOG_SPAWN_REGISTRATION_BINDING", "WATCHDOG_ARM_BINDING", "WATCHDOG_PROCESS_BINDING", "SIGNAL_PROCESS_BINDING", "OBSERVATION_PROCESS_BINDING", "PRESENCE_INSPECTION_BINDING", "OBJECT_DELETE_PATH_OWNERSHIP_BINDING", "RECOVERY_DECLARATION_BINDING", "PLAN_STEP_BINDING", "TERMINAL_INTENT_RECEIPT_BINDING", "ACTIVATION_CROSS_ARTIFACT_BINDING", "CLEANUP_OBJECT_RECEIPT_BINDING", "HEALTH_STATE_BINDING", "MUTATING_EPOCH_RECEIPT_BINDING", "TERMINAL_CARRIER_BINDING", "JOURNAL_PHASE_SNAPSHOT_BINDING"]},
+    "semanticMutation": {"enum": ["SOCKET_INODE", "SOCKET_ABSENCE_PATH", "SHUTDOWN_PROCESS_GROUP", "SIGNAL_MARKER", "FILE_TARGET_PATH", "SWAP_PAIR_PATH", "SWAP_PAIR_ROLE", "SWAP_PAIR_FINGERPRINT", "DATABASE_ID", "DATABASE_NESTED_ID", "DATABASE_ACTIVATION_IDENTITY", "DATABASE_WAL_SHM_SWAP", "DATABASE_SCHEMA_FINGERPRINT", "DATABASE_IDENTITY_FINGERPRINT", "SYMLINK_TARGET", "RECEIPT_KIND", "JOURNAL_PATH", "EXTERNAL_COMMAND_ID", "OBSERVATION_TARGET", "CONTROLLER_CANDIDATE_BINDING", "WATCHDOG_REGISTRATION_BINDING", "WATCHDOG_TARGET_PROOF", "LAUNCHER_TARGET_PATH", "OBJECT_OWNERSHIP", "ACTIVATION_RECEIPT_BINDING", "ACTIVATION_MANIFEST_BINDING", "ACTIVATION_DATABASE_BINDING", "ACTIVATION_CONTROLLER_BINDING", "TERMINAL_RECEIPT_BINDING", "CONTROLLER_EPOCH", "CONTROLLER_RESPONSE_EPOCH", "CONTROLLER_COMMAND_ID", "CONTROLLER_REQUEST_FINGERPRINT", "CONTROLLER_RECEIPT_EPOCH", "CONTROLLER_RESULT_FINGERPRINT", "CONTROLLER_REPLAY_EPOCH", "EXECUTION_BRANCH_SWITCH", "MIGRATION_PLAN_LINEAGE", "ABORT_UNREACHED_REVERSE", "RECOVERY_PLAN_OVERWRITE", "RECOVERY_SOURCE_BINDING", "STEP_PLAN_ID", "STEP_PLAN_ORDINAL", "CLEANUP_REMOVED_OBJECTS", "POST_FREEZE_COMPLETED_MUTATION", "ABSENCE_SYNC_PATH"]},
+    "semanticMutant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "fixture", "kind", "rule", "mutation", "patch", "expectedSchemaDisposition", "expectedSemanticDisposition"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 160},
+        "fixture": {"$ref": "#/$defs/fixtureName"},
+        "kind": {"oneOf": [{"$ref": "#/$defs/fixtureStepKind"}, {"const": "CONTRACT_WIDE"}]},
+        "rule": {"$ref": "#/$defs/coherenceRule"},
+        "mutation": {"$ref": "#/$defs/semanticMutation"},
+        "patch": {"$ref": "#/$defs/mutation"},
+        "expectedSchemaDisposition": {"const": "ACCEPT"},
+        "expectedSemanticDisposition": {"const": "REJECT"}
+      }
+    },
+    "fixtureStepKind": {"enum": ["gate_close", "stage", "verify_staged", "maintenance_begin", "wait_runtime_quiescent", "maintenance_strengthen", "controller_shutdown", "shutdown_socket_cleanup", "database_prepare", "activation_link", "recovery_forward_only", "marketplace_registry", "plugin_registry", "launchers", "controller_candidate_spawn", "controller_accept", "controller_recover", "verify_candidate", "manifest_commit", "maintenance_resume", "terminal_journal_freeze", "commit_receipt_publish", "gate_open", "legacy_gateway_fence", "legacy_bridge_prepare", "legacy_bridge_swap", "legacy_marketplace_archive", "watchdog_spawn", "watchdog_arm", "watchdog_disarm", "legacy_sigstop", "legacy_quiescence", "migration_forward_only", "legacy_sigterm", "legacy_sigcont", "external_process_observe", "legacy_socket_cleanup", "legacy_fenced_snapshot_commit", "legacy_marketplace_unarchive", "legacy_bridge_swap_restore", "legacy_bridge_remove", "legacy_gateway_restore", "activation_link_restore", "registry_restore", "launchers_restore", "controller_previous_accept", "manifest_restore", "database_candidate_retire", "staged_generation_retire", "abort_receipt_publish", "abort_journal_close", "uninstall_plugin_remove", "uninstall_marketplace_remove", "uninstall_launchers_restore", "uninstall_activation_link_remove", "uninstall_database_remove", "uninstall_activation_remove", "uninstall_manifest_remove", "uninstall_fallback_remove", "uninstall_admin_remove", "uninstall_receipt_publish", "uninstall_tombstone_publish", "uninstall_journal_close", "cleanup_object_delete", "cleanup_receipt_publish", "cleanup_journal_close", "recovery_inspect", "recovery_resume_operation", "recovery_receipt_publish", "recovery_journal_close", "recovery_absence_verify", "external_exit_recheck"]},
+    "fixtureName": {"enum": ["automaton", "fingerprintRegistry", "databaseProjection", "runtimeQuiescenceProjection", "legacyQuiescenceProjection", "externalCommandProjection", "shutdownIntentProjection", "terminalJournalFreezeStep", "shutdownSocketCleanupStep", "recoveryResumeCleanupStep", "recoveryAbsenceSyncStep", "legacySigtermStep", "legacyGatewayFenceStep", "externalProcessObserveStep", "watchdogSpawnStep", "watchdogArmStep", "watchdogDisarmStep", "controllerCandidateSpawnStep", "launcherInstallStep", "activationLinkStep", "commitReceiptPublishStep", "legacyBridgeSwapStep", "legacyBridgeSwapRestoreStep", "migrationDiscoveredJournal", "migrationExitPendingJournal", "migrationFencedJournal", "activationFencedJournal", "abortReversibleJournal", "abortTerminalJournal", "recoveryOverlayJournal", "recoveryAppendOnlyScenario", "cleanupBoundaryJournal", "activationCommitReceipt", "cleanupReceipt", "cleanupBoundaryReceipt", "installationTombstone", "healthRequest", "smartStartRequest", "reserveLaunchPermitRequest", "commitLaunchPermitRequest", "healthResponse", "shutdownRequest", "shutdownResponse", "errorResponse", "replayReceiptResponse", "controllerMutationExchanges", "controllerReplayExchange", "activationBindingScenario"]},
+    "schemaName": {"enum": ["lifecycle-automaton-v2", "lifecycle-fingerprint-registry-v2", "lifecycle-projection-v2", "operation-step-v2", "operation-journal-v2", "cleanup-journal-v2", "activation-commit-receipt-v2", "cleanup-receipt-v2", "installation-tombstone-v2", "controller-protocol-v2"]},
+    "positiveCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "fixture", "schema"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "fixture": {"$ref": "#/$defs/fixtureName"},
+        "schema": {"$ref": "#/$defs/schemaName"}
+      }
+    },
+    "negativeCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "fixture", "schema", "mutation", "expectedFailureContains"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "fixture": {"$ref": "#/$defs/fixtureName"},
+        "schema": {"$ref": "#/$defs/schemaName"},
+        "mutation": {"$ref": "#/$defs/mutation"},
+        "expectedFailureContains": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    },
+    "mutation": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["operation", "path"],
+          "properties": {"operation": {"const": "remove"}, "path": {"type": "string", "pattern": "^/", "maxLength": 1024}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["operation", "path", "value"],
+          "properties": {"operation": {"enum": ["add", "replace"]}, "path": {"type": "string", "pattern": "^/", "maxLength": 1024}, "value": true}
+        }
+      ]
+    }
+  }
+}

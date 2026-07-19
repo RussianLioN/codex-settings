@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/config-requirements-normalized-v1.schema.json",
+  "title": "config-requirements-normalized-v1",
+  "oneOf": [
+    {"type": "null"},
+    {"$ref": "#/$defs/configRequirements"}
+  ],
+  "$defs": {
+    "booleanValue": {"type": "boolean"},
+    "nonEmptyString": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "stringSet": {
+      "type": "array",
+      "maxItems": 2048,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 4096}
+    },
+    "askForApproval": {
+      "oneOf": [
+        {"enum": ["untrusted", "on-request", "never"]},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["granular"],
+          "properties": {
+            "granular": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mcp_elicitations", "rules", "sandbox_approval", "request_permissions", "skill_approval"],
+              "properties": {
+                "mcp_elicitations": {"type": "boolean"},
+                "rules": {"type": "boolean"},
+                "sandbox_approval": {"type": "boolean"},
+                "request_permissions": {"type": "boolean"},
+                "skill_approval": {"type": "boolean"}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "hookHandler": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "async", "command"],
+          "properties": {
+            "type": {"const": "command"},
+            "async": {"type": "boolean"},
+            "command": {"type": "string", "minLength": 1, "maxLength": 65536},
+            "commandWindows": {"$ref": "#/$defs/nonEmptyString"},
+            "statusMessage": {"$ref": "#/$defs/nonEmptyString"},
+            "timeoutSec": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {"type": {"const": "prompt"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {"type": {"const": "agent"}}
+        }
+      ]
+    },
+    "hookGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hooks"],
+      "properties": {
+        "hooks": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/hookHandler"}},
+        "matcher": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "hookGroups": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {"$ref": "#/$defs/hookGroup"}
+    },
+    "managedHooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "PermissionRequest", "PostCompact", "PostToolUse", "PreCompact",
+        "PreToolUse", "SessionStart", "Stop", "SubagentStart",
+        "SubagentStop", "UserPromptSubmit"
+      ],
+      "properties": {
+        "PermissionRequest": {"$ref": "#/$defs/hookGroups"},
+        "PostCompact": {"$ref": "#/$defs/hookGroups"},
+        "PostToolUse": {"$ref": "#/$defs/hookGroups"},
+        "PreCompact": {"$ref": "#/$defs/hookGroups"},
+        "PreToolUse": {"$ref": "#/$defs/hookGroups"},
+        "SessionStart": {"$ref": "#/$defs/hookGroups"},
+        "Stop": {"$ref": "#/$defs/hookGroups"},
+        "SubagentStart": {"$ref": "#/$defs/hookGroups"},
+        "SubagentStop": {"$ref": "#/$defs/hookGroups"},
+        "UserPromptSubmit": {"$ref": "#/$defs/hookGroups"},
+        "managedDir": {"$ref": "#/$defs/nonEmptyString"},
+        "windowsManagedDir": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "newThread": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "model": {"$ref": "#/$defs/nonEmptyString"},
+        "modelReasoningEffort": {"$ref": "#/$defs/nonEmptyString"},
+        "serviceTier": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "newThread": {"$ref": "#/$defs/newThread"}
+      }
+    },
+    "permissionMap": {
+      "type": "object",
+      "maxProperties": 2048,
+      "propertyNames": {"minLength": 1, "maxLength": 4096},
+      "additionalProperties": {"type": "boolean"}
+    },
+    "domainMap": {
+      "type": "object",
+      "maxProperties": 2048,
+      "propertyNames": {"minLength": 1, "maxLength": 4096},
+      "additionalProperties": {"enum": ["allow", "deny"]}
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowLocalBinding": {"$ref": "#/$defs/booleanValue"},
+        "allowUnixSockets": {"$ref": "#/$defs/stringSet"},
+        "allowUpstreamProxy": {"$ref": "#/$defs/booleanValue"},
+        "allowedDomains": {"$ref": "#/$defs/stringSet"},
+        "dangerouslyAllowAllUnixSockets": {"$ref": "#/$defs/booleanValue"},
+        "dangerouslyAllowNonLoopbackProxy": {"$ref": "#/$defs/booleanValue"},
+        "deniedDomains": {"$ref": "#/$defs/stringSet"},
+        "domains": {"$ref": "#/$defs/domainMap"},
+        "enabled": {"$ref": "#/$defs/booleanValue"},
+        "httpPort": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "managedAllowedDomainsOnly": {"$ref": "#/$defs/booleanValue"},
+        "socksPort": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "unixSockets": {"$ref": "#/$defs/domainMap"}
+      }
+    },
+    "configRequirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "allowAppshots": {"$ref": "#/$defs/booleanValue"},
+        "allowManagedHooksOnly": {"$ref": "#/$defs/booleanValue"},
+        "allowRemoteControl": {"$ref": "#/$defs/booleanValue"},
+        "allowedApprovalPolicies": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/askForApproval"}
+        },
+        "allowedApprovalsReviewers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["user", "auto_review", "guardian_subagent"]}
+        },
+        "allowedPermissionProfiles": {"$ref": "#/$defs/permissionMap"},
+        "allowedSandboxModes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["read-only", "workspace-write", "danger-full-access"]}
+        },
+        "allowedWebSearchModes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["disabled", "cached", "indexed", "live"]}
+        },
+        "allowedWindowsSandboxImplementations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"enum": ["elevated", "unelevated"]}
+        },
+        "computerUse": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"allowLockedComputerUse": {"$ref": "#/$defs/booleanValue"}}
+        },
+        "defaultPermissions": {"$ref": "#/$defs/nonEmptyString"},
+        "enforceResidency": {"const": "us"},
+        "featureRequirements": {"$ref": "#/$defs/permissionMap"},
+        "hooks": {"$ref": "#/$defs/managedHooks"},
+        "models": {"$ref": "#/$defs/models"},
+        "network": {"$ref": "#/$defs/network"}
+      }
+    }
+  }
+}

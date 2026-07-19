@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/interface-evidence-v1.schema.json",
+  "title": "interface-evidence-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "subject",
+    "semantic",
+    "subjectFingerprint",
+    "semanticFingerprint",
+    "compatibilityFingerprint"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "contractVersion": {"const": "codex-interface-v1"},
+    "subject": {"$ref": "#/$defs/subject"},
+    "semantic": {"$ref": "#/$defs/semantic"},
+    "subjectFingerprint": {"$ref": "#/$defs/sha256"},
+    "semanticFingerprint": {"$ref": "#/$defs/sha256"},
+    "compatibilityFingerprint": {"$ref": "#/$defs/sha256"},
+    "extensions": {"type": "object", "maxProperties": 128}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/"},
+    "boundedString": {"type": "string", "minLength": 1, "maxLength": 256},
+    "safeInteger": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshotSha256", "snapshotPath", "size", "mode", "uid", "device",
+        "inode", "mtimeNs", "version", "platform", "architecture",
+        "signatureIdentifier", "teamIdentifier", "cdHash", "sourceLocator",
+        "sourceObservedSha256"
+      ],
+      "properties": {
+        "snapshotSha256": {"$ref": "#/$defs/sha256"},
+        "snapshotPath": {"$ref": "#/$defs/path"},
+        "size": {"$ref": "#/$defs/safeInteger"},
+        "mode": {"type": "integer", "minimum": 0, "maximum": 4095},
+        "uid": {"$ref": "#/$defs/safeInteger"},
+        "device": {"$ref": "#/$defs/safeInteger"},
+        "inode": {"$ref": "#/$defs/safeInteger"},
+        "mtimeNs": {"$ref": "#/$defs/safeInteger"},
+        "version": {"type": "string", "pattern": "^codex-cli [0-9]+\\.[0-9]+\\.[0-9]+$", "maxLength": 64},
+        "platform": {"const": "darwin"},
+        "architecture": {"const": "arm64"},
+        "signatureIdentifier": {"const": "codex"},
+        "teamIdentifier": {"const": "2DC432GLL2"},
+        "cdHash": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "sourceLocator": {"$ref": "#/$defs/path"},
+        "sourceObservedSha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "schemaRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaId", "schemaSha256"],
+      "properties": {
+        "schemaId": {"$ref": "#/$defs/boundedString"},
+        "schemaSha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "semantic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extensionRelease", "contractVersion", "platformAdapter", "commands",
+        "options", "appServerMethods", "machineSchemas", "probeBudgets",
+        "negativeProbeIds", "arg0AdapterVersion", "routingPolicyFingerprint",
+        "bundledCatalogFingerprint", "childProfiles"
+      ],
+      "properties": {
+        "extensionRelease": {"$ref": "#/$defs/boundedString"},
+        "contractVersion": {"const": "codex-interface-v1"},
+        "platformAdapter": {"const": "darwin-arm64-v1"},
+        "commands": {"$ref": "#/$defs/stringSet"},
+        "options": {"$ref": "#/$defs/stringSet"},
+        "appServerMethods": {"$ref": "#/$defs/stringSet"},
+        "machineSchemas": {
+          "type": "object",
+          "required": [
+            "interface-evidence-v1", "account-evidence-v1",
+            "config-requirements-normalized-v1", "child-profile-v1",
+            "config-requirements-vector-recipe-v1", "routing-policy-v2",
+            "child-jsonl-v1", "otel-logs-v1",
+            "boundary-result-v1", "reader-result-v1", "writer-result-v1"
+          ],
+          "minProperties": 11,
+          "maxProperties": 32,
+          "additionalProperties": {"$ref": "#/$defs/schemaRecord"}
+        },
+        "probeBudgets": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 32,
+          "additionalProperties": {"$ref": "#/$defs/safeInteger"}
+        },
+        "negativeProbeIds": {"$ref": "#/$defs/stringSet"},
+        "arg0AdapterVersion": {"const": "arg0-v1"},
+        "routingPolicyFingerprint": {"$ref": "#/$defs/sha256"},
+        "bundledCatalogFingerprint": {"$ref": "#/$defs/sha256"},
+        "childProfiles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["classifier", "reader", "writer"],
+          "properties": {
+            "classifier": {"$ref": "#/$defs/sha256"},
+            "reader": {"$ref": "#/$defs/sha256"},
+            "writer": {"$ref": "#/$defs/sha256"}
+          }
+        }
+      }
+    },
+    "stringSet": {
+      "type": "array",
+      "maxItems": 256,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/boundedString"}
+    }
+  }
+}

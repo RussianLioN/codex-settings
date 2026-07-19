@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/otel-logs-v1.schema.json",
+  "title": "otel-logs-v1",
+  "type": "object",
+  "required": ["resourceLogs"],
+  "properties": {
+    "resourceLogs": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {"$ref": "#/$defs/resourceLogs"}
+    }
+  },
+  "$defs": {
+    "resourceLogs": {
+      "type": "object",
+      "required": ["scopeLogs"],
+      "properties": {
+        "resource": {
+          "type": "object",
+          "properties": {"attributes": {"$ref": "#/$defs/attributes"}}
+        },
+        "scopeLogs": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"$ref": "#/$defs/scopeLogs"}
+        }
+      }
+    },
+    "scopeLogs": {
+      "type": "object",
+      "required": ["logRecords"],
+      "properties": {
+        "scope": {
+          "type": "object",
+          "properties": {"attributes": {"$ref": "#/$defs/attributes"}}
+        },
+        "logRecords": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "object",
+            "properties": {"attributes": {"$ref": "#/$defs/attributes"}}
+          }
+        }
+      }
+    },
+    "attributes": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "value"],
+        "properties": {
+          "key": {"type": "string", "minLength": 1, "maxLength": 256},
+          "value": {"$ref": "#/$defs/anyValue"}
+        }
+      }
+    },
+    "anyValue": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["stringValue"], "properties": {"stringValue": {"type": "string", "maxLength": 1048576}}},
+        {"type": "object", "additionalProperties": false, "required": ["boolValue"], "properties": {"boolValue": {"type": "boolean"}}},
+        {"type": "object", "additionalProperties": false, "required": ["intValue"], "properties": {"intValue": {"type": "string", "pattern": "^-?[0-9]+$", "maxLength": 32}}},
+        {"type": "object", "additionalProperties": false, "required": ["doubleValue"], "properties": {"doubleValue": {"type": "number"}}},
+        {"type": "object", "additionalProperties": false, "required": ["bytesValue"], "properties": {"bytesValue": {"type": "string", "maxLength": 5592408}}},
+        {"type": "object", "additionalProperties": false, "required": ["arrayValue"], "properties": {"arrayValue": {"type": "object", "additionalProperties": false, "required": ["values"], "properties": {"values": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/anyValue"}}}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kvlistValue"], "properties": {"kvlistValue": {"type": "object", "additionalProperties": false, "required": ["values"], "properties": {"values": {"$ref": "#/$defs/attributes"}}}}}
+      ]
+    }
+  }
+}

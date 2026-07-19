@@ -1,0 +1,447 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/operation-step-v2.schema.json",
+  "title": "operation-step-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["stepId", "ordinal", "planId", "planOrdinal", "recordCarrier", "kind", "state", "commandId", "action", "actionFingerprint", "before", "expectedAfter", "observedAfter", "intentAt", "completedAt"],
+  "properties": {
+    "stepId": {"type": "string", "pattern": "^st2_[0-9a-f]{32}$"},
+    "ordinal": {"type": "integer", "minimum": 0, "maximum": 127},
+    "planId": {"type": "string", "pattern": "^pl2_[0-9a-f]{32}$"},
+    "planOrdinal": {"type": "integer", "minimum": 0, "maximum": 127},
+    "recordCarrier": {"enum": ["JOURNAL_MUTABLE", "JOURNAL_ATOMIC_BOUNDARY", "FROZEN_TERMINAL_EXECUTOR"]},
+    "kind": {"type": "string"},
+    "state": {"enum": ["PLANNED", "INTENT_DURABLE", "COMPLETED"]},
+    "commandId": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, {"type": "string", "pattern": "^ec2_[0-9a-f]{32}$"}]},
+    "action": {},
+    "actionFingerprint": {"$ref": "#/$defs/sha256"},
+    "before": {"$ref": "lifecycle-projection-v2.schema.json"},
+    "expectedAfter": {"$ref": "lifecycle-projection-v2.schema.json"},
+    "observedAfter": {"oneOf": [{"type": "null"}, {"$ref": "lifecycle-projection-v2.schema.json"}]},
+    "intentAt": {"oneOf": [{"type": "null"}, {"type": "string", "format": "date-time"}]},
+    "completedAt": {"oneOf": [{"type": "null"}, {"type": "string", "format": "date-time"}]}
+  },
+  "allOf": [
+    {
+      "oneOf": [
+        {"properties": {"state": {"const": "PLANNED"}, "intentAt": {"type": "null"}, "completedAt": {"type": "null"}, "observedAfter": {"type": "null"}}},
+        {"properties": {"state": {"const": "INTENT_DURABLE"}, "intentAt": {"type": "string", "format": "date-time"}, "completedAt": {"type": "null"}, "observedAfter": {"type": "null"}}},
+        {"properties": {"state": {"const": "COMPLETED"}, "intentAt": {"type": "string", "format": "date-time"}, "completedAt": {"type": "string", "format": "date-time"}, "observedAfter": {"$ref": "lifecycle-projection-v2.schema.json"}}}
+      ]
+    },
+    {
+      "oneOf": [
+        {"properties": {"kind": {"enum": ["gate_close", "terminal_journal_freeze"]}, "recordCarrier": {"const": "JOURNAL_ATOMIC_BOUNDARY"}, "state": {"const": "COMPLETED"}}},
+        {"properties": {"kind": {"enum": ["commit_receipt_publish", "gate_open", "abort_receipt_publish", "abort_journal_close", "uninstall_receipt_publish", "uninstall_tombstone_publish", "uninstall_journal_close", "cleanup_receipt_publish", "cleanup_journal_close", "recovery_receipt_publish", "recovery_journal_close", "recovery_absence_verify"]}, "recordCarrier": {"const": "FROZEN_TERMINAL_EXECUTOR"}}},
+        {"properties": {"kind": {"not": {"enum": ["gate_close", "terminal_journal_freeze", "commit_receipt_publish", "gate_open", "abort_receipt_publish", "abort_journal_close", "uninstall_receipt_publish", "uninstall_tombstone_publish", "uninstall_journal_close", "cleanup_receipt_publish", "cleanup_journal_close", "recovery_receipt_publish", "recovery_journal_close", "recovery_absence_verify"]}}, "recordCarrier": {"const": "JOURNAL_MUTABLE"}}}
+      ]
+    },
+    {
+      "oneOf": [
+        {"$ref": "#/$defs/gateClose"},
+        {"$ref": "#/$defs/stage"},
+        {"$ref": "#/$defs/verifyStaged"},
+        {"$ref": "#/$defs/maintenanceBegin"},
+        {"$ref": "#/$defs/waitRuntimeQuiescent"},
+        {"$ref": "#/$defs/maintenanceStrengthen"},
+        {"$ref": "#/$defs/controllerShutdown"},
+        {"$ref": "#/$defs/shutdownSocketCleanup"},
+        {"$ref": "#/$defs/databasePrepare"},
+        {"$ref": "#/$defs/activationLink"},
+        {"$ref": "#/$defs/recoveryForwardOnly"},
+        {"$ref": "#/$defs/marketplaceRegistry"},
+        {"$ref": "#/$defs/pluginRegistry"},
+        {"$ref": "#/$defs/launchers"},
+        {"$ref": "#/$defs/controllerCandidateSpawn"},
+        {"$ref": "#/$defs/controllerAccept"},
+        {"$ref": "#/$defs/controllerRecover"},
+        {"$ref": "#/$defs/verifyCandidate"},
+        {"$ref": "#/$defs/manifestCommit"},
+        {"$ref": "#/$defs/maintenanceResume"},
+        {"$ref": "#/$defs/terminalJournalFreeze"},
+        {"$ref": "#/$defs/commitReceiptPublish"},
+        {"$ref": "#/$defs/gateOpen"},
+        {"$ref": "#/$defs/legacyGatewayFence"},
+        {"$ref": "#/$defs/legacyBridgePrepare"},
+        {"$ref": "#/$defs/legacyBridgeSwap"},
+        {"$ref": "#/$defs/legacyMarketplaceArchive"},
+        {"$ref": "#/$defs/watchdogSpawn"},
+        {"$ref": "#/$defs/watchdogArm"},
+        {"$ref": "#/$defs/watchdogDisarm"},
+        {"$ref": "#/$defs/legacySigstop"},
+        {"$ref": "#/$defs/legacyQuiescence"},
+        {"$ref": "#/$defs/migrationForwardOnly"},
+        {"$ref": "#/$defs/legacySigterm"},
+        {"$ref": "#/$defs/legacySigcont"},
+        {"$ref": "#/$defs/externalProcessObserve"},
+        {"$ref": "#/$defs/legacySocketCleanup"},
+        {"$ref": "#/$defs/legacyFencedSnapshotCommit"},
+        {"$ref": "#/$defs/legacyMarketplaceUnarchive"},
+        {"$ref": "#/$defs/legacyBridgeSwapRestore"},
+        {"$ref": "#/$defs/legacyBridgeRemove"},
+        {"$ref": "#/$defs/legacyGatewayRestore"},
+        {"$ref": "#/$defs/activationLinkRestore"},
+        {"$ref": "#/$defs/registryRestore"},
+        {"$ref": "#/$defs/launchersRestore"},
+        {"$ref": "#/$defs/controllerPreviousAccept"},
+        {"$ref": "#/$defs/manifestRestore"},
+        {"$ref": "#/$defs/databaseCandidateRetire"},
+        {"$ref": "#/$defs/stagedGenerationRetire"},
+        {"$ref": "#/$defs/abortReceiptPublish"},
+        {"$ref": "#/$defs/abortJournalClose"},
+        {"$ref": "#/$defs/uninstallPluginRemove"},
+        {"$ref": "#/$defs/uninstallMarketplaceRemove"},
+        {"$ref": "#/$defs/uninstallLaunchersRestore"},
+        {"$ref": "#/$defs/uninstallActivationLinkRemove"},
+        {"$ref": "#/$defs/uninstallDatabaseRemove"},
+        {"$ref": "#/$defs/uninstallActivationRemove"},
+        {"$ref": "#/$defs/uninstallManifestRemove"},
+        {"$ref": "#/$defs/uninstallFallbackRemove"},
+        {"$ref": "#/$defs/uninstallAdminRemove"},
+        {"$ref": "#/$defs/uninstallReceiptPublish"},
+        {"$ref": "#/$defs/uninstallTombstonePublish"},
+        {"$ref": "#/$defs/uninstallJournalClose"},
+        {"$ref": "#/$defs/cleanupObjectDelete"},
+        {"$ref": "#/$defs/cleanupReceiptPublish"},
+        {"$ref": "#/$defs/cleanupJournalClose"},
+        {"$ref": "#/$defs/recoveryInspect"},
+        {"$ref": "#/$defs/recoveryResumeOperation"},
+        {"$ref": "#/$defs/recoveryReceiptPublish"},
+        {"$ref": "#/$defs/recoveryJournalClose"},
+        {"$ref": "#/$defs/recoveryAbsenceVerify"},
+        {"$ref": "#/$defs/externalExitRecheck"}
+      ]
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "absolutePath": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/"},
+    "nullCommand": {"type": "null"},
+    "controllerCommandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"},
+    "externalCommandId": {"type": "string", "pattern": "^ec2_[0-9a-f]{32}$"},
+    "projection": {"$ref": "lifecycle-projection-v2.schema.json"},
+    "file": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "file-object-v2"}}},
+    "journalState": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "journal-state-v2"}}},
+    "journalStateMutable": {"$ref": "#/$defs/journalState", "properties": {"value": {"properties": {"frozen": {"const": false}}}}},
+    "journalStateFrozen": {"$ref": "#/$defs/journalState", "properties": {"value": {"properties": {"phase": {"const": "TERMINAL_FROZEN"}, "frozen": {"const": true}}}}},
+    "tree": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "tree-object-v2"}}},
+    "swapPair": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "swap-pair-v2"}}},
+    "symlink": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "symlink-object-v2"}}},
+    "manifest": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "manifest-v2"}}},
+    "activation": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "activation-v2"}}},
+    "database": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "database-object-v2"}}},
+    "controller": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "controller-state-v2"}}},
+    "shutdownIntent": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "shutdown-intent-v2"}}},
+    "controllerCandidateExpected": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "controller-candidate-v2"}, "value": {"properties": {"status": {"const": "EXPECTED_REGISTRATION"}}}}},
+    "controllerCandidate": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "controller-candidate-v2"}, "value": {"properties": {"status": {"const": "REGISTERED_READY"}}}}},
+    "watchdogExpected": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "watchdog-state-v2"}, "value": {"properties": {"state": {"const": "EXPECTED_REGISTRATION"}}}}},
+    "watchdogRegistered": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "watchdog-state-v2"}, "value": {"properties": {"state": {"const": "REGISTERED"}}}}},
+    "watchdogArmed": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "watchdog-state-v2"}, "value": {"properties": {"state": {"const": "ARMED"}}}}},
+    "watchdogExited": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "watchdog-state-v2"}, "value": {"properties": {"state": {"const": "EXITED"}}}}},
+    "registry": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "registry-state-v2"}}},
+    "launcherSet": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "launcher-set-v2"}}},
+    "legacyProcesses": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "legacy-process-set-v2"}}},
+    "quiescence": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "quiescence-proof-v2"}}},
+    "runtimeQuiescence": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "quiescence-proof-v2"}, "value": {"properties": {"proofKind": {"const": "runtime-v2"}}}}},
+    "legacyMigrationQuiescence": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "quiescence-proof-v2"}, "value": {"properties": {"proofKind": {"const": "legacy-migration"}}}}},
+    "externalCommand": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "external-command-v2"}}},
+    "receipt": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "receipt-object-v2"}}},
+    "absence": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "absence-proof-v2"}}},
+    "absenceObservation": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "absence-observation-v2"}}},
+    "fileOrAbsence": {"oneOf": [{"$ref": "#/$defs/file"}, {"$ref": "#/$defs/absence"}]},
+    "symlinkOrAbsence": {"oneOf": [{"$ref": "#/$defs/symlink"}, {"$ref": "#/$defs/absence"}]},
+    "treeOrAbsence": {"oneOf": [{"$ref": "#/$defs/tree"}, {"$ref": "#/$defs/absence"}]},
+    "databaseOrAbsence": {"oneOf": [{"$ref": "#/$defs/database"}, {"$ref": "#/$defs/absence"}]},
+    "registryOrAbsence": {"oneOf": [{"$ref": "#/$defs/registry"}, {"$ref": "#/$defs/absence"}]},
+    "launcherSetOrAbsence": {"oneOf": [{"$ref": "#/$defs/launcherSet"}, {"$ref": "#/$defs/absence"}]},
+    "actionFile": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "method", "targetPath", "durability"],
+      "properties": {"actionKind": {"const": "file-mutation"}, "method": {"enum": ["write-replace", "unlink", "rename", "rename-swap", "mkdir-stage", "verify", "fsync-directory"]}, "targetPath": {"$ref": "#/$defs/absolutePath"}, "durability": {"const": "FSYNC_FILE_AND_PARENT"}}
+    },
+    "actionSwapPair": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "method", "leftPath", "rightPath", "leftBeforeRole", "leftBeforeTreeFingerprint", "rightBeforeRole", "rightBeforeTreeFingerprint", "leftAfterRole", "leftAfterTreeFingerprint", "rightAfterRole", "rightAfterTreeFingerprint", "durability"],
+      "properties": {
+        "actionKind": {"const": "tree-swap"},
+        "method": {"const": "rename-exchange"},
+        "leftPath": {"$ref": "#/$defs/absolutePath"},
+        "rightPath": {"$ref": "#/$defs/absolutePath"},
+        "leftBeforeRole": {"enum": ["LEGACY_MARKETPLACE_TREE", "V2_BRIDGE_TREE"]},
+        "leftBeforeTreeFingerprint": {"$ref": "#/$defs/sha256"},
+        "rightBeforeRole": {"enum": ["LEGACY_MARKETPLACE_TREE", "V2_BRIDGE_TREE"]},
+        "rightBeforeTreeFingerprint": {"$ref": "#/$defs/sha256"},
+        "leftAfterRole": {"enum": ["LEGACY_MARKETPLACE_TREE", "V2_BRIDGE_TREE"]},
+        "leftAfterTreeFingerprint": {"$ref": "#/$defs/sha256"},
+        "rightAfterRole": {"enum": ["LEGACY_MARKETPLACE_TREE", "V2_BRIDGE_TREE"]},
+        "rightAfterTreeFingerprint": {"$ref": "#/$defs/sha256"},
+        "durability": {"const": "RENAME_EXCHANGE_FSYNC_BOTH_PARENTS"}
+      }
+    },
+    "actionLauncherSet": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "mode", "operations", "durability"],
+      "properties": {
+        "actionKind": {"const": "launcher-set-mutation"},
+        "mode": {"enum": ["INSTALL_OR_REPLACE", "RESTORE_PREVIOUS", "REMOVE_CREATED"]},
+        "operations": {
+          "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["name", "role", "method", "targetPath", "beforeFingerprint", "expectedAfterFingerprint"],
+            "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 128}, "role": {"enum": ["gateway", "admin", "highfd", "hook", "tool-server", "controller"]}, "method": {"enum": ["write-replace", "unlink"]}, "targetPath": {"$ref": "#/$defs/absolutePath"}, "beforeFingerprint": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]}, "expectedAfterFingerprint": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]}}
+          }
+        },
+        "durability": {"const": "FSYNC_EACH_FILE_AND_PARENT"}
+      }
+    },
+    "actionLauncherInstall": {"$ref": "#/$defs/actionLauncherSet", "properties": {"mode": {"const": "INSTALL_OR_REPLACE"}, "operations": {"items": {"properties": {"method": {"const": "write-replace"}, "expectedAfterFingerprint": {"$ref": "#/$defs/sha256"}}}}}},
+    "actionLauncherRestorePresent": {"$ref": "#/$defs/actionLauncherSet", "properties": {"mode": {"const": "RESTORE_PREVIOUS"}, "operations": {"items": {"properties": {"method": {"const": "write-replace"}, "expectedAfterFingerprint": {"$ref": "#/$defs/sha256"}}}}}},
+    "actionLauncherRestoreAbsent": {"$ref": "#/$defs/actionLauncherSet", "properties": {"mode": {"const": "REMOVE_CREATED"}, "operations": {"items": {"properties": {"method": {"const": "unlink"}, "expectedAfterFingerprint": {"type": "null"}}}}}},
+    "actionController": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "method", "operationId", "expectedControlEpoch"],
+      "properties": {"actionKind": {"const": "controller-command"}, "method": {"enum": ["maintenance_begin", "maintenance_strengthen", "shutdown", "controller_accept", "controller_recover", "maintenance_resume"]}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "expectedControlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}}
+    },
+    "actionControllerSpawn": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "candidateId", "controllerIdentity", "controllerStartId", "operationId", "activationId", "activationFingerprint", "databaseId", "argvFingerprint", "snapshotFingerprint", "privateReadyChannelPath", "readinessTokenHash", "absoluteDeadlineMonotonicMs", "processGroupPolicy"],
+      "properties": {"actionKind": {"const": "controller-candidate-spawn"}, "candidateId": {"type": "string", "pattern": "^cand2_[0-9a-f]{32}$"}, "controllerIdentity": {"$ref": "#/$defs/sha256"}, "controllerStartId": {"type": "string", "pattern": "^cs2_[0-9a-f]{32}$"}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "activationId": {"type": "string", "pattern": "^act2_[0-9a-f]{64}$"}, "activationFingerprint": {"$ref": "#/$defs/sha256"}, "databaseId": {"type": "string", "pattern": "^db2_[0-9a-f]{32}$"}, "argvFingerprint": {"$ref": "#/$defs/sha256"}, "snapshotFingerprint": {"$ref": "#/$defs/sha256"}, "privateReadyChannelPath": {"$ref": "#/$defs/absolutePath"}, "readinessTokenHash": {"$ref": "#/$defs/sha256"}, "absoluteDeadlineMonotonicMs": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "processGroupPolicy": {"const": "NEW_PRIVATE_GROUP"}}
+    },
+    "actionExternal": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "commandRole", "method", "externalCommandId", "argvFingerprint", "timeoutMs"],
+      "properties": {"actionKind": {"const": "external-command"}, "commandRole": {"const": "codex-registry"}, "method": {"enum": ["marketplace-register", "plugin-enable", "registry-restore", "plugin-disable", "marketplace-remove"]}, "externalCommandId": {"type": "string", "pattern": "^ec2_[0-9a-f]{32}$"}, "argvFingerprint": {"$ref": "#/$defs/sha256"}, "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 30000}}
+    },
+    "actionSignal": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "signal", "pid", "processStartMarker", "processGroupId", "watchdogId"],
+      "properties": {"actionKind": {"const": "signal"}, "signal": {"enum": ["SIGSTOP", "SIGTERM", "SIGCONT"]}, "pid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "processStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "processGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "watchdogId": {"type": "string", "pattern": "^wd2_[0-9a-f]{32}$"}}
+    },
+    "actionObserve": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "observerPid", "observerStartMarker", "targetPid", "targetStartMarker", "processGroupId", "deadlineMonotonicMs", "onDeadline"],
+      "properties": {"actionKind": {"const": "observe-process"}, "observerPid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "observerStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "targetPid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "targetStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "processGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "deadlineMonotonicMs": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "onDeadline": {"const": "SIGTERM_THEN_RECORD_STILL_RUNNING"}}
+    },
+    "actionVerify": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "predicate", "timeoutMs"],
+      "properties": {"actionKind": {"const": "verify"}, "predicate": {"enum": ["staged", "runtime-quiescent", "legacy-quiescent", "candidate", "presence-pair", "absence", "absence-and-parent-sync", "external-exit"]}, "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 180000}}
+    },
+    "actionJournal": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "transition", "journalPath", "durability"],
+      "properties": {"actionKind": {"const": "journal-transition"}, "transition": {"enum": ["gate-close", "forward-only", "freeze-delete-intent", "delete-frozen-journal"]}, "journalPath": {"$ref": "#/$defs/absolutePath"}, "durability": {"const": "FSYNC_FILE_AND_PARENT"}}
+    },
+    "actionLegacyFencedSnapshotCommit": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "transition", "journalPath", "discoveryBundleFingerprint", "fencedBeforeBundleFingerprint", "desiredBundleFingerprint", "durability"],
+      "properties": {"actionKind": {"const": "journal-snapshot-commit"}, "transition": {"const": "legacy-exit-pending-to-fenced"}, "journalPath": {"$ref": "#/$defs/absolutePath"}, "discoveryBundleFingerprint": {"$ref": "#/$defs/sha256"}, "fencedBeforeBundleFingerprint": {"$ref": "#/$defs/sha256"}, "desiredBundleFingerprint": {"$ref": "#/$defs/sha256"}, "durability": {"const": "FSYNC_FILE_AND_PARENT"}}
+    },
+    "actionDatabase": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "method", "databaseId", "path", "expectedSchemaFingerprint"],
+      "properties": {"actionKind": {"const": "database-mutation"}, "method": {"enum": ["prepare", "retire", "remove"]}, "databaseId": {"type": "string", "pattern": "^db2_[0-9a-f]{32}$"}, "path": {"$ref": "#/$defs/absolutePath"}, "expectedSchemaFingerprint": {"$ref": "#/$defs/sha256"}}
+    },
+    "actionSymlink": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "method", "path", "target", "durability"],
+      "properties": {"actionKind": {"const": "symlink-mutation"}, "method": {"enum": ["activate", "restore", "remove"]}, "path": {"$ref": "#/$defs/absolutePath"}, "target": {"oneOf": [{"type": "null"}, {"type": "string", "minLength": 1, "maxLength": 4096, "not": {"pattern": "^/"}}]}, "durability": {"const": "FSYNC_PARENT"}}
+    },
+    "actionSymlinkRestorePresent": {"$ref": "#/$defs/actionSymlink", "properties": {"method": {"const": "restore"}, "target": {"type": "string"}}},
+    "actionSymlinkRestoreAbsent": {"$ref": "#/$defs/actionSymlink", "properties": {"method": {"const": "remove"}, "target": {"type": "null"}}},
+    "actionReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "terminalKind", "receiptKind", "path", "creation", "bindsFrozenJournal"],
+      "properties": {"actionKind": {"const": "receipt-publish"}, "terminalKind": {"enum": ["COMMIT", "ABORT", "UNINSTALL", "CLEANUP"]}, "receiptKind": {"enum": ["activation-commit", "operation-abort", "installation-uninstall", "cleanup"]}, "path": {"$ref": "#/$defs/absolutePath"}, "creation": {"const": "O_EXCL_FSYNC_PARENT"}, "bindsFrozenJournal": {"const": true}},
+      "oneOf": [
+        {"properties": {"terminalKind": {"const": "COMMIT"}, "receiptKind": {"const": "activation-commit"}}},
+        {"properties": {"terminalKind": {"const": "ABORT"}, "receiptKind": {"const": "operation-abort"}}},
+        {"properties": {"terminalKind": {"const": "UNINSTALL"}, "receiptKind": {"const": "installation-uninstall"}}},
+        {"properties": {"terminalKind": {"const": "CLEANUP"}, "receiptKind": {"const": "cleanup"}}}
+      ]
+    },
+    "actionWatchdogSpawn": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "method", "watchdogId", "argvFingerprint", "imageFingerprint", "readinessTokenHash", "absoluteDeadlineMs", "processGroupPolicy"],
+      "properties": {"actionKind": {"const": "watchdog"}, "method": {"const": "spawn"}, "watchdogId": {"type": "string", "pattern": "^wd2_[0-9a-f]{32}$"}, "argvFingerprint": {"$ref": "#/$defs/sha256"}, "imageFingerprint": {"$ref": "#/$defs/sha256"}, "readinessTokenHash": {"$ref": "#/$defs/sha256"}, "absoluteDeadlineMs": {"const": 30000}, "processGroupPolicy": {"const": "NEW_PRIVATE_GROUP"}}
+    },
+    "actionWatchdogArm": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "method", "watchdogId", "pid", "processStartMarker", "processGroupId", "registrationFingerprint", "targetPid", "targetStartMarker", "targetProcessGroupId", "heartbeatMs", "absoluteDeadlineMs"],
+      "properties": {"actionKind": {"const": "watchdog"}, "method": {"const": "arm"}, "watchdogId": {"type": "string", "pattern": "^wd2_[0-9a-f]{32}$"}, "pid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "processStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "processGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "registrationFingerprint": {"$ref": "#/$defs/sha256"}, "targetPid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "targetStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "targetProcessGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "heartbeatMs": {"const": 2000}, "absoluteDeadlineMs": {"const": 30000}}
+    },
+    "actionWatchdogDisarm": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "method", "watchdogId", "pid", "processStartMarker", "processGroupId", "registrationFingerprint", "targetPid", "targetStartMarker", "targetProcessGroupId", "targetResumedOrExitedProofFingerprint", "absoluteDeadlineMs", "signalPolicy"],
+      "properties": {"actionKind": {"const": "watchdog"}, "method": {"const": "disarm-and-exit"}, "watchdogId": {"type": "string", "pattern": "^wd2_[0-9a-f]{32}$"}, "pid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "processStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "processGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "registrationFingerprint": {"$ref": "#/$defs/sha256"}, "targetPid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "targetStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "targetProcessGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "targetResumedOrExitedProofFingerprint": {"$ref": "#/$defs/sha256"}, "absoluteDeadlineMs": {"const": 30000}, "signalPolicy": {"const": "SIGTERM_ONLY"}}
+    },
+    "actionWatchdogCancel": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "method", "watchdogId", "pid", "processStartMarker", "processGroupId", "registrationFingerprint", "absoluteDeadlineMs", "signalPolicy"],
+      "properties": {"actionKind": {"const": "watchdog"}, "method": {"const": "cancel-and-exit"}, "watchdogId": {"type": "string", "pattern": "^wd2_[0-9a-f]{32}$"}, "pid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "processStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "processGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "registrationFingerprint": {"$ref": "#/$defs/sha256"}, "absoluteDeadlineMs": {"const": 30000}, "signalPolicy": {"const": "SIGTERM_ONLY"}}
+    },
+    "actionObjectDelete": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "objectKind", "path", "ownershipFingerprint", "durability"],
+      "properties": {"actionKind": {"const": "owned-object-delete"}, "objectKind": {"enum": ["activation", "database", "snapshot", "staged-generation", "smoke-tree", "evidence", "receipt", "manifest", "launcher", "fallback", "admin-entry", "marketplace-bridge"]}, "path": {"$ref": "#/$defs/absolutePath"}, "ownershipFingerprint": {"$ref": "#/$defs/sha256"}, "durability": {"const": "UNLINKAT_FSYNC_PARENT"}}
+    },
+    "actionSocketCleanup": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "method", "proofSource", "proofSourceId", "proofSourceFingerprint", "socketPath", "socketDevice", "socketInode", "socketOwnerUid", "socketOwnerGid", "socketMode", "targetPid", "targetStartMarker", "targetProcessGroupId", "processExitProofFingerprint", "lockPath", "exclusiveLockProofFingerprint", "durability"],
+      "properties": {
+        "actionKind": {"const": "socket-cleanup"},
+        "method": {"const": "unlink-proven-orphan"},
+        "proofSource": {"enum": ["CONTROLLER_SHUTDOWN_INTENT", "LEGACY_EXIT_OBSERVATION"]},
+        "proofSourceId": {"type": "string", "pattern": "^(?:cc2|ec2)_[0-9a-f]{32}$"},
+        "proofSourceFingerprint": {"$ref": "#/$defs/sha256"},
+        "socketPath": {"$ref": "#/$defs/absolutePath"},
+        "socketDevice": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "socketInode": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "socketOwnerUid": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "socketOwnerGid": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "socketMode": {"type": "string", "pattern": "^0[0-7]{3}$"},
+        "targetPid": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "targetStartMarker": {"type": "string", "minLength": 1, "maxLength": 256},
+        "targetProcessGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "processExitProofFingerprint": {"$ref": "#/$defs/sha256"},
+        "lockPath": {"$ref": "#/$defs/absolutePath"},
+        "exclusiveLockProofFingerprint": {"$ref": "#/$defs/sha256"},
+        "durability": {"const": "UNLINKAT_FSYNC_PARENT"}
+      },
+      "oneOf": [
+        {"properties": {"proofSource": {"const": "CONTROLLER_SHUTDOWN_INTENT"}, "proofSourceId": {"type": "string", "pattern": "^cc2_"}}},
+        {"properties": {"proofSource": {"const": "LEGACY_EXIT_OBSERVATION"}, "proofSourceId": {"type": "string", "pattern": "^ec2_"}}}
+      ]
+    },
+    "actionRecoveryResume": {
+      "type": "object", "additionalProperties": false,
+      "required": ["actionKind", "sourceMachine", "sourcePlanDefinitionFingerprint", "recoveryPlanDefinitionFingerprint", "sourceStepState", "firstIncompleteOrdinal", "firstIncompleteKind", "firstIncompleteStepId", "declaredActionFingerprint", "observedDisposition", "thirdStateDisposition"],
+      "properties": {
+        "actionKind": {"const": "resume-declared-step"},
+        "sourceMachine": {"enum": ["apply", "abort", "rollback", "uninstall", "cleanup", "legacyMigration"]},
+        "sourcePlanDefinitionFingerprint": {"$ref": "#/$defs/sha256"},
+        "recoveryPlanDefinitionFingerprint": {"$ref": "#/$defs/sha256"},
+        "sourceStepState": {"enum": ["NO_DURABLE_INTENT_YET", "DURABLE_STEP_EXISTS"]},
+        "firstIncompleteOrdinal": {"type": "integer", "minimum": 0, "maximum": 127},
+        "firstIncompleteKind": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "firstIncompleteStepId": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^st2_[0-9a-f]{32}$"}]},
+        "declaredActionFingerprint": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+        "observedDisposition": {"enum": ["REEXECUTE_FROM_BEFORE", "MARK_COMPLETED_FROM_EXPECTED_AFTER"]},
+        "thirdStateDisposition": {"const": "RECOVERY_STATE_AMBIGUOUS"}
+      },
+      "oneOf": [
+        {"properties": {"sourceStepState": {"const": "NO_DURABLE_INTENT_YET"}, "firstIncompleteStepId": {"type": "null"}, "declaredActionFingerprint": {"type": "null"}, "observedDisposition": {"const": "REEXECUTE_FROM_BEFORE"}}},
+        {"properties": {"sourceStepState": {"const": "DURABLE_STEP_EXISTS"}, "firstIncompleteStepId": {"type": "string"}, "declaredActionFingerprint": {"$ref": "#/$defs/sha256"}}}
+      ]
+    },
+    "kind": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {"kind": {"type": "string"}}
+    },
+    "gateClose": {"properties": {"kind": {"const": "gate_close"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionJournal", "properties": {"transition": {"const": "gate-close"}}}, "before": {"$ref": "#/$defs/absence"}, "expectedAfter": {"$ref": "#/$defs/journalStateMutable"}}},
+    "stage": {"properties": {"kind": {"const": "stage"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionFile", "properties": {"method": {"const": "mkdir-stage"}}}, "before": {"$ref": "#/$defs/absence"}, "expectedAfter": {"$ref": "#/$defs/tree"}}},
+    "verifyStaged": {"properties": {"kind": {"const": "verify_staged"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionVerify", "properties": {"predicate": {"const": "staged"}}}, "before": {"$ref": "#/$defs/tree"}, "expectedAfter": {"$ref": "#/$defs/tree"}}},
+    "maintenanceBegin": {"properties": {"kind": {"const": "maintenance_begin"}, "commandId": {"$ref": "#/$defs/controllerCommandId"}, "action": {"$ref": "#/$defs/actionController", "properties": {"method": {"const": "maintenance_begin"}}}, "before": {"$ref": "#/$defs/controller"}, "expectedAfter": {"$ref": "#/$defs/controller"}}},
+    "waitRuntimeQuiescent": {"properties": {"kind": {"const": "wait_runtime_quiescent"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionVerify", "properties": {"predicate": {"const": "runtime-quiescent"}}}, "before": {"$ref": "#/$defs/controller"}, "expectedAfter": {"$ref": "#/$defs/runtimeQuiescence"}}},
+    "maintenanceStrengthen": {"properties": {"kind": {"const": "maintenance_strengthen"}, "commandId": {"$ref": "#/$defs/controllerCommandId"}, "action": {"$ref": "#/$defs/actionController", "properties": {"method": {"const": "maintenance_strengthen"}}}, "before": {"$ref": "#/$defs/controller"}, "expectedAfter": {"$ref": "#/$defs/controller"}}},
+    "controllerShutdown": {"properties": {"kind": {"const": "controller_shutdown"}, "commandId": {"$ref": "#/$defs/controllerCommandId"}, "action": {"$ref": "#/$defs/actionController", "properties": {"method": {"const": "shutdown"}}}, "before": {"$ref": "#/$defs/controller"}, "expectedAfter": {"$ref": "#/$defs/shutdownIntent"}}},
+    "shutdownSocketCleanup": {"properties": {"kind": {"const": "shutdown_socket_cleanup"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionSocketCleanup", "properties": {"proofSource": {"const": "CONTROLLER_SHUTDOWN_INTENT"}}}, "before": {"$ref": "#/$defs/shutdownIntent"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "databasePrepare": {"properties": {"kind": {"const": "database_prepare"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionDatabase", "properties": {"method": {"const": "prepare"}}}, "before": {"$ref": "#/$defs/databaseOrAbsence"}, "expectedAfter": {"$ref": "#/$defs/database"}}},
+    "activationLink": {"properties": {"kind": {"const": "activation_link"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionSymlink", "properties": {"method": {"const": "activate"}}}, "before": {"$ref": "#/$defs/symlinkOrAbsence"}, "expectedAfter": {"$ref": "#/$defs/symlink"}}},
+    "recoveryForwardOnly": {"properties": {"kind": {"const": "recovery_forward_only"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionJournal", "properties": {"transition": {"const": "forward-only"}}}, "before": {"$ref": "#/$defs/journalStateMutable", "properties": {"value": {"properties": {"recoveryPolicy": {"const": "REVERSIBLE"}}}}}, "expectedAfter": {"$ref": "#/$defs/journalStateMutable", "properties": {"value": {"properties": {"recoveryPolicy": {"const": "FORWARD_ONLY"}}}}}}},
+    "marketplaceRegistry": {"properties": {"kind": {"const": "marketplace_registry"}, "commandId": {"$ref": "#/$defs/externalCommandId"}, "action": {"$ref": "#/$defs/actionExternal", "properties": {"method": {"const": "marketplace-register"}}}, "before": {"$ref": "#/$defs/registryOrAbsence"}, "expectedAfter": {"$ref": "#/$defs/registry"}}},
+    "pluginRegistry": {"properties": {"kind": {"const": "plugin_registry"}, "commandId": {"$ref": "#/$defs/externalCommandId"}, "action": {"$ref": "#/$defs/actionExternal", "properties": {"method": {"const": "plugin-enable"}}}, "before": {"$ref": "#/$defs/registry"}, "expectedAfter": {"$ref": "#/$defs/registry"}}},
+    "launchers": {"properties": {"kind": {"const": "launchers"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionLauncherInstall"}, "before": {"$ref": "#/$defs/launcherSetOrAbsence"}, "expectedAfter": {"$ref": "#/$defs/launcherSet"}}},
+    "controllerCandidateSpawn": {"properties": {"kind": {"const": "controller_candidate_spawn"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionControllerSpawn"}, "before": {"$ref": "#/$defs/absence"}, "expectedAfter": {"$ref": "#/$defs/controllerCandidateExpected"}}},
+    "controllerAccept": {"properties": {"kind": {"const": "controller_accept"}, "commandId": {"$ref": "#/$defs/controllerCommandId"}, "action": {"$ref": "#/$defs/actionController", "properties": {"method": {"const": "controller_accept"}}}, "before": {"$ref": "#/$defs/controllerCandidate"}, "expectedAfter": {"$ref": "#/$defs/controller"}}},
+    "controllerRecover": {"properties": {"kind": {"const": "controller_recover"}, "commandId": {"$ref": "#/$defs/controllerCommandId"}, "action": {"$ref": "#/$defs/actionController", "properties": {"method": {"const": "controller_recover"}}}, "before": {"$ref": "#/$defs/controllerCandidate"}, "expectedAfter": {"$ref": "#/$defs/controller"}}},
+    "verifyCandidate": {"properties": {"kind": {"const": "verify_candidate"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionVerify", "properties": {"predicate": {"const": "candidate"}}}, "before": {"$ref": "#/$defs/activation"}, "expectedAfter": {"$ref": "#/$defs/activation"}}},
+    "manifestCommit": {"properties": {"kind": {"const": "manifest_commit"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionFile", "properties": {"method": {"const": "write-replace"}}}, "before": {"oneOf": [{"$ref": "#/$defs/manifest"}, {"$ref": "#/$defs/absence"}]}, "expectedAfter": {"$ref": "#/$defs/manifest"}}},
+    "maintenanceResume": {"properties": {"kind": {"const": "maintenance_resume"}, "commandId": {"$ref": "#/$defs/controllerCommandId"}, "action": {"$ref": "#/$defs/actionController", "properties": {"method": {"const": "maintenance_resume"}}}, "before": {"$ref": "#/$defs/controller"}, "expectedAfter": {"$ref": "#/$defs/controller"}}},
+    "terminalJournalFreeze": {"properties": {"kind": {"const": "terminal_journal_freeze"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionJournal", "properties": {"transition": {"const": "freeze-delete-intent"}}}, "before": {"$ref": "#/$defs/journalStateMutable"}, "expectedAfter": {"$ref": "#/$defs/journalStateFrozen"}}},
+    "commitReceiptPublish": {"properties": {"kind": {"const": "commit_receipt_publish"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionReceipt", "properties": {"terminalKind": {"const": "COMMIT"}, "receiptKind": {"const": "activation-commit"}}}, "before": {"$ref": "#/$defs/absence"}, "expectedAfter": {"$ref": "#/$defs/receipt"}}},
+    "gateOpen": {"properties": {"kind": {"const": "gate_open"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionJournal", "properties": {"transition": {"const": "delete-frozen-journal"}}}, "before": {"$ref": "#/$defs/journalStateFrozen"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "legacyGatewayFence": {"properties": {"kind": {"const": "legacy_gateway_fence"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionFile", "properties": {"method": {"const": "write-replace"}}}, "before": {"$ref": "#/$defs/fileOrAbsence"}, "expectedAfter": {"$ref": "#/$defs/file"}}},
+    "legacyBridgePrepare": {"properties": {"kind": {"const": "legacy_bridge_prepare"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionFile", "properties": {"method": {"const": "mkdir-stage"}}}, "before": {"$ref": "#/$defs/absence"}, "expectedAfter": {"$ref": "#/$defs/tree"}}},
+    "legacyBridgeSwap": {"properties": {"kind": {"const": "legacy_bridge_swap"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionSwapPair", "properties": {"leftBeforeRole": {"const": "LEGACY_MARKETPLACE_TREE"}, "rightBeforeRole": {"const": "V2_BRIDGE_TREE"}, "leftAfterRole": {"const": "V2_BRIDGE_TREE"}, "rightAfterRole": {"const": "LEGACY_MARKETPLACE_TREE"}}}, "before": {"$ref": "#/$defs/swapPair", "properties": {"value": {"properties": {"leftRole": {"const": "LEGACY_MARKETPLACE_TREE"}, "rightRole": {"const": "V2_BRIDGE_TREE"}}}}}, "expectedAfter": {"$ref": "#/$defs/swapPair", "properties": {"value": {"properties": {"leftRole": {"const": "V2_BRIDGE_TREE"}, "rightRole": {"const": "LEGACY_MARKETPLACE_TREE"}}}}}}},
+    "legacyMarketplaceArchive": {"properties": {"kind": {"const": "legacy_marketplace_archive"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionFile", "properties": {"method": {"const": "rename"}}}, "before": {"$ref": "#/$defs/tree"}, "expectedAfter": {"$ref": "#/$defs/tree"}}},
+    "watchdogSpawn": {"properties": {"kind": {"const": "watchdog_spawn"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionWatchdogSpawn"}, "before": {"$ref": "#/$defs/absence"}, "expectedAfter": {"$ref": "#/$defs/watchdogExpected"}}},
+    "watchdogArm": {"properties": {"kind": {"const": "watchdog_arm"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionWatchdogArm"}, "before": {"$ref": "#/$defs/watchdogRegistered"}, "expectedAfter": {"$ref": "#/$defs/watchdogArmed"}}},
+    "watchdogDisarm": {
+      "properties": {"kind": {"const": "watchdog_disarm"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "expectedAfter": {"$ref": "#/$defs/watchdogExited"}},
+      "oneOf": [
+        {"properties": {"action": {"$ref": "#/$defs/actionWatchdogCancel"}, "before": {"$ref": "#/$defs/watchdogRegistered"}}},
+        {"properties": {"action": {"$ref": "#/$defs/actionWatchdogDisarm"}, "before": {"$ref": "#/$defs/watchdogArmed"}}}
+      ]
+    },
+    "legacySigstop": {"properties": {"kind": {"const": "legacy_sigstop"}, "commandId": {"$ref": "#/$defs/externalCommandId"}, "action": {"$ref": "#/$defs/actionSignal", "properties": {"signal": {"const": "SIGSTOP"}}}, "before": {"$ref": "#/$defs/legacyProcesses"}, "expectedAfter": {"$ref": "#/$defs/legacyProcesses"}}},
+    "legacyQuiescence": {"properties": {"kind": {"const": "legacy_quiescence"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionVerify", "properties": {"predicate": {"const": "legacy-quiescent"}}}, "before": {"$ref": "#/$defs/legacyProcesses"}, "expectedAfter": {"$ref": "#/$defs/legacyMigrationQuiescence"}}},
+    "migrationForwardOnly": {"properties": {"kind": {"const": "migration_forward_only"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionJournal", "properties": {"transition": {"const": "forward-only"}}}, "before": {"$ref": "#/$defs/journalStateMutable", "properties": {"value": {"properties": {"recoveryPolicy": {"const": "REVERSIBLE"}}}}}, "expectedAfter": {"$ref": "#/$defs/journalStateMutable", "properties": {"value": {"properties": {"phase": {"const": "LEGACY_EXIT_PENDING"}, "recoveryPolicy": {"const": "FORWARD_ONLY"}}}}}}},
+    "legacySigterm": {"properties": {"kind": {"const": "legacy_sigterm"}, "commandId": {"$ref": "#/$defs/externalCommandId"}, "action": {"$ref": "#/$defs/actionSignal", "properties": {"signal": {"const": "SIGTERM"}}}, "before": {"$ref": "#/$defs/legacyProcesses"}, "expectedAfter": {"$ref": "#/$defs/legacyProcesses"}}},
+    "legacySigcont": {"properties": {"kind": {"const": "legacy_sigcont"}, "commandId": {"$ref": "#/$defs/externalCommandId"}, "action": {"$ref": "#/$defs/actionSignal", "properties": {"signal": {"const": "SIGCONT"}}}, "before": {"$ref": "#/$defs/legacyProcesses"}, "expectedAfter": {"$ref": "#/$defs/legacyProcesses"}}},
+    "externalProcessObserve": {"properties": {"kind": {"const": "external_process_observe"}, "commandId": {"$ref": "#/$defs/externalCommandId"}, "action": {"$ref": "#/$defs/actionObserve"}, "before": {"$ref": "#/$defs/externalCommand"}, "expectedAfter": {"$ref": "#/$defs/externalCommand"}}},
+    "legacySocketCleanup": {"properties": {"kind": {"const": "legacy_socket_cleanup"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionSocketCleanup", "properties": {"proofSource": {"const": "LEGACY_EXIT_OBSERVATION"}}}, "before": {"$ref": "#/$defs/legacyProcesses"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "legacyFencedSnapshotCommit": {"properties": {"kind": {"const": "legacy_fenced_snapshot_commit"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionLegacyFencedSnapshotCommit"}, "before": {"$ref": "#/$defs/journalStateMutable", "properties": {"value": {"properties": {"phase": {"const": "LEGACY_EXIT_PENDING"}, "recoveryPolicy": {"const": "FORWARD_ONLY"}}}}}, "expectedAfter": {"$ref": "#/$defs/journalStateMutable", "properties": {"value": {"properties": {"phase": {"const": "FENCED"}, "recoveryPolicy": {"const": "FORWARD_ONLY"}}}}}}},
+    "legacyMarketplaceUnarchive": {"properties": {"kind": {"const": "legacy_marketplace_unarchive"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionFile", "properties": {"method": {"const": "rename"}}}, "before": {"$ref": "#/$defs/tree"}, "expectedAfter": {"$ref": "#/$defs/tree"}}},
+    "legacyBridgeSwapRestore": {"properties": {"kind": {"const": "legacy_bridge_swap_restore"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionSwapPair", "properties": {"leftBeforeRole": {"const": "V2_BRIDGE_TREE"}, "rightBeforeRole": {"const": "LEGACY_MARKETPLACE_TREE"}, "leftAfterRole": {"const": "LEGACY_MARKETPLACE_TREE"}, "rightAfterRole": {"const": "V2_BRIDGE_TREE"}}}, "before": {"$ref": "#/$defs/swapPair", "properties": {"value": {"properties": {"leftRole": {"const": "V2_BRIDGE_TREE"}, "rightRole": {"const": "LEGACY_MARKETPLACE_TREE"}}}}}, "expectedAfter": {"$ref": "#/$defs/swapPair", "properties": {"value": {"properties": {"leftRole": {"const": "LEGACY_MARKETPLACE_TREE"}, "rightRole": {"const": "V2_BRIDGE_TREE"}}}}}}},
+    "legacyBridgeRemove": {"properties": {"kind": {"const": "legacy_bridge_remove"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionObjectDelete", "properties": {"objectKind": {"const": "marketplace-bridge"}}}, "before": {"$ref": "#/$defs/tree"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "legacyGatewayRestore": {
+      "properties": {"kind": {"const": "legacy_gateway_restore"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "before": {"$ref": "#/$defs/file"}},
+      "oneOf": [
+        {"properties": {"action": {"$ref": "#/$defs/actionFile", "properties": {"method": {"const": "write-replace"}}}, "expectedAfter": {"$ref": "#/$defs/file"}}},
+        {"properties": {"action": {"$ref": "#/$defs/actionFile", "properties": {"method": {"const": "unlink"}}}, "expectedAfter": {"$ref": "#/$defs/absence"}}}
+      ]
+    },
+    "activationLinkRestore": {
+      "properties": {"kind": {"const": "activation_link_restore"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "before": {"$ref": "#/$defs/symlink"}},
+      "oneOf": [
+        {"properties": {"action": {"$ref": "#/$defs/actionSymlinkRestorePresent"}, "expectedAfter": {"$ref": "#/$defs/symlink"}}},
+        {"properties": {"action": {"$ref": "#/$defs/actionSymlinkRestoreAbsent"}, "expectedAfter": {"$ref": "#/$defs/absence"}}}
+      ]
+    },
+    "registryRestore": {"properties": {"kind": {"const": "registry_restore"}, "commandId": {"$ref": "#/$defs/externalCommandId"}, "action": {"$ref": "#/$defs/actionExternal", "properties": {"method": {"const": "registry-restore"}}}, "before": {"$ref": "#/$defs/registry"}, "expectedAfter": {"$ref": "#/$defs/registryOrAbsence"}}},
+    "launchersRestore": {
+      "properties": {"kind": {"const": "launchers_restore"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "before": {"$ref": "#/$defs/launcherSet"}},
+      "oneOf": [
+        {"properties": {"action": {"$ref": "#/$defs/actionLauncherRestorePresent"}, "expectedAfter": {"$ref": "#/$defs/launcherSet"}}},
+        {"properties": {"action": {"$ref": "#/$defs/actionLauncherRestoreAbsent"}, "expectedAfter": {"$ref": "#/$defs/absence"}}}
+      ]
+    },
+    "controllerPreviousAccept": {"properties": {"kind": {"const": "controller_previous_accept"}, "commandId": {"$ref": "#/$defs/controllerCommandId"}, "action": {"$ref": "#/$defs/actionController", "properties": {"method": {"const": "controller_accept"}}}, "before": {"$ref": "#/$defs/controllerCandidate"}, "expectedAfter": {"$ref": "#/$defs/controller"}}},
+    "manifestRestore": {"properties": {"kind": {"const": "manifest_restore"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionFile", "properties": {"method": {"const": "write-replace"}}}, "before": {"$ref": "#/$defs/manifest"}, "expectedAfter": {"$ref": "#/$defs/manifest"}}},
+    "databaseCandidateRetire": {"properties": {"kind": {"const": "database_candidate_retire"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionDatabase", "properties": {"method": {"const": "retire"}}}, "before": {"$ref": "#/$defs/database"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "stagedGenerationRetire": {"properties": {"kind": {"const": "staged_generation_retire"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionObjectDelete", "properties": {"objectKind": {"const": "staged-generation"}}}, "before": {"$ref": "#/$defs/tree"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "abortReceiptPublish": {"properties": {"kind": {"const": "abort_receipt_publish"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionReceipt", "properties": {"terminalKind": {"const": "ABORT"}, "receiptKind": {"const": "operation-abort"}}}, "before": {"$ref": "#/$defs/absence"}, "expectedAfter": {"$ref": "#/$defs/receipt"}}},
+    "abortJournalClose": {"properties": {"kind": {"const": "abort_journal_close"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionJournal", "properties": {"transition": {"const": "delete-frozen-journal"}}}, "before": {"$ref": "#/$defs/journalStateFrozen"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "uninstallPluginRemove": {"properties": {"kind": {"const": "uninstall_plugin_remove"}, "commandId": {"$ref": "#/$defs/externalCommandId"}, "action": {"$ref": "#/$defs/actionExternal", "properties": {"method": {"const": "plugin-disable"}}}, "before": {"$ref": "#/$defs/registry"}, "expectedAfter": {"$ref": "#/$defs/registry"}}},
+    "uninstallMarketplaceRemove": {"properties": {"kind": {"const": "uninstall_marketplace_remove"}, "commandId": {"$ref": "#/$defs/externalCommandId"}, "action": {"$ref": "#/$defs/actionExternal", "properties": {"method": {"const": "marketplace-remove"}}}, "before": {"$ref": "#/$defs/registry"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "uninstallLaunchersRestore": {
+      "properties": {"kind": {"const": "uninstall_launchers_restore"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "before": {"$ref": "#/$defs/launcherSet"}},
+      "oneOf": [
+        {"properties": {"action": {"$ref": "#/$defs/actionLauncherRestorePresent"}, "expectedAfter": {"$ref": "#/$defs/launcherSet"}}},
+        {"properties": {"action": {"$ref": "#/$defs/actionLauncherRestoreAbsent"}, "expectedAfter": {"$ref": "#/$defs/absence"}}}
+      ]
+    },
+    "uninstallActivationLinkRemove": {"properties": {"kind": {"const": "uninstall_activation_link_remove"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionSymlink", "properties": {"method": {"const": "remove"}}}, "before": {"$ref": "#/$defs/symlink"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "uninstallDatabaseRemove": {"properties": {"kind": {"const": "uninstall_database_remove"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionDatabase", "properties": {"method": {"const": "remove"}}}, "before": {"$ref": "#/$defs/database"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "uninstallActivationRemove": {"properties": {"kind": {"const": "uninstall_activation_remove"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionObjectDelete", "properties": {"objectKind": {"const": "activation"}}}, "before": {"$ref": "#/$defs/tree"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "uninstallManifestRemove": {"properties": {"kind": {"const": "uninstall_manifest_remove"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionObjectDelete", "properties": {"objectKind": {"const": "manifest"}}}, "before": {"$ref": "#/$defs/manifest"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "uninstallFallbackRemove": {"properties": {"kind": {"const": "uninstall_fallback_remove"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionObjectDelete", "properties": {"objectKind": {"const": "fallback"}}}, "before": {"$ref": "#/$defs/file"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "uninstallAdminRemove": {"properties": {"kind": {"const": "uninstall_admin_remove"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionObjectDelete", "properties": {"objectKind": {"const": "admin-entry"}}}, "before": {"$ref": "#/$defs/file"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "uninstallReceiptPublish": {"properties": {"kind": {"const": "uninstall_receipt_publish"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionReceipt", "properties": {"terminalKind": {"const": "UNINSTALL"}, "receiptKind": {"const": "installation-uninstall"}}}, "before": {"$ref": "#/$defs/absence"}, "expectedAfter": {"$ref": "#/$defs/receipt"}}},
+    "uninstallTombstonePublish": {"properties": {"kind": {"const": "uninstall_tombstone_publish"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionFile", "properties": {"method": {"const": "write-replace"}}}, "before": {"$ref": "#/$defs/fileOrAbsence"}, "expectedAfter": {"$ref": "#/$defs/file"}}},
+    "uninstallJournalClose": {"properties": {"kind": {"const": "uninstall_journal_close"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionJournal", "properties": {"transition": {"const": "delete-frozen-journal"}}}, "before": {"$ref": "#/$defs/journalStateFrozen"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "cleanupObjectDelete": {"properties": {"kind": {"const": "cleanup_object_delete"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionObjectDelete"}, "before": {"$ref": "#/$defs/projection"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "cleanupReceiptPublish": {"properties": {"kind": {"const": "cleanup_receipt_publish"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionReceipt", "properties": {"terminalKind": {"const": "CLEANUP"}, "receiptKind": {"const": "cleanup"}}}, "before": {"$ref": "#/$defs/absence"}, "expectedAfter": {"$ref": "#/$defs/receipt"}}},
+    "cleanupJournalClose": {"properties": {"kind": {"const": "cleanup_journal_close"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionJournal", "properties": {"transition": {"const": "delete-frozen-journal"}}}, "before": {"$ref": "#/$defs/journalStateFrozen"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "recoveryInspect": {"properties": {"kind": {"const": "recovery_inspect"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionVerify", "properties": {"predicate": {"const": "presence-pair"}}}, "before": {"$ref": "#/$defs/fileOrAbsence"}, "expectedAfter": {"$ref": "#/$defs/fileOrAbsence"}}},
+    "recoveryResumeOperation": {"properties": {"kind": {"const": "recovery_resume_operation"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionRecoveryResume"}, "before": {"$ref": "#/$defs/journalStateMutable"}, "expectedAfter": {"$ref": "#/$defs/journalStateMutable"}}},
+    "recoveryReceiptPublish": {"properties": {"kind": {"const": "recovery_receipt_publish"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionReceipt"}, "before": {"$ref": "#/$defs/absence"}, "expectedAfter": {"$ref": "#/$defs/receipt"}}},
+    "recoveryJournalClose": {"properties": {"kind": {"const": "recovery_journal_close"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionJournal", "properties": {"transition": {"const": "delete-frozen-journal"}}}, "before": {"$ref": "#/$defs/journalStateFrozen"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "recoveryAbsenceVerify": {"properties": {"kind": {"const": "recovery_absence_verify"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionVerify", "properties": {"predicate": {"const": "absence-and-parent-sync"}}}, "before": {"$ref": "#/$defs/absenceObservation"}, "expectedAfter": {"$ref": "#/$defs/absence"}}},
+    "externalExitRecheck": {"properties": {"kind": {"const": "external_exit_recheck"}, "commandId": {"$ref": "#/$defs/nullCommand"}, "action": {"$ref": "#/$defs/actionVerify", "properties": {"predicate": {"const": "external-exit"}}}, "before": {"$ref": "#/$defs/externalCommand"}, "expectedAfter": {"$ref": "#/$defs/externalCommand"}}}
+  }
+}

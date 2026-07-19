@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/controller-protocol-v2.schema.json",
+  "title": "controller-protocol-v2",
+  "oneOf": [
+    {"$ref": "#/$defs/healthRequest"},
+    {"$ref": "#/$defs/maintenanceBeginRequest"},
+    {"$ref": "#/$defs/maintenanceStrengthenRequest"},
+    {"$ref": "#/$defs/maintenanceStatusRequest"},
+    {"$ref": "#/$defs/shutdownRequest"},
+    {"$ref": "#/$defs/controllerAcceptRequest"},
+    {"$ref": "#/$defs/controllerRecoverRequest"},
+    {"$ref": "#/$defs/maintenanceResumeRequest"},
+    {"$ref": "#/$defs/smartStartRequest"},
+    {"$ref": "#/$defs/smartStatusRequest"},
+    {"$ref": "#/$defs/reserveLaunchPermitRequest"},
+    {"$ref": "#/$defs/commitLaunchPermitRequest"},
+    {"$ref": "#/$defs/healthResponse"},
+    {"$ref": "#/$defs/maintenanceBeginResponse"},
+    {"$ref": "#/$defs/maintenanceStrengthenResponse"},
+    {"$ref": "#/$defs/maintenanceStatusResponse"},
+    {"$ref": "#/$defs/shutdownResponse"},
+    {"$ref": "#/$defs/controllerAcceptResponse"},
+    {"$ref": "#/$defs/controllerRecoverResponse"},
+    {"$ref": "#/$defs/maintenanceResumeResponse"},
+    {"$ref": "#/$defs/smartStartResponse"},
+    {"$ref": "#/$defs/smartStatusResponse"},
+    {"$ref": "#/$defs/reserveLaunchPermitResponse"},
+    {"$ref": "#/$defs/commitLaunchPermitResponse"},
+    {"$ref": "#/$defs/errorResponse"},
+    {"$ref": "#/$defs/replayReceiptResponse"}
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "method": {"enum": ["health", "maintenance_begin", "maintenance_strengthen", "maintenance_status", "shutdown", "controller_accept", "controller_recover", "maintenance_resume", "smart_start", "smart_status", "reserve_launch_permit", "commit_launch_permit"]},
+    "nullableSha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+    "nullableInstanceId": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^ci2_[0-9a-f]{32}$"}]},
+    "nullableControllerStartId": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^cs2_[0-9a-f]{32}$"}]},
+    "nullableCommandId": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}]},
+    "nullableEpoch": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 1, "maximum": 9007199254740991}]},
+    "nullableOperationId": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}]},
+    "requestBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["messageType", "protocolVersion", "release", "codexHomeHash", "shellSessionId", "controllerIdentity", "instanceId", "controllerStartId", "commandId", "expectedControlEpoch", "operationId", "method", "params", "requestFingerprint", "extensions"],
+      "properties": {
+        "messageType": {"const": "request"},
+        "protocolVersion": {"const": 2},
+        "release": {"const": "0.2.0"},
+        "codexHomeHash": {"$ref": "#/$defs/sha256"},
+        "shellSessionId": {"type": "string", "minLength": 1, "maxLength": 256},
+        "controllerIdentity": {"$ref": "#/$defs/nullableSha256"},
+        "instanceId": {"$ref": "#/$defs/nullableInstanceId"},
+        "controllerStartId": {"$ref": "#/$defs/nullableControllerStartId"},
+        "commandId": {"$ref": "#/$defs/nullableCommandId"},
+        "expectedControlEpoch": {"$ref": "#/$defs/nullableEpoch"},
+        "operationId": {"$ref": "#/$defs/nullableOperationId"},
+        "method": {"$ref": "#/$defs/method"},
+        "params": {},
+        "requestFingerprint": {"$ref": "#/$defs/sha256"},
+        "extensions": {"type": "object", "maxProperties": 128}
+      }
+    },
+    "healthFence": {"properties": {"controllerIdentity": {"type": "null"}, "instanceId": {"type": "null"}, "controllerStartId": {"type": "null"}, "commandId": {"type": "null"}, "expectedControlEpoch": {"type": "null"}, "operationId": {"type": "null"}}},
+    "liveFence": {"properties": {"controllerIdentity": {"$ref": "#/$defs/sha256"}, "instanceId": {"type": "string", "pattern": "^ci2_[0-9a-f]{32}$"}, "controllerStartId": {"type": "string", "pattern": "^cs2_[0-9a-f]{32}$"}, "expectedControlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}}},
+    "controlFence": {"properties": {"controllerIdentity": {"$ref": "#/$defs/sha256"}, "instanceId": {"type": "string", "pattern": "^ci2_[0-9a-f]{32}$"}, "controllerStartId": {"type": "string", "pattern": "^cs2_[0-9a-f]{32}$"}, "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, "expectedControlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}}},
+    "candidateFence": {"properties": {"controllerIdentity": {"$ref": "#/$defs/sha256"}, "instanceId": {"type": "null"}, "controllerStartId": {"type": "string", "pattern": "^cs2_[0-9a-f]{32}$"}, "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, "expectedControlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}}},
+    "emptyParams": {"type": "object", "additionalProperties": false, "maxProperties": 0},
+    "maintenanceBeginParams": {"type": "object", "additionalProperties": false, "required": ["reasonCode"], "properties": {"reasonCode": {"type": "string", "minLength": 1, "maxLength": 128}}},
+    "maintenanceStrengthenParams": {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"const": "freeze"}}},
+    "controllerStartParams": {
+      "type": "object", "additionalProperties": false,
+      "required": ["activationId", "databaseId", "pid", "processStartMarker", "processGroupId"],
+      "properties": {"activationId": {"type": "string", "pattern": "^act2_[0-9a-f]{64}$"}, "databaseId": {"type": "string", "pattern": "^db2_[0-9a-f]{32}$"}, "pid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "processStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "processGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647}}
+    },
+    "activationGate": {
+      "description": "Closed activation gate. gateFingerprint is SHA256(UTF8('codex-smart/activation-gate/v2') || 0x00 || canonical-json-v1({manifestSemanticFingerprint, activationReceiptFingerprint, journalAbsenceProof})); journalAbsenceProof is included as the complete projection, not by proofFingerprint alone.",
+      "type": "object", "additionalProperties": false,
+      "required": ["manifestSemanticFingerprint", "activationReceiptFingerprint", "journalAbsenceProof", "gateFingerprint"],
+      "properties": {
+        "manifestSemanticFingerprint": {"$ref": "#/$defs/sha256"},
+        "activationReceiptFingerprint": {"$ref": "#/$defs/sha256"},
+        "journalAbsenceProof": {"$ref": "lifecycle-projection-v2.schema.json", "description": "Full absence-proof-v2 envelope: proofFingerprint uses codex-smart/absence-proof/v2, then valueFingerprint uses codex-smart/absence-proof-projection/v2.", "properties": {"schemaId": {"const": "absence-proof-v2"}}},
+        "gateFingerprint": {"$ref": "#/$defs/sha256", "description": "Computed over the exact three-field projection; this field is excluded from its own hash input."}
+      }
+    },
+    "smartStartParams": {
+      "type": "object", "additionalProperties": false,
+      "required": ["routeId", "nodeId", "activationGate"],
+      "properties": {"routeId": {"type": "string", "minLength": 1, "maxLength": 256}, "nodeId": {"type": "string", "minLength": 1, "maxLength": 256}, "activationGate": {"$ref": "#/$defs/activationGate"}}
+    },
+    "smartStatusParams": {"type": "object", "additionalProperties": false, "required": ["admissionId"], "properties": {"admissionId": {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"}}},
+    "reserveLaunchPermitParams": {
+      "type": "object", "additionalProperties": false,
+      "required": ["admissionId", "activationGate"],
+      "properties": {"admissionId": {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"}, "activationGate": {"$ref": "#/$defs/activationGate"}}
+    },
+    "commitLaunchPermitParams": {
+      "type": "object", "additionalProperties": false,
+      "required": ["permitId", "guardPid", "guardStartMarker", "oneTimeTokenHash", "argvFingerprint", "snapshotIdentityFingerprint", "activationGate"],
+      "properties": {"permitId": {"type": "string", "pattern": "^lp2_[0-9a-f]{32}$"}, "guardPid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "guardStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "oneTimeTokenHash": {"$ref": "#/$defs/sha256"}, "argvFingerprint": {"$ref": "#/$defs/sha256"}, "snapshotIdentityFingerprint": {"$ref": "#/$defs/sha256"}, "activationGate": {"$ref": "#/$defs/activationGate"}}
+    },
+    "healthRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/healthFence"}], "properties": {"method": {"const": "health"}, "params": {"$ref": "#/$defs/emptyParams"}}},
+    "maintenanceBeginRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/controlFence"}], "properties": {"method": {"const": "maintenance_begin"}, "params": {"$ref": "#/$defs/maintenanceBeginParams"}}},
+    "maintenanceStrengthenRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/controlFence"}], "properties": {"method": {"const": "maintenance_strengthen"}, "params": {"$ref": "#/$defs/maintenanceStrengthenParams"}}},
+    "maintenanceStatusRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/liveFence"}], "properties": {"method": {"const": "maintenance_status"}, "commandId": {"type": "null"}, "operationId": {"type": "null"}, "params": {"$ref": "#/$defs/emptyParams"}}},
+    "shutdownRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/controlFence"}], "properties": {"method": {"const": "shutdown"}, "params": {"$ref": "#/$defs/emptyParams"}}},
+    "controllerAcceptRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/candidateFence"}], "properties": {"method": {"const": "controller_accept"}, "params": {"$ref": "#/$defs/controllerStartParams"}}},
+    "controllerRecoverRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/candidateFence"}], "properties": {"method": {"const": "controller_recover"}, "params": {"$ref": "#/$defs/controllerStartParams"}}},
+    "maintenanceResumeRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/controlFence"}], "properties": {"method": {"const": "maintenance_resume"}, "params": {"$ref": "#/$defs/emptyParams"}}},
+    "smartStartRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/liveFence"}], "properties": {"method": {"const": "smart_start"}, "commandId": {"type": "null"}, "operationId": {"type": "null"}, "params": {"$ref": "#/$defs/smartStartParams"}}},
+    "smartStatusRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/liveFence"}], "properties": {"method": {"const": "smart_status"}, "commandId": {"type": "null"}, "operationId": {"type": "null"}, "params": {"$ref": "#/$defs/smartStatusParams"}}},
+    "reserveLaunchPermitRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/liveFence"}], "properties": {"method": {"const": "reserve_launch_permit"}, "commandId": {"type": "null"}, "operationId": {"type": "null"}, "params": {"$ref": "#/$defs/reserveLaunchPermitParams"}}},
+    "commitLaunchPermitRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/liveFence"}], "properties": {"method": {"const": "commit_launch_permit"}, "commandId": {"type": "null"}, "operationId": {"type": "null"}, "params": {"$ref": "#/$defs/commitLaunchPermitParams"}}},
+    "responseBase": {
+      "type": "object", "additionalProperties": false,
+      "required": ["messageType", "protocolVersion", "release", "method", "responseKind", "commandId", "requestFingerprint", "controlEpoch", "payload", "responseFingerprint", "extensions"],
+      "properties": {
+        "messageType": {"const": "response"}, "protocolVersion": {"const": 2}, "release": {"const": "0.2.0"}, "method": {"$ref": "#/$defs/method"}, "responseKind": {"enum": ["HEALTH", "SUCCESS", "ERROR", "REPLAY_RECEIPT"]}, "commandId": {"$ref": "#/$defs/nullableCommandId"}, "requestFingerprint": {"$ref": "#/$defs/sha256"}, "controlEpoch": {"$ref": "#/$defs/nullableEpoch"}, "payload": {}, "responseFingerprint": {"$ref": "#/$defs/sha256"}, "extensions": {"type": "object", "maxProperties": 128}
+      }
+    },
+    "workCounts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["nonterminalRoutes", "nonterminalNodes", "activeAttempts", "activeLeases", "openIntents", "inflightLaunchPermits", "activeRuntimeArtifacts", "pendingCandidatePublications"],
+      "properties": {"nonterminalRoutes": {"type": "integer", "minimum": 0}, "nonterminalNodes": {"type": "integer", "minimum": 0}, "activeAttempts": {"type": "integer", "minimum": 0}, "activeLeases": {"type": "integer", "minimum": 0}, "openIntents": {"type": "integer", "minimum": 0}, "inflightLaunchPermits": {"type": "integer", "minimum": 0}, "activeRuntimeArtifacts": {"type": "integer", "minimum": 0}, "pendingCandidatePublications": {"type": "integer", "minimum": 0}}
+    },
+    "zeroWorkCounts": {
+      "const": {"nonterminalRoutes": 0, "nonterminalNodes": 0, "activeAttempts": 0, "activeLeases": 0, "openIntents": 0, "inflightLaunchPermits": 0, "activeRuntimeArtifacts": 0, "pendingCandidatePublications": 0}
+    },
+    "healthPayload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["namespace", "controllerIdentity", "instanceId", "controllerStartId", "pid", "processStartMarker", "processGroupId", "state", "maintenanceMode", "operationId", "acceptingNewRoutes", "quiescent", "activationFingerprint", "compatibilityFingerprint", "routingPolicyFingerprint", "bundledCatalogFingerprint", "databaseId", "databaseSchemaVersion", "workCounts"],
+      "properties": {"namespace": {"const": "codex-smart-subagents-v2"}, "controllerIdentity": {"$ref": "#/$defs/sha256"}, "instanceId": {"type": "string", "pattern": "^ci2_[0-9a-f]{32}$"}, "controllerStartId": {"type": "string", "pattern": "^cs2_[0-9a-f]{32}$"}, "pid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "processStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "processGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "state": {"enum": ["ACCEPTING", "DRAINING", "MAINTENANCE"]}, "maintenanceMode": {"enum": [null, "drain", "freeze"]}, "operationId": {"$ref": "#/$defs/nullableOperationId"}, "acceptingNewRoutes": {"type": "boolean"}, "quiescent": {"type": "boolean"}, "activationFingerprint": {"$ref": "#/$defs/sha256"}, "compatibilityFingerprint": {"$ref": "#/$defs/sha256"}, "routingPolicyFingerprint": {"$ref": "#/$defs/sha256"}, "bundledCatalogFingerprint": {"$ref": "#/$defs/sha256"}, "databaseId": {"type": "string", "pattern": "^db2_[0-9a-f]{32}$"}, "databaseSchemaVersion": {"const": 2}, "workCounts": {"$ref": "#/$defs/workCounts"}},
+      "allOf": [
+        {
+          "oneOf": [
+            {"properties": {"state": {"const": "ACCEPTING"}, "maintenanceMode": {"type": "null"}, "operationId": {"type": "null"}, "acceptingNewRoutes": {"const": true}}},
+            {"properties": {"state": {"const": "DRAINING"}, "maintenanceMode": {"const": "drain"}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "acceptingNewRoutes": {"const": false}}},
+            {"properties": {"state": {"const": "MAINTENANCE"}, "maintenanceMode": {"enum": ["drain", "freeze"]}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "acceptingNewRoutes": {"const": false}}}
+          ]
+        },
+        {"if": {"properties": {"quiescent": {"const": true}}, "required": ["quiescent"]}, "then": {"properties": {"workCounts": {"$ref": "#/$defs/zeroWorkCounts"}}}}
+      ]
+    },
+    "commandReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["commandId", "requestFingerprint", "resultFingerprint", "controlEpoch"],
+      "properties": {"commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, "requestFingerprint": {"$ref": "#/$defs/sha256"}, "resultFingerprint": {"$ref": "#/$defs/sha256", "description": "For shutdown this value is copied exactly into shutdown-intent-v2.value.commandReceiptFingerprint."}, "controlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}}
+    },
+    "epochTransitionPayload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "previousControlEpoch", "newControlEpoch", "commandReceipt"],
+      "properties": {"status": {"enum": ["MAINTENANCE_BEGUN", "MAINTENANCE_STRENGTHENED", "MAINTENANCE_RESUMED"]}, "previousControlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "newControlEpoch": {"type": "integer", "minimum": 2, "maximum": 9007199254740991}, "commandReceipt": {"$ref": "#/$defs/commandReceipt"}}
+    },
+    "socketIntent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "device", "inode", "ownerUid", "ownerGid", "mode", "controllerPid", "controllerStartMarker", "controllerProcessGroupId", "lockPath", "processExitRequired", "exclusiveLockRequired"],
+      "properties": {"path": {"type": "string", "pattern": "^/", "maxLength": 4096}, "device": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "inode": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}, "ownerUid": {"type": "integer", "minimum": 0}, "ownerGid": {"type": "integer", "minimum": 0}, "mode": {"type": "string", "pattern": "^0[0-7]{3}$"}, "controllerPid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "controllerStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "controllerProcessGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "lockPath": {"type": "string", "pattern": "^/", "maxLength": 4096}, "processExitRequired": {"const": true}, "exclusiveLockRequired": {"const": true}}
+    },
+    "shutdownPayload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "previousControlEpoch", "newControlEpoch", "socketIntent", "commandReceipt"],
+      "properties": {"status": {"const": "SHUTDOWN_COMMITTED"}, "previousControlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "newControlEpoch": {"type": "integer", "minimum": 2, "maximum": 9007199254740991}, "socketIntent": {"$ref": "#/$defs/socketIntent"}, "commandReceipt": {"$ref": "#/$defs/commandReceipt"}}
+    },
+    "controllerStartPayload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "previousControlEpoch", "newControlEpoch", "controllerIdentity", "instanceId", "controllerStartId", "commandReceipt"],
+      "properties": {"status": {"enum": ["CONTROLLER_ACCEPTED", "CONTROLLER_RECOVERED"]}, "previousControlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "newControlEpoch": {"type": "integer", "minimum": 2, "maximum": 9007199254740991}, "controllerIdentity": {"$ref": "#/$defs/sha256"}, "instanceId": {"type": "string", "pattern": "^ci2_[0-9a-f]{32}$"}, "controllerStartId": {"type": "string", "pattern": "^cs2_[0-9a-f]{32}$"}, "commandReceipt": {"$ref": "#/$defs/commandReceipt"}}
+    },
+    "maintenanceStatusPayload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["state", "maintenanceMode", "operationId", "quiescent"],
+      "properties": {"state": {"enum": ["ACCEPTING", "DRAINING", "MAINTENANCE"]}, "maintenanceMode": {"enum": [null, "drain", "freeze"]}, "operationId": {"$ref": "#/$defs/nullableOperationId"}, "quiescent": {"type": "boolean"}},
+      "oneOf": [
+        {"properties": {"state": {"const": "ACCEPTING"}, "maintenanceMode": {"type": "null"}, "operationId": {"type": "null"}}},
+        {"properties": {"state": {"const": "DRAINING"}, "maintenanceMode": {"const": "drain"}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}}},
+        {"properties": {"state": {"const": "MAINTENANCE"}, "maintenanceMode": {"enum": ["drain", "freeze"]}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}}}
+      ]
+    },
+    "smartStartPayload": {"type": "object", "additionalProperties": false, "required": ["status", "admissionId", "activationGateFingerprint"], "properties": {"status": {"const": "QUEUED"}, "admissionId": {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"}, "activationGateFingerprint": {"$ref": "#/$defs/sha256"}}},
+    "smartStatusPayload": {"type": "object", "additionalProperties": false, "required": ["admissionId", "status", "terminalProblem"], "properties": {"admissionId": {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"}, "status": {"enum": ["ATTESTING", "RESERVED", "GUARDED", "COMMIT_AUTHORIZED", "STARTED", "STALE", "ABORTED"]}, "terminalProblem": {"oneOf": [{"type": "null"}, {"type": "string", "minLength": 1, "maxLength": 128}]}}},
+    "reservePayload": {"type": "object", "additionalProperties": false, "required": ["status", "permitId", "activationGateFingerprint"], "properties": {"status": {"const": "RESERVED"}, "permitId": {"type": "string", "pattern": "^lp2_[0-9a-f]{32}$"}, "activationGateFingerprint": {"$ref": "#/$defs/sha256"}}},
+    "commitPayload": {"type": "object", "additionalProperties": false, "required": ["status", "permitId", "guardPid", "guardStartMarker", "activationGateFingerprint"], "properties": {"status": {"const": "COMMIT_AUTHORIZED"}, "permitId": {"type": "string", "pattern": "^lp2_[0-9a-f]{32}$"}, "guardPid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "guardStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "activationGateFingerprint": {"$ref": "#/$defs/sha256"}}},
+    "healthResponse": {"$ref": "#/$defs/responseBase", "properties": {"method": {"const": "health"}, "responseKind": {"const": "HEALTH"}, "commandId": {"type": "null"}, "controlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "payload": {"$ref": "#/$defs/healthPayload"}}},
+    "successResponse": {"$ref": "#/$defs/responseBase", "properties": {"responseKind": {"const": "SUCCESS"}, "controlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}}},
+    "maintenanceBeginResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "maintenance_begin"}, "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, "payload": {"$ref": "#/$defs/epochTransitionPayload", "properties": {"status": {"const": "MAINTENANCE_BEGUN"}}}}},
+    "maintenanceStrengthenResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "maintenance_strengthen"}, "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, "payload": {"$ref": "#/$defs/epochTransitionPayload", "properties": {"status": {"const": "MAINTENANCE_STRENGTHENED"}}}}},
+    "maintenanceStatusResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "maintenance_status"}, "commandId": {"type": "null"}, "payload": {"$ref": "#/$defs/maintenanceStatusPayload"}}},
+    "shutdownResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "shutdown"}, "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, "payload": {"$ref": "#/$defs/shutdownPayload"}}},
+    "controllerAcceptResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "controller_accept"}, "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, "payload": {"$ref": "#/$defs/controllerStartPayload", "properties": {"status": {"const": "CONTROLLER_ACCEPTED"}}}}},
+    "controllerRecoverResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "controller_recover"}, "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, "payload": {"$ref": "#/$defs/controllerStartPayload", "properties": {"status": {"const": "CONTROLLER_RECOVERED"}}}}},
+    "maintenanceResumeResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "maintenance_resume"}, "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, "payload": {"$ref": "#/$defs/epochTransitionPayload", "properties": {"status": {"const": "MAINTENANCE_RESUMED"}}}}},
+    "smartStartResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "smart_start"}, "commandId": {"type": "null"}, "payload": {"$ref": "#/$defs/smartStartPayload"}}},
+    "smartStatusResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "smart_status"}, "commandId": {"type": "null"}, "payload": {"$ref": "#/$defs/smartStatusPayload"}}},
+    "reserveLaunchPermitResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "reserve_launch_permit"}, "commandId": {"type": "null"}, "payload": {"$ref": "#/$defs/reservePayload"}}},
+    "commitLaunchPermitResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "commit_launch_permit"}, "commandId": {"type": "null"}, "payload": {"$ref": "#/$defs/commitPayload"}}},
+    "errorPayload": {"type": "object", "additionalProperties": false, "required": ["code", "message", "retryable"], "properties": {"code": {"enum": ["COMMAND_REPLAY_CONFLICT", "CONTROL_EPOCH_MISMATCH", "CONTROLLER_INSTANCE_MISMATCH", "CONTROLLER_OPERATION_CONFLICT", "INVALID_TRANSITION", "ADAPTIVE_ACTIVATION_UNCOMMITTED", "EXTERNAL_PROCESS_STILL_RUNNING", "INTERNAL_ERROR"]}, "message": {"type": "string", "minLength": 1, "maxLength": 1024}, "retryable": {"type": "boolean"}}},
+    "errorResponse": {"$ref": "#/$defs/responseBase", "properties": {"responseKind": {"const": "ERROR"}, "controlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "payload": {"$ref": "#/$defs/errorPayload"}}},
+    "replayPayload": {"type": "object", "additionalProperties": false, "required": ["commandReceipt", "originalResponseFingerprint"], "properties": {"commandReceipt": {"$ref": "#/$defs/commandReceipt"}, "originalResponseFingerprint": {"$ref": "#/$defs/sha256"}}},
+    "replayReceiptResponse": {"$ref": "#/$defs/responseBase", "properties": {"method": {"enum": ["maintenance_begin", "maintenance_strengthen", "shutdown", "controller_accept", "controller_recover", "maintenance_resume"]}, "responseKind": {"const": "REPLAY_RECEIPT"}, "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, "controlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "payload": {"$ref": "#/$defs/replayPayload"}}}
+  }
+}

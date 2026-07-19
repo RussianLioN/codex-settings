@@ -1,0 +1,901 @@
+{
+  "schemaVersion": 1,
+  "contexts": {
+    "reader-luna-medium": {
+      "profileCase": "reader",
+      "selectedPair": {
+        "model": "gpt-5.6-luna",
+        "reasoningEffort": "medium"
+      }
+    },
+    "writer-terra-high": {
+      "profileCase": "writer",
+      "selectedPair": {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "high"
+      }
+    }
+  },
+  "cycle7Cases": [
+    {
+      "name": "granular-optional-absent",
+      "construction": "granular-optionals",
+      "parameters": {
+        "mode": "absent"
+      },
+      "expected": {
+        "normalizationStatus": "complete",
+        "compatibilityStatus": "compatible",
+        "normalizedPolicyCount": 2
+      }
+    },
+    {
+      "name": "granular-optional-null",
+      "construction": "granular-optionals",
+      "parameters": {
+        "mode": "null"
+      },
+      "expected": {
+        "normalizationStatus": "complete",
+        "compatibilityStatus": "compatible",
+        "normalizedPolicyCount": 2
+      }
+    },
+    {
+      "name": "granular-optional-false",
+      "construction": "granular-optionals",
+      "parameters": {
+        "mode": "false"
+      },
+      "expected": {
+        "normalizationStatus": "complete",
+        "compatibilityStatus": "compatible",
+        "normalizedPolicyCount": 2
+      }
+    },
+    {
+      "name": "granular-equivalent-deduplicates",
+      "construction": "granular-dedup",
+      "parameters": {},
+      "expected": {
+        "normalizationStatus": "complete",
+        "compatibilityStatus": "compatible",
+        "normalizedPolicyCount": 2
+      }
+    },
+    {
+      "name": "envelope-parsed-1048577-bytes",
+      "construction": "envelope-bytes",
+      "parameters": {
+        "sourceKind": "parsed",
+        "utf8Bytes": 1048577
+      },
+      "expected": {
+        "normalizationStatus": "rejected",
+        "errorCode": "MANAGED_REQUIREMENT_MALFORMED",
+        "compatibilityStatus": "not-run"
+      }
+    },
+    {
+      "name": "envelope-raw-1048577-bytes",
+      "construction": "envelope-bytes",
+      "parameters": {
+        "sourceKind": "raw-utf8",
+        "utf8Bytes": 1048577
+      },
+      "expected": {
+        "normalizationStatus": "rejected",
+        "errorCode": "MANAGED_REQUIREMENT_MALFORMED",
+        "compatibilityStatus": "not-run"
+      }
+    },
+    {
+      "name": "raw-lone-surrogate",
+      "construction": "raw-unicode-escape",
+      "parameters": {
+        "hexCodeUnit": "d800"
+      },
+      "expected": {
+        "normalizationStatus": "rejected",
+        "errorCode": "MANAGED_REQUIREMENT_MALFORMED",
+        "compatibilityStatus": "not-run"
+      }
+    },
+    {
+      "name": "envelope-parsed-depth-1100",
+      "construction": "envelope-depth",
+      "parameters": {
+        "sourceKind": "parsed",
+        "depth": 1100
+      },
+      "expected": {
+        "normalizationStatus": "rejected",
+        "errorCode": "MANAGED_REQUIREMENT_MALFORMED",
+        "compatibilityStatus": "not-run"
+      }
+    },
+    {
+      "name": "envelope-raw-depth-1100",
+      "construction": "envelope-depth",
+      "parameters": {
+        "sourceKind": "raw-utf8",
+        "depth": 1100
+      },
+      "expected": {
+        "normalizationStatus": "rejected",
+        "errorCode": "MANAGED_REQUIREMENT_MALFORMED",
+        "compatibilityStatus": "not-run"
+      }
+    },
+    {
+      "name": "raw-5000-digit-integer",
+      "construction": "raw-integer-digits",
+      "parameters": {
+        "digits": 5000
+      },
+      "expected": {
+        "normalizationStatus": "rejected",
+        "errorCode": "MANAGED_REQUIREMENT_MALFORMED",
+        "compatibilityStatus": "not-run"
+      }
+    }
+  ],
+  "cycle8Cases": [
+    {
+      "name": "allowed-approval-policies-repeat-2049",
+      "field": "allowedApprovalPolicies",
+      "value": "never",
+      "repeatCount": 2049,
+      "expected": {
+        "normalizationStatus": "complete",
+        "compatibilityStatus": "compatible",
+        "normalized": [
+          "never"
+        ]
+      }
+    },
+    {
+      "name": "allowed-approvals-reviewers-repeat-2049",
+      "field": "allowedApprovalsReviewers",
+      "value": "user",
+      "repeatCount": 2049,
+      "expected": {
+        "normalizationStatus": "complete",
+        "compatibilityStatus": "compatible",
+        "normalized": [
+          "user"
+        ]
+      }
+    },
+    {
+      "name": "allowed-sandbox-modes-repeat-2049",
+      "field": "allowedSandboxModes",
+      "value": "read-only",
+      "repeatCount": 2049,
+      "expected": {
+        "normalizationStatus": "complete",
+        "compatibilityStatus": "compatible",
+        "normalized": [
+          "read-only"
+        ]
+      }
+    },
+    {
+      "name": "allowed-web-search-modes-repeat-2049",
+      "field": "allowedWebSearchModes",
+      "value": "disabled",
+      "repeatCount": 2049,
+      "expected": {
+        "normalizationStatus": "complete",
+        "compatibilityStatus": "compatible",
+        "normalized": [
+          "disabled"
+        ]
+      }
+    },
+    {
+      "name": "allowed-windows-sandbox-implementations-repeat-2049",
+      "field": "allowedWindowsSandboxImplementations",
+      "value": "unelevated",
+      "repeatCount": 2049,
+      "expected": {
+        "normalizationStatus": "complete",
+        "compatibilityStatus": "compatible",
+        "normalized": [
+          "unelevated"
+        ]
+      }
+    }
+  ],
+  "cases": [
+    {
+      "name": "requirements-null",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": null
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": null,
+          "canonicalUtf8": "null",
+          "fingerprint": "a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4"
+        },
+        "compatibility": {
+          "status": "compatible"
+        }
+      }
+    },
+    {
+      "name": "requirements-empty",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {}
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {},
+          "canonicalUtf8": "{}",
+          "fingerprint": "ee9527f2c354d28bddf16167de9fc9c41b9522e1b74d5e34ccc07f4f91b5114a"
+        },
+        "compatibility": {
+          "status": "compatible"
+        }
+      }
+    },
+    {
+      "name": "optional-null-equals-absent",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "allowedSandboxModes": null
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {},
+          "canonicalUtf8": "{}",
+          "fingerprint": "ee9527f2c354d28bddf16167de9fc9c41b9522e1b74d5e34ccc07f4f91b5114a"
+        },
+        "compatibility": {
+          "status": "compatible"
+        }
+      }
+    },
+    {
+      "name": "reader-limits",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "allowedWebSearchModes": [
+              "disabled"
+            ],
+            "allowedSandboxModes": [
+              "read-only"
+            ]
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {
+            "allowedSandboxModes": [
+              "read-only"
+            ],
+            "allowedWebSearchModes": [
+              "disabled"
+            ]
+          },
+          "canonicalUtf8": "{\"allowedSandboxModes\":[\"read-only\"],\"allowedWebSearchModes\":[\"disabled\"]}",
+          "fingerprint": "e2d486df1850eb0f96b5494cb5ad77a25bdeafc618536d06504e15bc0f5c9d59"
+        },
+        "compatibility": {
+          "status": "compatible"
+        }
+      }
+    },
+    {
+      "name": "granular-defaults",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "allowedApprovalPolicies": [
+              {
+                "granular": {
+                  "mcp_elicitations": false,
+                  "rules": false,
+                  "sandbox_approval": false
+                }
+              }
+            ]
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {
+            "allowedApprovalPolicies": [
+              {
+                "granular": {
+                  "mcp_elicitations": false,
+                  "request_permissions": false,
+                  "rules": false,
+                  "sandbox_approval": false,
+                  "skill_approval": false
+                }
+              }
+            ]
+          },
+          "canonicalUtf8": "{\"allowedApprovalPolicies\":[{\"granular\":{\"mcp_elicitations\":false,\"request_permissions\":false,\"rules\":false,\"sandbox_approval\":false,\"skill_approval\":false}}]}",
+          "fingerprint": "8a129f29a168c35348a551b48f88dd572dbc5ff5f54cfbe9009f5bf3d38a033a"
+        },
+        "compatibility": {
+          "status": "rejected",
+          "errorCode": "MANAGED_REQUIREMENT_INCOMPATIBLE"
+        }
+      }
+    },
+    {
+      "name": "requirements-missing",
+      "source": {
+        "kind": "parsed",
+        "value": {}
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "rejected",
+          "phase": "envelope",
+          "errorCode": "MANAGED_REQUIREMENT_MALFORMED"
+        },
+        "compatibility": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "name": "unknown-protective-field",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "futureConstraint": true
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "rejected",
+          "phase": "structure",
+          "errorCode": "MANAGED_REQUIREMENT_UNSUPPORTED"
+        },
+        "compatibility": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "name": "empty-approval-allowlist",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "allowedApprovalPolicies": []
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {
+            "allowedApprovalPolicies": []
+          },
+          "canonicalUtf8": "{\"allowedApprovalPolicies\":[]}",
+          "fingerprint": "2787b06d41b5351bcf670785ecc6154d6be902f46768601ee174f95fb5029bc8"
+        },
+        "compatibility": {
+          "status": "rejected",
+          "errorCode": "MANAGED_REQUIREMENT_INCOMPATIBLE"
+        }
+      }
+    },
+    {
+      "name": "unknown-feature",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "featureRequirements": {
+              "future_feature": false
+            }
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {
+            "featureRequirements": {
+              "future_feature": false
+            }
+          },
+          "canonicalUtf8": "{\"featureRequirements\":{\"future_feature\":false}}",
+          "fingerprint": "0c5d01b32354d87936f2b41850b69142d93d8747d4166e978655042481a4141e"
+        },
+        "compatibility": {
+          "status": "rejected",
+          "errorCode": "MANAGED_REQUIREMENT_UNSUPPORTED"
+        }
+      }
+    },
+    {
+      "name": "network-legacy-conflict",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "network": {
+              "domains": {
+                "example.com": "allow"
+              },
+              "allowedDomains": []
+            }
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "rejected",
+          "phase": "normalization",
+          "errorCode": "MANAGED_REQUIREMENT_MALFORMED"
+        },
+        "compatibility": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "name": "writer-limits",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "allowedApprovalPolicies": [
+              "never"
+            ],
+            "allowedPermissionProfiles": {
+              "codex-smart-writer": true
+            },
+            "allowedSandboxModes": [
+              "workspace-write"
+            ],
+            "allowedWebSearchModes": [
+              "disabled"
+            ],
+            "models": {
+              "newThread": {
+                "model": "gpt-5.6-terra",
+                "modelReasoningEffort": "high"
+              }
+            }
+          }
+        }
+      },
+      "contextRef": "writer-terra-high",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {
+            "allowedApprovalPolicies": [
+              "never"
+            ],
+            "allowedPermissionProfiles": {
+              "codex-smart-writer": true
+            },
+            "allowedSandboxModes": [
+              "workspace-write"
+            ],
+            "allowedWebSearchModes": [
+              "disabled"
+            ],
+            "models": {
+              "newThread": {
+                "model": "gpt-5.6-terra",
+                "modelReasoningEffort": "high"
+              }
+            }
+          },
+          "canonicalUtf8": "{\"allowedApprovalPolicies\":[\"never\"],\"allowedPermissionProfiles\":{\"codex-smart-writer\":true},\"allowedSandboxModes\":[\"workspace-write\"],\"allowedWebSearchModes\":[\"disabled\"],\"models\":{\"newThread\":{\"model\":\"gpt-5.6-terra\",\"modelReasoningEffort\":\"high\"}}}",
+          "fingerprint": "5ff8967b7e9f85a3204decc7934492f3d60634824f60c50628ac5a958808a29e"
+        },
+        "compatibility": {
+          "status": "compatible"
+        }
+      }
+    },
+    {
+      "name": "approval-mismatch",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "allowedApprovalPolicies": [
+              "on-request"
+            ]
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {
+            "allowedApprovalPolicies": [
+              "on-request"
+            ]
+          },
+          "canonicalUtf8": "{\"allowedApprovalPolicies\":[\"on-request\"]}",
+          "fingerprint": "0d5e7a94a5cd7d3499c088fb1eee8e929dec45b1238cc23fe38403b5270e264a"
+        },
+        "compatibility": {
+          "status": "rejected",
+          "errorCode": "MANAGED_REQUIREMENT_INCOMPATIBLE"
+        }
+      }
+    },
+    {
+      "name": "sandbox-mismatch",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "allowedSandboxModes": [
+              "workspace-write"
+            ]
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {
+            "allowedSandboxModes": [
+              "workspace-write"
+            ]
+          },
+          "canonicalUtf8": "{\"allowedSandboxModes\":[\"workspace-write\"]}",
+          "fingerprint": "2f4dd3d1d24a1aef255859b2192ec1fb141bee617d423d4e9501f422b4569399"
+        },
+        "compatibility": {
+          "status": "rejected",
+          "errorCode": "MANAGED_REQUIREMENT_INCOMPATIBLE"
+        }
+      }
+    },
+    {
+      "name": "search-mismatch",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "allowedWebSearchModes": [
+              "live"
+            ]
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {
+            "allowedWebSearchModes": [
+              "live"
+            ]
+          },
+          "canonicalUtf8": "{\"allowedWebSearchModes\":[\"live\"]}",
+          "fingerprint": "4b2eb78267588e6cc6df397a3eb6ca49f1daaa34136e6039e1a22fc86374cf5a"
+        },
+        "compatibility": {
+          "status": "rejected",
+          "errorCode": "MANAGED_REQUIREMENT_INCOMPATIBLE"
+        }
+      }
+    },
+    {
+      "name": "profile-mismatch",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "allowedPermissionProfiles": {
+              "codex-smart-writer": true
+            }
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {
+            "allowedPermissionProfiles": {
+              "codex-smart-writer": true
+            }
+          },
+          "canonicalUtf8": "{\"allowedPermissionProfiles\":{\"codex-smart-writer\":true}}",
+          "fingerprint": "8aa321cb36aed6ff4ab330bb39cf5d8db56914609b1957f651de089865cf34de"
+        },
+        "compatibility": {
+          "status": "rejected",
+          "errorCode": "MANAGED_REQUIREMENT_INCOMPATIBLE"
+        }
+      }
+    },
+    {
+      "name": "model-mismatch",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "models": {
+              "newThread": {
+                "model": "gpt-5.6-terra"
+              }
+            }
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {
+            "models": {
+              "newThread": {
+                "model": "gpt-5.6-terra"
+              }
+            }
+          },
+          "canonicalUtf8": "{\"models\":{\"newThread\":{\"model\":\"gpt-5.6-terra\"}}}",
+          "fingerprint": "d0470d0108b3ec87539d60f41db271a77f0dd62f2b07b91cc7decb807c5761b9"
+        },
+        "compatibility": {
+          "status": "rejected",
+          "errorCode": "MANAGED_REQUIREMENT_INCOMPATIBLE"
+        }
+      }
+    },
+    {
+      "name": "effort-mismatch",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "models": {
+              "newThread": {
+                "modelReasoningEffort": "high"
+              }
+            }
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {
+            "models": {
+              "newThread": {
+                "modelReasoningEffort": "high"
+              }
+            }
+          },
+          "canonicalUtf8": "{\"models\":{\"newThread\":{\"modelReasoningEffort\":\"high\"}}}",
+          "fingerprint": "94da3274bb32bde0644c2a69e3dc6ac3ab9a25fa7e0c8e402d1b0443b81d4e96"
+        },
+        "compatibility": {
+          "status": "rejected",
+          "errorCode": "MANAGED_REQUIREMENT_INCOMPATIBLE"
+        }
+      }
+    },
+    {
+      "name": "nonempty-managed-hooks",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "hooks": {
+              "PermissionRequest": [],
+              "PostCompact": [],
+              "PostToolUse": [],
+              "PreCompact": [],
+              "PreToolUse": [],
+              "SessionStart": [],
+              "Stop": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "async": false,
+                      "command": "/bin/false"
+                    }
+                  ]
+                }
+              ],
+              "SubagentStart": [],
+              "SubagentStop": [],
+              "UserPromptSubmit": []
+            }
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {
+            "hooks": {
+              "PermissionRequest": [],
+              "PostCompact": [],
+              "PostToolUse": [],
+              "PreCompact": [],
+              "PreToolUse": [],
+              "SessionStart": [],
+              "Stop": [
+                {
+                  "hooks": [
+                    {
+                      "type": "command",
+                      "async": false,
+                      "command": "/bin/false"
+                    }
+                  ]
+                }
+              ],
+              "SubagentStart": [],
+              "SubagentStop": [],
+              "UserPromptSubmit": []
+            }
+          },
+          "canonicalUtf8": "{\"hooks\":{\"PermissionRequest\":[],\"PostCompact\":[],\"PostToolUse\":[],\"PreCompact\":[],\"PreToolUse\":[],\"SessionStart\":[],\"Stop\":[{\"hooks\":[{\"async\":false,\"command\":\"/bin/false\",\"type\":\"command\"}]}],\"SubagentStart\":[],\"SubagentStop\":[],\"UserPromptSubmit\":[]}}",
+          "fingerprint": "b4932fe6e87b05521b4ba397c9f34a73cb81a00769751f689df19349c612c3e4"
+        },
+        "compatibility": {
+          "status": "rejected",
+          "errorCode": "MANAGED_REQUIREMENT_INCOMPATIBLE"
+        }
+      }
+    },
+    {
+      "name": "unknown-enum",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "allowedSandboxModes": [
+              "future-sandbox"
+            ]
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "rejected",
+          "phase": "structure",
+          "errorCode": "MANAGED_REQUIREMENT_MALFORMED"
+        },
+        "compatibility": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "name": "duplicate-key-raw-bytes",
+      "source": {
+        "kind": "raw-utf8",
+        "value": "{\"requirements\":{\"allowedSandboxModes\":[\"read-only\"],\"allowedSandboxModes\":[\"workspace-write\"]}}"
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "rejected",
+          "phase": "strict-parse",
+          "errorCode": "MANAGED_REQUIREMENT_MALFORMED"
+        },
+        "compatibility": {
+          "status": "not-run"
+        }
+      }
+    },
+    {
+      "name": "finite-enum-natural-set",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "allowedWebSearchModes": [
+              "live",
+              "disabled",
+              "indexed",
+              "cached"
+            ]
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {
+            "allowedWebSearchModes": [
+              "cached",
+              "disabled",
+              "indexed",
+              "live"
+            ]
+          },
+          "canonicalUtf8": "{\"allowedWebSearchModes\":[\"cached\",\"disabled\",\"indexed\",\"live\"]}",
+          "fingerprint": "27616f795fc7eb16d39daf817383e1c4e9006eea1eabce0c02cee363986ed06f"
+        },
+        "compatibility": {
+          "status": "compatible"
+        }
+      }
+    },
+    {
+      "name": "finite-enum-duplicate-normalizes",
+      "source": {
+        "kind": "parsed",
+        "value": {
+          "requirements": {
+            "allowedSandboxModes": [
+              "read-only",
+              "read-only"
+            ]
+          }
+        }
+      },
+      "contextRef": "reader-luna-medium",
+      "expected": {
+        "normalization": {
+          "status": "complete",
+          "normalized": {
+            "allowedSandboxModes": [
+              "read-only"
+            ]
+          },
+          "canonicalUtf8": "{\"allowedSandboxModes\":[\"read-only\"]}",
+          "fingerprint": "550d650268066364b46b7bfe7931748249c8ca26364488a8b17da1ba8702f51a"
+        },
+        "compatibility": {
+          "status": "compatible"
+        }
+      }
+    }
+  ]
+}
