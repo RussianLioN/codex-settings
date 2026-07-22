@@ -11,6 +11,13 @@ description: Use when an adaptive Codex turn is active and the task may benefit 
 `smart_plan`. Контроллер, а не корневая модель, выбирает модель, уровень
 рассуждения и профиль прав каждого узла.
 
+В управляемом ходе используй прямые имена команд:
+`mcp__codex_smart_subagents__smart_plan`,
+`mcp__codex_smart_subagents__route_start`,
+`mcp__codex_smart_subagents__smart_wait` и
+`mcp__codex_smart_subagents__smart_cancel`. Не ищи их в `ALL_TOOLS`: это
+отдельное доверенное пространство команд корневой модели.
+
 Не выдумывай идентификаторы маршрута, узла или запуска. Привязку хода и
 шлюз активации сервер получает сам из проверенного контекста. Если добавочного
 контекста нет, работай `direct`.

@@ -211,6 +211,12 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
         "--disable",
         "enable_fanout",
     )
+
+    ADAPTIVE_DIRECT_TOOL_ARGUMENTS = (
+        "-c",
+        'code_mode.direct_only_tool_namespaces=["mcp__codex_smart_subagents"]',
+    )
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve()
@@ -327,6 +333,7 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
                 "gpt-5.6-terra",
                 "-c",
                 'model_reasoning_effort="medium"',
+                *self.ADAPTIVE_DIRECT_TOOL_ARGUMENTS,
                 *self.ADAPTIVE_DISABLED_FEATURE_ARGUMENTS,
             ),
             argv,
@@ -376,6 +383,7 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
                     (
                         str(self.real),
                         *original,
+                        *self.ADAPTIVE_DIRECT_TOOL_ARGUMENTS,
                         *self.ADAPTIVE_DISABLED_FEATURE_ARGUMENTS,
                     ),
                     explicit_argv,
@@ -412,8 +420,16 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            self.ADAPTIVE_DISABLED_FEATURE_ARGUMENTS,
-            argv[-len(self.ADAPTIVE_DISABLED_FEATURE_ARGUMENTS) :],
+            (
+                *self.ADAPTIVE_DIRECT_TOOL_ARGUMENTS,
+                *self.ADAPTIVE_DISABLED_FEATURE_ARGUMENTS,
+            ),
+            argv[
+                -len(
+                    self.ADAPTIVE_DIRECT_TOOL_ARGUMENTS
+                    + self.ADAPTIVE_DISABLED_FEATURE_ARGUMENTS
+                ) :
+            ],
         )
         self.assertEqual(
             ("--enable", "multi_agent", "проверь"),

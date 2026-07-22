@@ -54,6 +54,10 @@ _ADAPTIVE_DISABLED_FEATURE_ARGUMENTS = (
     "--disable",
     "enable_fanout",
 )
+_ADAPTIVE_DIRECT_TOOL_ARGUMENTS = (
+    "-c",
+    'code_mode.direct_only_tool_namespaces=["mcp__codex_smart_subagents"]',
+)
 _ADAPTIVE_AGENT_FEATURES = frozenset(
     {"multi_agent", "multi_agent_v2", "enable_fanout"}
 )
@@ -1511,6 +1515,10 @@ def run_permanent_gateway(
             rewritten,
             dict(decision.coordinator or {}),
         )
+    # Codex 0.145.0 откладывает MCP-команды, но координатор Terra не получает
+    # средство их поиска. Оставляем напрямую видимым только проверенное
+    # пространство четырёх команд управляемого маршрута.
+    rewritten.extend(_ADAPTIVE_DIRECT_TOOL_ARGUMENTS)
     # Эти параметры намеренно завершают argv: пользовательский ``--enable``
     # не должен открыть параллельный путь субагентов мимо доказуемого
     # контроллера выбранной пары модели и уровня рассуждения.

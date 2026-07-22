@@ -809,6 +809,7 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("Use when", text)
         for tool in ("smart_plan", "route_start", "smart_wait", "smart_cancel"):
             self.assertIn(tool, text)
+            self.assertIn(f"mcp__codex_smart_subagents__{tool}", text)
         self.assertIn("direct", text)
         self.assertIn("не применяют", text.lower())
         self.assertNotIn("smart_integrate", text)
