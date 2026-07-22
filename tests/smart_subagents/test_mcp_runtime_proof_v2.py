@@ -350,7 +350,7 @@ class MCPRuntimeProofV2Tests(unittest.TestCase):
         with self.assertRaises(module.MCPRuntimeProofV2Error):
             module.build_user_mcp_policy_proof_v2(self.codex_home)
 
-    def test_policy_rejects_wrong_types_and_changed_or_corrupt_proof(self) -> None:
+    def test_policy_rejects_wrong_types_and_corrupt_proof(self) -> None:
         module = self._module()
         self.config_path.write_text(
             f'[plugins."{PLUGIN_ID}"]\nenabled = "true"\n',
@@ -365,11 +365,64 @@ class MCPRuntimeProofV2Tests(unittest.TestCase):
         with self.assertRaises(module.MCPRuntimeProofV2Error):
             module.verify_user_mcp_policy_proof_v2(self.codex_home, encoded[:-1])
 
-        self.config_path.write_bytes(self.config_path.read_bytes() + b"\n")
+    def test_policy_proof_accepts_unrelated_codex_config_rewrite(self) -> None:
+        module = self._module()
+        self._write_policy()
+        encoded = module.build_user_mcp_policy_proof_v2(self.codex_home)
+
+        self.config_path.write_bytes(
+            self.config_path.read_bytes()
+            + (
+                b'\n[hooks.state."managed-hook"]\n'
+                b'trusted_hash = "sha256:' + b"a" * 64 + b'"\n'
+            )
+        )
         self.config_path.chmod(0o600)
+
+        verified = module.verify_user_mcp_policy_proof_v2(
+            self.codex_home,
+            encoded,
+        )
+
+        self.assertEqual(json.loads(encoded), verified)
+
+    def test_policy_proof_rejects_changed_target_policy(self) -> None:
+        module = self._module()
+        self._write_policy()
+        encoded = module.build_user_mcp_policy_proof_v2(self.codex_home)
+        self._write_policy(plugin_enabled=False)
+
         with self.assertRaises(module.MCPRuntimeProofV2Error) as caught:
             module.verify_user_mcp_policy_proof_v2(self.codex_home, encoded)
+
         self.assertEqual("USER_MCP_POLICY_PROOF_MISMATCH", caught.exception.code)
+
+    def test_policy_proof_rejects_non_string_digest_fields_cleanly(self) -> None:
+        module = self._module()
+        self._write_policy()
+        original = json.loads(
+            module.build_user_mcp_policy_proof_v2(self.codex_home)
+        )
+
+        for field in ("rawSha256", "proofFingerprint"):
+            with self.subTest(field=field):
+                damaged = deepcopy(original)
+                damaged[field] = 7
+                encoded = json.dumps(
+                    damaged,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                with self.assertRaises(module.MCPRuntimeProofV2Error) as caught:
+                    module.verify_user_mcp_policy_proof_v2(
+                        self.codex_home,
+                        encoded,
+                    )
+                self.assertEqual(
+                    "USER_MCP_POLICY_PROOF_MISMATCH",
+                    caught.exception.code,
+                )
 
     def test_attestation_binds_live_process_nonce_and_exact_tools(self) -> None:
         module = self._module()

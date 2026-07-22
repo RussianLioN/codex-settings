@@ -69,6 +69,13 @@ _POLICY_VECTOR_FILES = (
     "child-profile-v1.json",
 )
 _RUNTIME_VECTOR_FILES = ("lifecycle-v2.json",)
+_MCP_RUNTIME_SCHEMA_FILES = (
+    "child-attestation-v2.schema.json",
+    "context-bundle-v1.schema.json",
+    "controller-protocol-v2.schema.json",
+    "lifecycle-projection-v2.schema.json",
+    "smart-turn-protocol-v2.schema.json",
+)
 _RUNTIME_SCHEMA_FILES = (
     "account-evidence-v1.schema.json",
     "activation-commit-receipt-v2.schema.json",
@@ -2095,13 +2102,23 @@ def _materialize_marketplace(
             contract_root / name,
         )
     runtime_schema_root = marketplace / "docs" / "contracts" / "schemas"
+    mcp_schema_root = config_root / "runtime-schemas"
     _ensure_private_directory(runtime_schema_root)
+    _ensure_private_directory(mcp_schema_root)
     for name in _RUNTIME_SCHEMA_FILES:
         source = source_root / "docs" / "contracts" / "schemas" / name
         destination = runtime_schema_root / name
         _copy_regular_file_with_deadline(source, destination)
         if destination.read_bytes() != source.read_bytes():
             _fail("RUNTIME_SCHEMA_COPY_MISMATCH", f"схема скопирована неверно: {name}")
+        if name in _MCP_RUNTIME_SCHEMA_FILES:
+            mcp_destination = mcp_schema_root / name
+            _copy_regular_file_with_deadline(source, mcp_destination)
+            if mcp_destination.read_bytes() != source.read_bytes():
+                _fail(
+                    "RUNTIME_SCHEMA_COPY_MISMATCH",
+                    f"схема MCP скопирована неверно: {name}",
+                )
     runtime_vector_root = marketplace / "docs" / "contracts" / "vectors"
     _ensure_private_directory(runtime_vector_root)
     for name in _RUNTIME_VECTOR_FILES:

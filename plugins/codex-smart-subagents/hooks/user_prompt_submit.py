@@ -33,8 +33,8 @@ from integration_runtime_v2 import (  # noqa: E402
     IntegrationConfigV2,
     TurnContextStoreV2,
     capture_hook_turn_context_v2,
+    require_current_user_mcp_policy_v2,
     require_live_controller_v2,
-    require_live_mcp_runtime_v2,
     require_mcp_contract_v2,
 )
 
@@ -183,7 +183,11 @@ def _handle_v2(
     deadline = time.monotonic() + HOOK_TOTAL_BUDGET_SECONDS_V2
     try:
         config = IntegrationConfigV2.from_environ(environ)
-        require_live_mcp_runtime_v2(config, environ)
+        # Codex запускает MCP лениво и может выполнить UserPromptSubmit раньше
+        # первого tools/list. Здесь доказываем неизменную пользовательскую
+        # политику и bundled-договор; сам процесс MCP подтверждает себя при
+        # фактическом обращении к инструментам.
+        require_current_user_mcp_policy_v2(config, environ)
         mcp_contract_checker(PLUGIN_ROOT)
         controller_checker(config, deadline=deadline)
         record = capture_hook_turn_context_v2(

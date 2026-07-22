@@ -525,7 +525,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         self.assertIn("обычном режиме", response["systemMessage"].lower())
         self.assertFalse(TurnContextStoreV2(self.config).path.exists())
 
-    def test_user_prompt_requires_current_policy_and_live_mcp_attestation(
+    def test_user_prompt_requires_current_policy_before_mcp_attestation(
         self,
     ) -> None:
         path = PLUGIN / "hooks" / "user_prompt_submit.py"
@@ -542,8 +542,11 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         }
         store = TurnContextStoreV2(self.config)
 
-        valid, publisher = self._proven_environment()
-        self.addCleanup(publisher.cleanup)
+        valid = self._environment()
+        valid[MCP_SESSION_NONCE_ENV_V2] = "mcpn2_" + "f" * 64
+        valid[USER_MCP_POLICY_PROOF_ENV_V2] = (
+            build_user_mcp_policy_proof_v2(self.codex_home)
+        )
         response = module.handle(
             payload,
             valid,
@@ -577,20 +580,89 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         self.assertNotIn("hookSpecificOutput", response)
         self.assertFalse(store.path.exists())
 
-        publisher.cleanup()
-        response = module.handle(
-            payload,
-            valid,
+    def test_stop_uses_current_policy_before_mcp_attestation(self) -> None:
+        environment = self._environment()
+        environment[MCP_SESSION_NONCE_ENV_V2] = "mcpn2_" + "f" * 64
+        environment[USER_MCP_POLICY_PROOF_ENV_V2] = (
+            build_user_mcp_policy_proof_v2(self.codex_home)
+        )
+        TurnContextStoreV2(self.config).save(self.record)
+        stop_path = PLUGIN / "hooks" / "stop.py"
+        stop_spec = importlib.util.spec_from_file_location(
+            "smart_stop_pre_attestation_test",
+            stop_path,
+        )
+        assert stop_spec is not None and stop_spec.loader is not None
+        stop_module = importlib.util.module_from_spec(stop_spec)
+        sys.modules[stop_spec.name] = stop_module
+        stop_spec.loader.exec_module(stop_module)
+
+        response = stop_module.handle(
+            {
+                "session_id": self.record.session_id,
+                "turn_id": self.record.turn_id,
+                "hook_event_name": "Stop",
+            },
+            environment,
+            v2_plan_state_provider=(
+                lambda _config, _record, *, deadline: "MISSING"
+            ),
+        )
+
+        self.assertEqual("block", response["decision"])
+        self.assertIn("smart_plan", response["reason"])
+        self.assertEqual(
+            1,
+            TurnContextStoreV2(self.config).load().continuation_count,
+        )
+
+    def test_unrelated_config_rewrite_keeps_user_prompt_active(self) -> None:
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        self.user_config.write_bytes(
+            self.user_config.read_bytes()
+            + (
+                b'\n[hooks.state."managed-hook"]\n'
+                b'trusted_hash = "sha256:' + b"a" * 64 + b'"\n'
+            )
+        )
+        self.user_config.chmod(0o600)
+        prompt_path = PLUGIN / "hooks" / "user_prompt_submit.py"
+        prompt_spec = importlib.util.spec_from_file_location(
+            "smart_prompt_unrelated_rewrite_test",
+            prompt_path,
+        )
+        assert prompt_spec is not None and prompt_spec.loader is not None
+        prompt_module = importlib.util.module_from_spec(prompt_spec)
+        sys.modules[prompt_spec.name] = prompt_module
+        prompt_spec.loader.exec_module(prompt_module)
+        response = prompt_module.handle(
+            {
+                "session_id": self.record.session_id,
+                "turn_id": self.record.turn_id,
+                "cwd": str(ROOT),
+                "hook_event_name": "UserPromptSubmit",
+            },
+            environment,
             v2_mcp_contract_checker=lambda _plugin_root: None,
             v2_controller_checker=lambda _config, *, deadline: None,
         )
-        self.assertNotIn("hookSpecificOutput", response)
-        self.assertFalse(store.path.exists())
+        self.assertIn("hookSpecificOutput", response)
+        self.assertEqual(
+            self.record.turn_id,
+            TurnContextStoreV2(self.config).load().turn_id,
+        )
 
-    def test_changed_config_and_missing_proof_never_enter_stop_cycle(self) -> None:
+    def test_target_policy_change_and_missing_proof_never_enter_stop_cycle(
+        self,
+    ) -> None:
         environment, publisher = self._proven_environment()
         self.addCleanup(publisher.cleanup)
-        self.user_config.write_bytes(self.user_config.read_bytes() + b"\n")
+        self.user_config.write_text(
+            '[plugins."codex-smart-subagents@codex-settings-adaptive"]\n'
+            "enabled = false\n",
+            encoding="utf-8",
+        )
         self.user_config.chmod(0o600)
         prompt_path = PLUGIN / "hooks" / "user_prompt_submit.py"
         prompt_spec = importlib.util.spec_from_file_location(
@@ -610,6 +682,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             },
             environment,
             v2_mcp_contract_checker=lambda _plugin_root: None,
+            v2_controller_checker=lambda _config, *, deadline: None,
         )
         self.assertNotIn("hookSpecificOutput", response)
 

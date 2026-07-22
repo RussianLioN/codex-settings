@@ -248,9 +248,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         server = build_server(os.environ)
-    except Exception:
+    except Exception as error:
         sys.stderr.write(
             "codex-smart-subagents: неполное окружение умного сеанса\n"
+        )
+        mode = (
+            "v2"
+            if _has_v2_environment(os.environ)
+            else (
+                "v1"
+                if os.environ.get("CODEX_ADAPTIVE_SESSION_ID")
+                else "ordinary"
+            )
+        )
+        sys.stderr.write(
+            "codex-smart-subagents: "
+            f"startup diagnostic mode={mode} error={type(error).__name__}\n"
         )
         return 2
     if isinstance(server, (MCPProxyServerV2, InactiveMCPServer)):

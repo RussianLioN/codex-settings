@@ -26,7 +26,12 @@ _CURSOR = re.compile(r"^cur2_[0-9a-f]{32}$")
 _CLIENT_NODE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{2,63}$")
 _PACKAGE = Path(__file__).resolve().parent
 _REPOSITORY = _PACKAGE.parents[3]
-_SCHEMA_ROOT = _REPOSITORY / "docs" / "contracts" / "schemas"
+_BUNDLED_SCHEMA_ROOT = _PACKAGE.parents[1] / "config" / "runtime-schemas"
+_SCHEMA_ROOT = (
+    _BUNDLED_SCHEMA_ROOT
+    if _BUNDLED_SCHEMA_ROOT.is_dir()
+    else _REPOSITORY / "docs" / "contracts" / "schemas"
+)
 
 
 @dataclass

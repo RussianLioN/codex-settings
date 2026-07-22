@@ -552,17 +552,31 @@ def require_mcp_contract_v2(plugin_root: Path) -> None:
         raise IntegrationV2Error("обязательный MCP не доказал полный договор") from exc
 
 
-def require_live_mcp_runtime_v2(
+def require_current_user_mcp_policy_v2(
     config: IntegrationConfigV2,
     environ: Mapping[str, str],
 ) -> None:
-    """Требует неизменную base policy и живой bundled MCP этого сеанса."""
+    """Проверяет неизменную политику до ленивого запуска MCP в Codex."""
 
     try:
         verify_user_mcp_policy_proof_v2(
             config.codex_home,
             environ.get(USER_MCP_POLICY_PROOF_ENV_V2),
         )
+    except Exception as exc:
+        raise IntegrationV2Error(
+            "пользовательская политика MCP изменилась после запуска"
+        ) from exc
+
+
+def require_live_mcp_runtime_v2(
+    config: IntegrationConfigV2,
+    environ: Mapping[str, str],
+) -> None:
+    """Требует неизменную base policy и живой bundled MCP этого сеанса."""
+
+    require_current_user_mcp_policy_v2(config, environ)
+    try:
         verify_mcp_runtime_attestation_v2(environ)
     except Exception as exc:
         raise IntegrationV2Error(
@@ -840,6 +854,7 @@ __all__ = [
     "capture_hook_turn_context_v2",
     "durable_smart_plan_exists_v2",
     "durable_smart_turn_state_v2",
+    "require_current_user_mcp_policy_v2",
     "require_mcp_contract_v2",
     "require_live_controller_v2",
     "require_live_mcp_runtime_v2",

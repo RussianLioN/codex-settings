@@ -310,6 +310,27 @@ class MCPEntrypointV2Tests(unittest.TestCase):
         )
         self.assertEqual([], responses[1]["result"]["tools"])
 
+    def test_main_reports_only_safe_startup_failure_class_and_mode(self) -> None:
+        environment = dict(self.environment)
+        environment["DO_NOT_PRINT_THIS_SECRET"] = "secret-value-must-not-leak"
+        error = io.StringIO()
+        with (
+            mock.patch.object(self.entry.os, "environ", environment),
+            mock.patch.object(self.entry.sys, "stderr", error),
+            mock.patch.object(
+                self.entry,
+                "build_server",
+                side_effect=RuntimeError("secret-value-must-not-leak"),
+            ),
+        ):
+            self.assertEqual(2, self.entry.main(["--stdio"]))
+
+        diagnostic = error.getvalue()
+        self.assertIn("mode=v2", diagnostic)
+        self.assertIn("error=RuntimeError", diagnostic)
+        self.assertNotIn("secret-value-must-not-leak", diagnostic)
+        self.assertNotIn("DO_NOT_PRINT_THIS_SECRET", diagnostic)
+
     def test_runtime_attestation_is_published_for_exact_tools_list_before_flush(
         self,
     ) -> None:

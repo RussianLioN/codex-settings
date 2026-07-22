@@ -1806,7 +1806,9 @@ def installer_source_digest_from_materialized_activation_v2(
         plugin_relative = path.relative_to(plugin_root)
         if plugin_relative == Path(
             "config/bundled-catalog-v1.json"
-        ) or plugin_relative.is_relative_to(Path("config/contracts")):
+        ) or plugin_relative.is_relative_to(
+            Path("config/contracts")
+        ) or plugin_relative.is_relative_to(Path("config/runtime-schemas")):
             continue
         source_relative = Path("plugins") / _PLUGIN_NAME / plugin_relative
         files[source_relative.as_posix()] = (

@@ -28,6 +28,7 @@ from codex_smart_subagents.activation_gateway_v2 import (  # noqa: E402
 from codex_smart_subagents.activation_materializer_v2 import (  # noqa: E402
     ActivationMaterializationV2Error,
     ControllerCandidateV2,
+    _MCP_RUNTIME_SCHEMA_FILES,
     _RUNTIME_SCHEMA_FILES,
     _RUNTIME_VECTOR_FILES,
     activate_materialized_v2,
@@ -443,12 +444,28 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
                     )
         names = set(_RUNTIME_SCHEMA_FILES)
         installed = installed_marketplace / "docs" / "contracts" / "schemas"
+        cached = (
+            installed_marketplace
+            / "plugins"
+            / "codex-smart-subagents"
+            / "config"
+            / "runtime-schemas"
+        )
 
         self.assertEqual(names, {path.name for path in installed.iterdir()})
         for name in names:
             self.assertEqual(
                 (ROOT / "docs" / "contracts" / "schemas" / name).read_bytes(),
                 (installed / name).read_bytes(),
+            )
+        self.assertEqual(
+            set(_MCP_RUNTIME_SCHEMA_FILES),
+            {path.name for path in cached.iterdir()},
+        )
+        for name in _MCP_RUNTIME_SCHEMA_FILES:
+            self.assertEqual(
+                (ROOT / "docs" / "contracts" / "schemas" / name).read_bytes(),
+                (cached / name).read_bytes(),
             )
         installed_vectors = installed_marketplace / "docs" / "contracts" / "vectors"
         self.assertEqual(
@@ -499,6 +516,8 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
         )
 
         (installed / "context-bundle-v1.schema.json").unlink()
+        self._installed_tool_definitions(result)
+        (cached / "context-bundle-v1.schema.json").unlink()
         failed = self._installed_tool_definitions(result, check=False)
         self.assertNotEqual(0, failed.returncode)
         self.assertIn("SCHEMA_DEPENDENCY_MISSING", failed.stderr)

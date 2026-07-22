@@ -169,7 +169,15 @@ def verify_user_mcp_policy_proof_v2(
     codex_home: Path,
     encoded_proof: str | None,
 ) -> Mapping[str, Any]:
-    """Повторно читает config.toml и требует побайтово то же доказательство."""
+    """Повторно доказывает неизменность только целевой политики MCP.
+
+    Codex вправе атомарно переписывать ``config.toml`` во время запуска,
+    например при сохранении состояния доверия к hooks. Поэтому побайтовая
+    идентичность всего файла здесь была бы ложным сигналом изменения политики.
+    Исходное доказательство остаётся привязанным к точному снимку запуска, а
+    текущий файл повторно разбирается и сравнивается по закрытой смысловой
+    проекции целевого расширения, сервера и четырёх инструментов.
+    """
 
     if (
         type(encoded_proof) is not str
@@ -181,28 +189,68 @@ def verify_user_mcp_policy_proof_v2(
             "доказательство пользовательской политики отсутствует",
         )
     try:
-        expected = build_user_mcp_policy_proof_v2(codex_home)
-    except MCPRuntimeProofV2Error as exc:
+        value = json.loads(encoded_proof)
+    except json.JSONDecodeError as exc:
         raise MCPRuntimeProofV2Error(
             "USER_MCP_POLICY_PROOF_MISMATCH",
-            "текущая пользовательская политика не доказана",
-        ) from exc
-    if not hmac.compare_digest(expected, encoded_proof):
-        raise MCPRuntimeProofV2Error(
-            "USER_MCP_POLICY_PROOF_MISMATCH",
-            "config.toml изменился после запуска",
-        )
-    try:
-        value = json.loads(expected)
-    except json.JSONDecodeError as exc:  # pragma: no cover - канонический кодировщик
-        raise MCPRuntimeProofV2Error(
-            "USER_MCP_POLICY_PROOF_MISMATCH",
-            "внутреннее доказательство повреждено",
+            "доказательство нельзя разобрать",
         ) from exc
     if type(value) is not dict or frozenset(value) != _POLICY_FIELDS:
         raise MCPRuntimeProofV2Error(
             "USER_MCP_POLICY_PROOF_MISMATCH",
             "доказательство имеет неверную форму",
+        )
+    try:
+        unsigned = {
+            name: value[name] for name in value if name != "proofFingerprint"
+        }
+        calculated_fingerprint = domain_fingerprint(_POLICY_DOMAIN, unsigned)
+        canonical_proof = canonical_json_bytes(value).decode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise MCPRuntimeProofV2Error(
+            "USER_MCP_POLICY_PROOF_MISMATCH",
+            "доказательство повреждено",
+        ) from exc
+    identity = value.get("fileIdentity")
+    if (
+        value.get("schemaVersion") != 2
+        or value.get("proofKind") != "codex-user-mcp-policy-v2"
+        or type(value.get("configPath")) is not str
+        or type(value.get("rawSha256")) is not str
+        or _SHA256_PATTERN.fullmatch(value.get("rawSha256", "")) is None
+        or type(identity) is not dict
+        or set(identity) != {"device", "inode", "size", "mtimeNs"}
+        or any(
+            type(item) is not str or not item.isdigit()
+            for item in identity.values()
+        )
+        or type(value.get("policy")) is not dict
+        or type(value.get("proofFingerprint")) is not str
+        or _SHA256_PATTERN.fullmatch(value.get("proofFingerprint", "")) is None
+        or not hmac.compare_digest(
+            value["proofFingerprint"],
+            calculated_fingerprint,
+        )
+        or canonical_proof != encoded_proof
+    ):
+        raise MCPRuntimeProofV2Error(
+            "USER_MCP_POLICY_PROOF_MISMATCH",
+            "доказательство повреждено",
+        )
+    try:
+        current = json.loads(build_user_mcp_policy_proof_v2(codex_home))
+    except (MCPRuntimeProofV2Error, json.JSONDecodeError) as exc:
+        raise MCPRuntimeProofV2Error(
+            "USER_MCP_POLICY_PROOF_MISMATCH",
+            "текущая пользовательская политика не доказана",
+        ) from exc
+    if (
+        value["configPath"] != current["configPath"]
+        or value["policy"] != current["policy"]
+    ):
+        raise MCPRuntimeProofV2Error(
+            "USER_MCP_POLICY_PROOF_MISMATCH",
+            "целевая пользовательская политика изменилась после запуска",
         )
     return value
 

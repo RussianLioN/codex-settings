@@ -30,7 +30,7 @@ from integration_runtime_v2 import (  # noqa: E402
     IntegrationConfigV2,
     TurnContextStoreV2,
     durable_smart_turn_state_v2,
-    require_live_mcp_runtime_v2,
+    require_current_user_mcp_policy_v2,
 )
 
 
@@ -60,7 +60,7 @@ def handle(
         ):
             config_v2 = IntegrationConfigV2.from_environ(environ)
             try:
-                require_live_mcp_runtime_v2(config_v2, environ)
+                require_current_user_mcp_policy_v2(config_v2, environ)
             except Exception:
                 return None
             deadline = time.monotonic() + HOOK_TOTAL_BUDGET_SECONDS_V2

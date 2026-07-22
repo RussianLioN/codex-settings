@@ -80,7 +80,10 @@ class MCPProxyServerV2:
         request_id: Any,
         params: Mapping[str, Any],
     ) -> dict[str, Any]:
-        if set(params) != {"name", "arguments"}:
+        if set(params) not in (
+            {"name", "arguments"},
+            {"name", "arguments", "_meta"},
+        ) or ("_meta" in params and type(params["_meta"]) is not dict):
             return self._error(request_id, -32602, "Invalid params")
         name = params["name"]
         if type(name) is not str:

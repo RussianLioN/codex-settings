@@ -159,6 +159,20 @@ class MCPProxyServerV2Tests(unittest.TestCase):
         self.assertEqual(-32602, response["error"]["code"])
         self.assertEqual([], client.calls)
 
+    def test_accepts_standard_request_meta_without_forwarding_it(self) -> None:
+        client = _Client()
+        server = MCPProxyServerV2(client=client)
+        message = _call("smart_plan", _plan_arguments())
+        message["params"]["_meta"] = {
+            "codex/thread-id": "thread-value-not-for-controller"
+        }
+
+        response = server.handle(message)
+
+        self.assertNotIn("error", response)
+        self.assertEqual([("smart_plan", _plan_arguments())], client.calls)
+        self.assertNotIn("thread-value-not-for-controller", str(client.calls))
+
     def test_transport_failure_is_sanitized_as_internal_mcp_error(self) -> None:
         client = _Client(
             error=ControllerCommandV2Error("TRANSPORT_FAILURE", "/private/secret")

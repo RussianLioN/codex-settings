@@ -44,7 +44,12 @@ SERVER_PERMISSION_EVIDENCE_REF = "server.delegation-policy"
 _SERVER_PERMISSION_BANS = frozenset({"delegation-not-explicitly-allowed"})
 _PACKAGE = Path(__file__).resolve().parent
 _REPOSITORY = _PACKAGE.parents[3]
-_SCHEMA_ROOT = _REPOSITORY / "docs" / "contracts" / "schemas"
+_BUNDLED_SCHEMA_ROOT = _PACKAGE.parents[1] / "config" / "runtime-schemas"
+_SCHEMA_ROOT = (
+    _BUNDLED_SCHEMA_ROOT
+    if _BUNDLED_SCHEMA_ROOT.is_dir()
+    else _REPOSITORY / "docs" / "contracts" / "schemas"
+)
 
 
 @dataclass
