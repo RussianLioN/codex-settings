@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -12,7 +13,28 @@ SOURCE = PLUGIN_ROOT / "src"
 if str(SOURCE) not in sys.path:
     sys.path.insert(0, str(SOURCE))
 
-from codex_smart_subagents.admin import main  # noqa: E402
+from codex_smart_subagents.activation_gateway_v2 import (  # noqa: E402
+    GatewayLayout,
+    v2_gateway_state_present,
+)
+
+
+def _version_two_state_claimed() -> bool:
+    raw_home = os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))
+    codex_home = Path(raw_home).expanduser()
+    if not codex_home.is_absolute():
+        return False
+    layout = GatewayLayout.for_codex_home(codex_home)
+    receipt = (
+        layout.manifest_root / "codex-smart-subagents-v2.installer.json"
+    )
+    return os.path.lexists(receipt) or v2_gateway_state_present(layout)
+
+
+if _version_two_state_claimed():
+    from codex_smart_subagents.admin_v2 import main  # noqa: E402
+else:
+    from codex_smart_subagents.admin import main  # noqa: E402
 
 
 if __name__ == "__main__":

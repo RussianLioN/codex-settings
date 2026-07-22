@@ -1,7 +1,11 @@
 schema_version = 1
 algorithm_version = "route-v1"
-supported_codex_versions = ["0.144.4"]
+minimum_codex_version = "0.144.4"
 supported_platforms = ["darwin-arm64"]
+
+[coordinator]
+model = "gpt-5.6-terra"
+reasoning_effort = "medium"
 
 [models."gpt-5.6-luna"]
 rank = 0

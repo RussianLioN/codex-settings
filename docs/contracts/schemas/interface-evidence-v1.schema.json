@@ -45,7 +45,11 @@
         "uid": {"$ref": "#/$defs/safeInteger"},
         "device": {"$ref": "#/$defs/safeInteger"},
         "inode": {"$ref": "#/$defs/safeInteger"},
-        "mtimeNs": {"$ref": "#/$defs/safeInteger"},
+        "mtimeNs": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "maxLength": 32
+        },
         "version": {"type": "string", "pattern": "^codex-cli [0-9]+\\.[0-9]+\\.[0-9]+$", "maxLength": 64},
         "platform": {"const": "darwin"},
         "architecture": {"const": "arm64"},

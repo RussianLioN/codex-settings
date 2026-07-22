@@ -21,11 +21,19 @@ from codex_smart_subagents.contracts import (  # noqa: E402
 class CatalogTests(unittest.TestCase):
     def test_repository_catalog_is_strict_and_stable(self) -> None:
         catalog = Catalog.load(REPO / ".codex" / "adaptive-subagents.toml")
-        self.assertEqual(("0.144.4",), catalog.supported_codex_versions)
+        self.assertEqual("0.144.4", catalog.minimum_codex_version)
+        self.assertTrue(catalog.supports_codex_version("0.144.6"))
         self.assertRegex(catalog.generation, r"^cg1_[a-f0-9]{16}$")
         self.assertEqual(
             {"gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"},
             set(catalog.models),
+        )
+        self.assertEqual(
+            {
+                "model": "gpt-5.6-terra",
+                "reasoning_effort": "medium",
+            },
+            catalog.coordinator,
         )
         self.assertEqual(20, catalog.limits["global_processes"])
         self.assertEqual(6, catalog.limits["root_processes"])
@@ -59,6 +67,17 @@ class CatalogTests(unittest.TestCase):
             invalid.write_text(source.replace("global_processes = 20", "global_processes = 0"))
             with self.assertRaises(CatalogError):
                 Catalog.load(invalid)
+
+            invalid_coordinator = Path(directory) / "invalid-coordinator.toml"
+            invalid_coordinator.write_text(
+                source.replace(
+                    'model = "gpt-5.6-terra"',
+                    'model = "unknown-model"',
+                    1,
+                )
+            )
+            with self.assertRaises(CatalogError):
+                Catalog.load(invalid_coordinator)
 
     def test_generation_changes_when_normalized_catalog_changes(self) -> None:
         source = (REPO / ".codex" / "adaptive-subagents.toml").read_text()

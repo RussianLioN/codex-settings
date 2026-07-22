@@ -1,0 +1,243 @@
+{
+  "schemaVersion": 2,
+  "fixtures": {
+    "applyInstalled": {
+      "schemaVersion": 2,
+      "command": "apply",
+      "status": "installed",
+      "readiness": "READY",
+      "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "attemptId": "opa2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "smokeInvocationId": null,
+      "resultFingerprint": "c9f0fe7c9d2feb2d028c77adb4c8c6537eddb39265bc61f2dccda122aa23ef0f",
+      "changes": [
+        {
+          "kind": "migrated_manifest",
+          "beforeFingerprint": null,
+          "afterFingerprint": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        {
+          "kind": "staged_generation",
+          "beforeFingerprint": null,
+          "afterFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        {
+          "kind": "gate_opened",
+          "beforeFingerprint": null,
+          "afterFingerprint": "3333333333333333333333333333333333333333333333333333333333333333"
+        }
+      ],
+      "problems": [],
+      "extensions": {}
+    },
+    "applyFailedProblems": {
+      "schemaVersion": 2,
+      "command": "apply",
+      "status": "failed",
+      "readiness": "BROKEN",
+      "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "attemptId": "opa2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "smokeInvocationId": null,
+      "resultFingerprint": "4ddbaeb10b4e7c4e07ec963dd8d3327667998dfebb19678a699f512c5f4a103d",
+      "changes": [
+        {
+          "kind": "gate_closed",
+          "beforeFingerprint": "8888888888888888888888888888888888888888888888888888888888888888",
+          "afterFingerprint": "9999999999999999999999999999999999999999999999999999999999999999"
+        }
+      ],
+      "problems": [
+        {
+          "code": "FIRST_ERROR",
+          "severity": "error",
+          "component": "activation",
+          "message": "Ошибка активации.",
+          "remediation": "Выполните восстановление."
+        },
+        {
+          "code": "SECOND_WARNING",
+          "severity": "warning",
+          "component": "controller",
+          "message": "Контроллер остановлен.",
+          "remediation": "Проверьте состояние."
+        },
+        {
+          "code": "THIRD_INFO",
+          "severity": "info",
+          "component": "installer",
+          "message": "Журнал сохранён.",
+          "remediation": "Сохраните журнал."
+        }
+      ],
+      "extensions": {}
+    },
+    "doctorDegraded": {
+      "schemaVersion": 2,
+      "command": "doctor",
+      "status": "DEGRADED",
+      "readiness": "DEGRADED",
+      "operationId": null,
+      "attemptId": null,
+      "smokeInvocationId": null,
+      "resultFingerprint": "38aec9a996c282625a3b06b9d243689e60d5c32be9f3f2523ea4e7b3dc475105",
+      "changes": [],
+      "problems": [
+        {
+          "code": "CONTROLLER_NOT_READY",
+          "severity": "warning",
+          "component": "controller",
+          "message": "Контроллер не готов.",
+          "remediation": "Повторите диагностику."
+        }
+      ],
+      "extensions": {}
+    },
+    "smokeReady": {
+      "schemaVersion": 2,
+      "command": "smoke",
+      "status": "READY",
+      "readiness": "READY",
+      "operationId": null,
+      "attemptId": null,
+      "smokeInvocationId": "sm2_cccccccccccccccccccccccccccccccc",
+      "resultFingerprint": "ef8c9aff4a18c7c94846bd94592a3ce19a20d34aeb502abd1a218dfbf8978c2c",
+      "changes": [],
+      "problems": [],
+      "extensions": {}
+    },
+    "inspectInspected": {
+      "schemaVersion": 2,
+      "command": "inspect",
+      "status": "inspected",
+      "readiness": "READY",
+      "operationId": null,
+      "attemptId": null,
+      "smokeInvocationId": null,
+      "resultFingerprint": "a4ba96ee351fb0e2eb066a33e611cea75058b3bd9b20f7daee70309592009623",
+      "changes": [],
+      "problems": [],
+      "extensions": {}
+    },
+    "rollbackRolledBack": {
+      "schemaVersion": 2,
+      "command": "rollback",
+      "status": "rolled_back",
+      "readiness": "READY",
+      "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "attemptId": "opa2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "smokeInvocationId": null,
+      "resultFingerprint": "f06fe3b7985c37ea6a6c33025edf4cc01702ff4cbedf4a8858a54368081b4612",
+      "changes": [
+        {
+          "kind": "published_activation",
+          "beforeFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "afterFingerprint": "4444444444444444444444444444444444444444444444444444444444444444"
+        }
+      ],
+      "problems": [],
+      "extensions": {}
+    },
+    "cleanupCleaned": {
+      "schemaVersion": 2,
+      "command": "cleanup",
+      "status": "cleaned",
+      "readiness": "READY",
+      "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "attemptId": "opa2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "smokeInvocationId": null,
+      "resultFingerprint": "1397f9babd5fe933a3ec75b76fea9bb637a7bfb420ad04b0431a94ba8f3b9b3b",
+      "changes": [
+        {
+          "kind": "retired_generation",
+          "beforeFingerprint": "5555555555555555555555555555555555555555555555555555555555555555",
+          "afterFingerprint": null
+        }
+      ],
+      "problems": [],
+      "extensions": {}
+    },
+    "uninstallUninstalled": {
+      "schemaVersion": 2,
+      "command": "uninstall",
+      "status": "uninstalled",
+      "readiness": "DISABLED",
+      "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "attemptId": "opa2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "smokeInvocationId": null,
+      "resultFingerprint": "76152eaca79413c6747aa93d271e850f0b887057475b4fa471e7666b7ac49924",
+      "changes": [
+        {
+          "kind": "removed_installation",
+          "beforeFingerprint": "6666666666666666666666666666666666666666666666666666666666666666",
+          "afterFingerprint": null
+        }
+      ],
+      "problems": [],
+      "extensions": {}
+    },
+    "recoverRecovered": {
+      "schemaVersion": 2,
+      "command": "recover",
+      "status": "recovered",
+      "readiness": "READY",
+      "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "attemptId": "opa2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "smokeInvocationId": null,
+      "resultFingerprint": "11e7aa3a0eedc044277cec730510ac7c8311ba8942ab5683002b6fcb1f15aa43",
+      "changes": [
+        {
+          "kind": "gate_opened",
+          "beforeFingerprint": null,
+          "afterFingerprint": "7777777777777777777777777777777777777777777777777777777777777777"
+        }
+      ],
+      "problems": [],
+      "extensions": {}
+    }
+  },
+  "positiveCases": [
+    {"name": "apply-installed", "fixture": "applyInstalled"},
+    {"name": "apply-failed-with-sorted-problems", "fixture": "applyFailedProblems"},
+    {"name": "doctor-degraded", "fixture": "doctorDegraded"},
+    {"name": "smoke-ready", "fixture": "smokeReady"},
+    {"name": "inspect-inspected", "fixture": "inspectInspected"},
+    {"name": "rollback-rolled-back", "fixture": "rollbackRolledBack"},
+    {"name": "cleanup-cleaned", "fixture": "cleanupCleaned"},
+    {"name": "uninstall-uninstalled", "fixture": "uninstallUninstalled"},
+    {"name": "recover-recovered", "fixture": "recoverRecovered"}
+  ],
+  "negativeCases": [
+    {"name": "missing-schema-version", "fixture": "applyInstalled", "mutation": {"operation": "remove", "path": "/schemaVersion"}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "unknown-command", "fixture": "applyInstalled", "mutation": {"operation": "replace", "path": "/command", "value": "upgrade"}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "status-from-another-command", "fixture": "applyInstalled", "mutation": {"operation": "replace", "path": "/status", "value": "cleaned"}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "unknown-readiness", "fixture": "applyInstalled", "mutation": {"operation": "replace", "path": "/readiness", "value": "FULL_READY"}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "doctor-readiness-mismatch", "fixture": "doctorDegraded", "mutation": {"operation": "replace", "path": "/readiness", "value": "BROKEN"}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "invalid-operation-id", "fixture": "applyInstalled", "mutation": {"operation": "replace", "path": "/operationId", "value": "op2_bad"}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "invalid-attempt-id", "fixture": "applyInstalled", "mutation": {"operation": "replace", "path": "/attemptId", "value": "att2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "smoke-id-missing", "fixture": "smokeReady", "mutation": {"operation": "replace", "path": "/smokeInvocationId", "value": null}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "smoke-id-on-non-smoke", "fixture": "inspectInspected", "mutation": {"operation": "replace", "path": "/smokeInvocationId", "value": "sm2_cccccccccccccccccccccccccccccccc"}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "doctor-carries-operation", "fixture": "doctorDegraded", "mutation": {"operation": "replace", "path": "/operationId", "value": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "successful-change-without-operation", "fixture": "applyInstalled", "mutation": {"operation": "replace", "path": "/operationId", "value": null}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "planned-carries-operation", "fixture": "applyInstalled", "mutation": {"operation": "replace", "path": "/status", "value": "planned"}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "unexpected-top-level-field", "fixture": "applyInstalled", "mutation": {"operation": "add", "path": "/message", "value": "лишнее поле"}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "unexpected-change-field", "fixture": "applyInstalled", "mutation": {"operation": "add", "path": "/changes/0/path", "value": "/tmp/value"}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "unknown-change-kind", "fixture": "applyInstalled", "mutation": {"operation": "replace", "path": "/changes/0/kind", "value": "changed_everything"}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "unexpected-problem-field", "fixture": "doctorDegraded", "mutation": {"operation": "add", "path": "/problems/0/details", "value": {}}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "unknown-problem-severity", "fixture": "doctorDegraded", "mutation": {"operation": "replace", "path": "/problems/0/severity", "value": "fatal"}, "expectedCode": "SCHEMA_INVALID"},
+    {"name": "change-order-reversed", "fixture": "applyInstalled", "mutation": {"operation": "replace", "path": "/changes", "value": [
+      {"kind": "gate_opened", "beforeFingerprint": null, "afterFingerprint": "3333333333333333333333333333333333333333333333333333333333333333"},
+      {"kind": "staged_generation", "beforeFingerprint": null, "afterFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"},
+      {"kind": "migrated_manifest", "beforeFingerprint": null, "afterFingerprint": "1111111111111111111111111111111111111111111111111111111111111111"}
+    ]}, "expectedCode": "CHANGE_ORDER_INVALID"},
+    {"name": "duplicate-change-kind", "fixture": "applyInstalled", "mutation": {"operation": "replace", "path": "/changes/1/kind", "value": "migrated_manifest"}, "expectedCode": "CHANGE_KIND_DUPLICATE"},
+    {"name": "change-without-effect", "fixture": "rollbackRolledBack", "mutation": {"operation": "replace", "path": "/changes/0/afterFingerprint", "value": "3333333333333333333333333333333333333333333333333333333333333333"}, "expectedCode": "CHANGE_NO_EFFECT"},
+    {"name": "problem-order-reversed", "fixture": "applyFailedProblems", "mutation": {"operation": "replace", "path": "/problems", "value": [
+      {"code": "THIRD_INFO", "severity": "info", "component": "installer", "message": "Журнал сохранён.", "remediation": "Сохраните журнал."},
+      {"code": "SECOND_WARNING", "severity": "warning", "component": "controller", "message": "Контроллер остановлен.", "remediation": "Проверьте состояние."},
+      {"code": "FIRST_ERROR", "severity": "error", "component": "activation", "message": "Ошибка активации.", "remediation": "Выполните восстановление."}
+    ]}, "expectedCode": "PROBLEM_ORDER_INVALID"},
+    {"name": "fingerprint-does-not-match-projection", "fixture": "inspectInspected", "mutation": {"operation": "replace", "path": "/resultFingerprint", "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}, "expectedCode": "RESULT_FINGERPRINT_MISMATCH"},
+    {"name": "retirement-outside-cleanup", "fixture": "rollbackRolledBack", "mutation": {"operation": "replace", "path": "/changes/0/kind", "value": "retired_generation"}, "expectedCode": "RETIRED_GENERATION_OUTSIDE_CLEANUP"},
+    {"name": "installation-removal-outside-uninstall", "fixture": "rollbackRolledBack", "mutation": {"operation": "replace", "path": "/changes/0/kind", "value": "removed_installation"}, "expectedCode": "REMOVED_INSTALLATION_OUTSIDE_UNINSTALL"}
+  ]
+}

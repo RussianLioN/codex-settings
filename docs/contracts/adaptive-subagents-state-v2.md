@@ -320,19 +320,23 @@ C5 candidate_registry_route
 
 - `activation_fingerprint TEXT NOT NULL`;
 - `compatibility_fingerprint TEXT NOT NULL`;
-- `account_context_fingerprint TEXT NOT NULL`;
 - `issued_control_epoch INTEGER NOT NULL
   CHECK(issued_control_epoch BETWEEN 0 AND 9007199254740991)`.
 
-Эти значения входят в канонический `context_json` и `context_hash`. Токен,
-созданный при другой активации, совместимости, учётной среде или эпохе, не
-потребляется.
+Эти значения входят в канонический `context_json` и `context_hash`. Привязка
+хода намеренно не содержит `accountContextFingerprint`: хук выдаёт её в
+интерактивном бюджете до любого пятикомандного `AccountEvidence`. Токен,
+созданный при другой активации, совместимости или эпохе, не потребляется.
+Учётная среда связывается позднее с заданием доказательства, конкретным
+допуском узла и попыткой. Сам маршрут создаётся `smart_plan`, где сбор
+`AccountEvidence` запрещён, поэтому маршрут не содержит выдуманных или
+устаревших отпечатков учётной среды.
 
 Строгий `request-context-v2` имеет ровно поля `schemaVersion=2`,
 `shellSessionId`, `sessionId`, `turnId`, `codexHome`, `repoRoot`, `baseSha`,
 `worktreeFingerprint`, `activationFingerprint`,
-`compatibilityFingerprint`, `accountContextFingerprint`,
-`issuedControlEpoch`. Все строки непусты и ограничены 4096 байт; отпечатки —
+`compatibilityFingerprint`, `issuedControlEpoch`. Все строки непусты и
+ограничены 4096 байт; отпечатки —
 64 hex, эпоха — целое от 0 до 9007199254740991. Ноль допустим только в
 перенесённой уже потреблённой привязке версии 1 и никогда не принимается
 живым контроллером версии 2. `context_json` является
@@ -348,14 +352,86 @@ C5 candidate_registry_route
 
 - `activation_fingerprint TEXT NOT NULL`;
 - `compatibility_fingerprint TEXT NOT NULL`;
-- `account_catalog_fingerprint TEXT NOT NULL`;
-- `account_context_fingerprint TEXT NOT NULL`;
-- `UNIQUE(route_id,activation_fingerprint,account_context_fingerprint)`.
+- терминальные состояния `DIRECT` и `CLARIFY` для планов без узлов и без
+  запуска; для них `startable=0`.
+
+Поля `account_catalog_fingerprint` и `account_context_fingerprint` в
+`routes` отсутствуют: один маршрут может содержать несколько узлов, а каждый
+фактический запуск узла обязан получить отдельное свежее доказательство
+учётной среды. Эти отпечатки впервые появляются в успешном
+`account_evidence_jobs`, затем атомарно связываются с `nodes` при
+`admit_node` и повторяются в разрешении запуска и попытке.
 
 Маршрут не хранит отдельную текущую контрольную эпоху: исторический
 `issuedControlEpoch` внутри контекста доказывает момент выдачи привязки, но
 последующие `drain/resume` не делают поставленный маршрут структурно
 устаревшим. Действующая эпоха заново фиксируется на границе запуска узла.
+
+### `start_requests` и `account_evidence_jobs`
+
+Публичный `route_start` не создаёт допуск узла. В одной `BEGIN IMMEDIATE` он
+проверяет владельца маршрута, состояние контроллера и отсутствие прежнего
+незавершённого запуска, затем создаёт:
+
+- `start_request_id TEXT PRIMARY KEY`, форма `sr2_` плюс 32 hex;
+- `route_id TEXT NOT NULL` и идентичность владельца хода;
+- `state TEXT NOT NULL`, одно из `ATTESTING`, `READY`, `STARTED`, `STALE`,
+  `FAILED`, `CANCELLED`;
+- `evidence_job_id TEXT UNIQUE`, пока задание не создано может быть `NULL`;
+- `admission_id TEXT UNIQUE`, равен `NULL` до успешного доказательства;
+- времена создания, изменения, конечного исхода и точный `failure_code`.
+
+Публичное поле называется `startRequestId`. Оно является устойчивым
+идентификатором ожидания и отмены до появления допуска.
+
+Таблица `account_evidence_jobs` содержит:
+
+- `evidence_job_id TEXT PRIMARY KEY`, форма `aej2_` плюс 32 hex;
+- `start_request_id TEXT NOT NULL UNIQUE` и `route_id TEXT NOT NULL`;
+- `boundary_id TEXT NOT NULL`, закрытая граница, для которой собирается
+  свидетельство;
+- `state TEXT NOT NULL`, одно из `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED`,
+  `CANCEL_REQUESTED`, `CANCELLED`;
+- позицию справедливой очереди, владельца, единый конечный срок 180 секунд,
+  PID и маркер текущей из пяти стадий, отпечатки результата либо точный код
+  отказа;
+- времена постановки, начала, последнего прогресса, запроса отмены и
+  завершения.
+
+Задание доказательства и последующая фактическая попытка используют один
+заранее известный `attemptId`. Отдельная случайная выдача при фиксации запуска
+запрещена. Идентификатор доступен сразу после создания задания и вычисляется
+одинаково любым читателем:
+
+```text
+attemptId = "att2_" || FIRST_32_HEX(
+  SHA256(UTF8("codex-smart/attempt-id-for-evidence-job/v2") || 0x00 ||
+         UTF8(canonical-json-v1({"evidenceJobId": evidence_job_id}))))
+```
+
+`evidence_job_id` имеет уже проверенную форму `aej2_` плюс 32 hex. Полная
+проекция содержит ровно `evidenceJobId`; 32 hex берутся слева из строчного
+64-символьного результата SHA-256. `route_start` возвращает этот `attemptId`,
+сборщик помещает его в вход `node-attempt`, а `commit_launch_permit` обязан
+создать строку `attempts` ровно с тем же значением. При повторе фиксации
+другое значение считается конфликтом.
+
+Частичные уникальные индексы разрешают не более одного незавершённого задания
+на маршрут. Планировщик удерживает не более двух `RUNNING` глобально и не
+более одного на маршрут; очередь содержит не более 32 заданий. Переполнение
+даёт `ACCOUNT_EVIDENCE_QUEUE_FULL` без скрытого повтора. Ожидающая отмена
+переходит сразу в `CANCELLED` и никогда не создаёт процесс. Активная отмена
+фиксирует `CANCEL_REQUESTED`, завершает текущую группу в пределах пяти секунд,
+доказывает отсутствие пяти дочерних процессов и единожды фиксирует
+`CANCELLED`. Повтор отмены возвращает тот же терминальный результат.
+
+Только после `SUCCEEDED` контроллер сопоставляет учётный контекст и выбранные
+пары, повторно проверяет эпоху и фактический шлюз и вызывает внутренний
+`admit_node`. `admissionId` создаётся только после успешного свежего
+`AccountEvidence`; до этого ни узел, ни разрешение запуска не получают
+фактического допуска. Осушение сначала запрещает новые задания, переводит
+ожидающие и активные задания в описанный путь отмены и лишь затем ожидает
+покоя.
 
 ### Единый `activationGate`
 
@@ -390,7 +466,7 @@ gateFingerprint =
 
 Из проекции исключён только собственный `gateFingerprint`. Сокращённая копия
 с одним `proofFingerprint`, иной порядок полей, иной домен или добавочное
-поле запрещены. `smart_start`, `reserve_launch_permit` и
+поле запрещены. `admit_node`, `reserve_launch_permit` и
 `commit_launch_permit` принимают побайтно одинаковый после
 `canonical-json-v1` объект целиком и на каждом рубеже независимо перестраивают
 его из фактического манифеста, неизменяемой квитанции и нового
@@ -398,8 +474,11 @@ gateFingerprint =
 
 Свежесть означает новую дескрипторную проверку тех же путей и повторную
 синхронизационную сверку, а не выдачу нового `proofId`. Шлюз использует
-устойчивую идентичность доказательства, связанную с последней положительной
-квитанцией активации, повторно строит все `entries` и проверяет, что
+полную `journalAbsenceTarget` из последней положительной квитанции
+активации; один `frozenJournalFingerprint` не позволяет восстановить эту
+цель. Для каждого родительского каталога проверка выполняет
+`fstatat(ENOENT) → fsync(dirfd) → fstatat(ENOENT)`, повторно строит все
+`entries` и проверяет, что
 канонические байты остались прежними. Поэтому свежая проверка совместима с
 обязательным побайтным равенством трёх запросов; изменение пути, родительского
 inode, операции или любого другого поля закрывает допуск.
@@ -409,27 +488,28 @@ inode, операции или любого другого поля закрыв
 Добавляются:
 
 - `activation_fingerprint TEXT NOT NULL`;
-- `account_context_fingerprint TEXT NOT NULL`;
-- `account_catalog_fingerprint TEXT NOT NULL`;
-- `admission_id TEXT`, уникальный `adm2_` плюс 32 строчных hex только в состояниях
-  `ATTESTING` и последующих состояниях запуска;
-- `admission_state TEXT`, одно из `ATTESTING`, `RESERVED`, `GUARDED`,
+- `account_context_fingerprint TEXT`, равный `NULL` до допуска и обязательный
+  начиная с `ADMITTED`;
+- `account_catalog_fingerprint TEXT` с тем же правилом;
+- `admission_id TEXT`, уникальный `adm2_` плюс 32 строчных hex только после
+  успешного задания доказательства;
+- `admission_state TEXT`, одно из `ADMITTED`, `RESERVED`, `GUARDED`,
   `COMMIT_AUTHORIZED`, `STARTED`, `STALE`, `ABORTED`, либо `NULL` до допуска;
 - `admission_manifest_semantic_fingerprint TEXT`;
 - `admission_activation_receipt_fingerprint TEXT`;
 - `admission_journal_absence_proof_json TEXT`;
 - `admission_gate_fingerprint TEXT`;
-- составной внешний ключ
-  `(route_id,activation_fingerprint,account_context_fingerprint)` на
-  одноимённую уникальную тройку `routes`.
+- обычная ссылка узла на `route_id`; учётная среда намеренно не переносится
+  на весь маршрут, потому что доказывается заново для каждой попытки узла.
 
 Выбранные `selected_model`, `reasoning_effort` и `permission_profile_id`
 остаются обязательными и неизменяемыми после допуска узла.
 `admission_journal_absence_proof_json` является каноническим JSON полной
 проекции `lifecycle-projection-v2` со `schemaId=absence-proof-v2`, а не
-одиночным отпечатком. Четыре поля шлюза одновременно равны `NULL` до допуска
-и одновременно ненулевые начиная с `ATTESTING`. Вместе они побайтно
-восстанавливают `activationGate`, принятый `smart_start`; один
+одиночным отпечатком. Два отпечатка учётной среды и четыре поля шлюза
+одновременно равны `NULL` до допуска и одновременно ненулевые начиная с
+`ADMITTED`. Вместе они побайтно
+восстанавливают `activationGate`, принятый `admit_node`; один
 `admission_gate_fingerprint` не считается доказательством. Закрытая ссылка
 из разрешения запуска и попытки обязана приводить к тем же компонентам.
 
@@ -587,25 +667,33 @@ journalAbsenceProof,activationGateFingerprint}`. `journalAbsenceProof` здес�
 базе и производный от внешней проекции отпечаток либо полную файловую
 идентичность её носителя: внешний объект содержит SHA-256 базы, поэтому такая
 обратная зависимость создала бы взаимный цикл двух объектов. Внешний журнал, а
-после принятия неизменяемая квитанция активации, хранит проекцию целиком и
-связывает её с теми же `operationId` и `databaseId`. Строка базы сохраняет
-только логический указатель, вычисляемый из этих двух независимых от содержимого
-идентификаторов, и постоянный `schemaId=database-object-v2`. Указатель сам не
-доказывает целостность: исполнитель разрешает его во внешнем носителе,
-проверяет его операцию и базу, затем сверяет полную проекцию с фактической
-базой.
+до принятия внешняя квитанция конкретной установки или миграции хранит
+историческую `database-object-v2` и связывает её с теми же `operationId` и
+`databaseId`. Положительная неизменяемая квитанция активации хранит вместо
+неё `database-binding-v2`: путь, устройство, inode, владельца, права,
+`databaseIdentity`, активацию, версии и отпечатки схемы, но не размер,
+SHA-256 меняющегося файла, WAL, SHM или резервную копию. Именно эта стабильная
+привязка проверяется живым шлюзом после каждой транзакции SQLite.
+
+Строка базы сохраняет только логический указатель, вычисляемый из
+`operationId` и `databaseId`, независимых от содержимого. Указатель сам не
+доказывает целостность: исполнитель разрешает исторический снимок во внешнем
+носителе для установки или миграции, а живой контроллер и `doctor` независимо
+сверяют `database-binding-v2` с фактической файловой и смысловой
+идентичностью. Историческая `database-object-v2` никогда не является
+условием открытия живого шлюза.
 
 Доказательство покоя, напротив, может храниться в базе как канонический JSON
 полной проекции `lifecycle-projection-v2` со
 `schemaId=quiescence-proof-v2`, включая `schemaSha256`, `value` и
 `valueFingerprint`. Вариант `runtime-v2` содержит
-`controllerIdentity`, `instanceId`, `controlEpoch`, точные восемь нулевых
+`controllerIdentity`, `instanceId`, `controlEpoch`, точные десять нулевых
 счётчиков `workCounts`, `databasePredicatesFingerprint`,
 `barrierHeld=true`, `quiescent=true`. Вариант `legacy-migration` содержит
 `legacyStateHome`, отпечаток полного множества старых процессов, точный
 целевой процесс, вооружённого сторожа, доказательства ограждений шлюза и
 моста, полный неизменяемый снимок файла базы, отпечатки идентичности базы и
-снимка, доказательства исключительной аренды и внешнего барьера, те же восемь
+снимка, доказательства исключительной аренды и внешнего барьера, те же десять
 нулевых счётчиков и `quiescent=true`. Удаление любого поля или замена всей
 проекции её итоговым отпечатком закрывает операцию.
 
@@ -660,7 +748,8 @@ journalAbsenceProof,activationGateFingerprint}`. `journalAbsenceProof` здес�
 
 - `ACCEPTING` означает `maintenance_mode=NONE`, `operation_id IS NULL`,
   непустые поля экземпляра, процесса и сокета, `lock_held=1`,
-  `accepting_new_routes=1` и `reason_code=NONE`;
+  `accepting_new_routes=1`, `quiescent=0` и `reason_code=NONE`; положительное
+  доказательство покоя действует только при закрытом приёме новых маршрутов;
 - `DRAINING` означает `maintenance_mode=DRAIN`, непустой `operation_id`,
   живые поля процесса и сокета, `lock_held=1` и
   `accepting_new_routes=0`;
@@ -679,7 +768,7 @@ journalAbsenceProof,activationGateFingerprint}`. `journalAbsenceProof` здес�
   связанную долговечную квитанцию команды; исходная эпоха такой команды не
   превышает 9007199254740990, а при достигнутом пределе 9007199254740991
   команда закрывается без изменения и без квитанции;
-- `maintenance_status`, `smart_start`, `smart_status`,
+- `maintenance_status`, `admit_node`, `smart_status`,
   `reserve_launch_permit` и `commit_launch_permit` эпоху не меняют и
   квитанцию управляющей команды не создают;
 - строка живой формы не доказывает живость сама по себе: сокет и маркер
@@ -707,6 +796,7 @@ journalAbsenceProof,activationGateFingerprint}`. `journalAbsenceProof` здес�
   `shutdown`, `controller_accept`, `controller_recover`,
   `maintenance_resume`;
 - `request_fingerprint TEXT NOT NULL`;
+- `request_json TEXT NOT NULL`;
 - `result_fingerprint TEXT NOT NULL`;
 - `response_json TEXT NOT NULL`;
 - `response_fingerprint TEXT NOT NULL`;
@@ -722,7 +812,13 @@ journalAbsenceProof,activationGateFingerprint}`. `journalAbsenceProof` здес�
   AND after_epoch=before_epoch+1)`;
 - `created_at TEXT NOT NULL`.
 
-`response_json` — канонический строгий ответ протокола, а
+`request_json` — канонический строгий запрос протокола. Он хранится в той же
+транзакции, что и квитанция, и позволяет восстановителю заново вычислить
+`request_fingerprint`, а затем проверить точные `controllerIdentity`,
+`instanceId`, `controllerStartId`, эпоху и все параметры, включая
+`activationId`, `databaseId`, PID, маркер запуска и группу процесса кандидата.
+Сверка одного сохранённого отпечатка без исходного запроса доказательством не
+считается. `response_json` — канонический строгий ответ протокола, а
 `result_fingerprint` использует единственную область
 `controllerCommandResult` реестра жизненного цикла и не включает собственную
 квитанцию или отпечаток ответа; возникающего рекурсивного хеша нет. Для
@@ -748,7 +844,12 @@ inode, владельца, группу, режим, прежние PID, мар�
 
 `maintenance_status` является чистым чтением и квитанцию не создаёт.
 Повтор `command_id` с тем же отпечатком возвращает сохранённый канонический
-ответ; с другим отпечатком получает `COMMAND_REPLAY_CONFLICT`. Разные
+ответ только после побайтной сверки сохранённого `request_json`; с другим
+запросом получает `COMMAND_REPLAY_CONFLICT`. Историческая квитанция
+`controller_accept` остаётся проверяемой после `maintenance_resume`, смены
+процесса или удаления прежнего сокета: она доказывает совершившийся переход,
+а текущее продвижение контроллера доказывается отдельными квитанциями
+`controller_recover` и `maintenance_resume`. Разные
 `command_id` позволяют законную последовательность
 `maintenance_begin → maintenance_resume → maintenance_begin` внутри одной
 операции и новый запуск контроллера после доказанной смерти старого.
@@ -790,9 +891,12 @@ inode, владельца, группу, режим, прежние PID, мар�
 доказательства выхода и исключительной блокировки. Она не создаётся в
 транзакции `shutdown` и не хранится внутри базы.
 
-Лишь отдельный файловый шаг `shutdown_socket_cleanup` принимает эту конечную
-проекцию, повторно сверяет путь, устройство, inode, владельца, группу и режим
-сокета, удерживая исключительную блокировку, выполняет `unlinkat`,
+Лишь отдельный файловый шаг `shutdown_socket_cleanup`, заранее записанный с
+ограничением `EXPECTED_SHUTDOWN_PROOF` как `before`, принимает сохранённую
+либо только что доказанную конечную проекцию
+`controller_shutdown.observedAfter`, повторно сверяет путь, устройство, inode,
+владельца, группу и режим сокета, удерживая исключительную блокировку,
+выполняет `unlinkat`,
 синхронизирует родительский каталог и сохраняет полную проекцию
 `absence-proof-v2`. Чужой или изменившийся сокет не удаляется.
 
@@ -917,7 +1021,7 @@ LEGACY_IMPORTED
   и `start_marker` равны `NULL`, а `resolved_at` и `failure_code` обязательны;
 - `ABORTED_ACTIVATION_GATE_CHANGED`: фактический канонический
   `activationGate` перестал совпадать с объектом, сохранённым при
-  `smart_start`; `failure_code` равен ровно
+  `admit_node`; `failure_code` равен ровно
   `ABORTED_ACTIVATION_GATE_CHANGED`, связанный допуск узла имеет
   `admission_state=ABORTED`, а попытка не создаётся;
 - `LEGACY_IMPORTED`: применяется только к терминальной исторической попытке,
@@ -945,14 +1049,17 @@ LEGACY_IMPORTED
 
 Переход допуска закрыт и атомарен на каждом рубеже:
 
-1. `smart_start` под общей стороной барьера и одной `BEGIN IMMEDIATE` заново
-   проверяет фактический манифест, неизменяемую квитанцию активации, свежую
-   синхронизированную проекцию отсутствия журнала, производный отпечаток,
-   живой экземпляр и ожидаемую эпоху. Он записывает в узел `admission_id`,
-   полный канонический `activationGate` и `admission_state=ATTESTING`.
-2. После свежего `AccountEvidence` отдельный `reserve_launch_permit` снова
-   получает общую сторону барьера и новую `BEGIN IMMEDIATE`, проверяет
-   `ACCEPTING`, ту же эпоху, маршрут, учётную среду, модель, уровень,
+1. После ровно одного успешного связанного задания `AccountEvidence`
+   внутренний `admit_node` под общей стороной барьера и одной
+   `BEGIN IMMEDIATE` заново проверяет фактический манифест, неизменяемую
+   квитанцию активации, свежую синхронизированную проекцию отсутствия
+   журнала, производный отпечаток, живой экземпляр и ожидаемую эпоху. Он
+   записывает в узел `admission_id`, `evidence_job_id`, полный канонический
+   `activationGate` и `admission_state=ADMITTED`.
+2. `reserve_launch_permit` не выполняет новый полный сбор. Он снова получает
+   общую сторону барьера и новую `BEGIN IMMEDIATE`, проверяет
+   `ACCEPTING`, ту же эпоху, тот же успешный `evidence_job_id`, маршрут,
+   учётную среду, модель, уровень,
    профиль, аргументы, снимок и побайтно тот же после канонизации шлюз. Свежая
    дескрипторная проверка сохраняет `snapshot_identity_fingerprint`; он входит
    в `permit_evidence_fingerprint`. Транзакция создаёт единственный `RESERVED`
@@ -1072,7 +1179,7 @@ RETRYABLE RECOVERING CANCELLING CANCELLED FAILED STALE SKIPPED SPLIT
 `BEGIN IMMEDIATE` и удерживаемой общей либо исключительной стороной барьера
 запуска связывает точные `controllerIdentity`, `instanceId`, живую
 `controlEpoch`, `barrierHeld=true`, `quiescent=true`,
-`databasePredicatesFingerprint` закрытых запросов ниже и ноль по всем восьми
+`databasePredicatesFingerprint` закрытых запросов ниже и ноль по всем десяти
 полям `workCounts`:
 
 1. маршруты в нетерминальном состоянии;
@@ -1084,13 +1191,59 @@ RETRYABLE RECOVERING CANCELLING CANCELLED FAILED STALE SKIPPED SPLIT
    `COMMIT_AUTHORIZED`;
 7. `runtime_artifacts` в `RESERVED` или `ACTIVE`;
 8. `candidate_publication_intents` в `PENDING`.
+9. `account_evidence_jobs` в `RUNNING` или `CANCEL_REQUESTED`
+   (`activeEvidenceJobs`).
+10. `account_evidence_jobs` в `QUEUED` (`queuedEvidenceJobs`).
 
-Эти закрытые наборы закрепляются в нормативных проверочных запросах рядом со
-схемой и используются без копирования в контроллере, миграторе и `doctor`.
-Полный `databasePredicatesFingerprint` связывает точные тексты восьми
-запросов, их параметры, закрытые перечисления и результат одного снимка. Он
-не заменяет `workCounts`, идентичность экземпляра, эпоху или признак
-удержания барьера.
+Нормативны следующие имена и точные строки SQL без завершающей точки с
+запятой; регистр, пробелы и порядок литералов входят в отпечаток:
+
+| № | `name` | `sql` |
+|---:|---|---|
+| 1 | `nonterminalRoutes` | `select count(*) from routes where state in ('PLANNED','BLOCKED','QUEUED','LEASED','PREPARING','RUNNING','COLLECTING','ATTESTING','VALIDATING','CANDIDATE_BUILDING','RETRYABLE','RECOVERING','CANCELLING','SPLIT')` |
+| 2 | `nonterminalNodes` | `select count(*) from nodes where state in ('PLANNED','BLOCKED','QUEUED','LEASED','PREPARING','RUNNING','COLLECTING','ATTESTING','VALIDATING','CANDIDATE_BUILDING','RETRYABLE','RECOVERING','CANCELLING','SPLIT')` |
+| 3 | `activeAttempts` | `select count(*) from attempts where state in ('STARTING','RUNNING')` |
+| 4 | `activeLeases` | `select count(*) from leases` |
+| 5 | `openIntents` | `select count(*) from intents where state='PENDING'` |
+| 6 | `inflightLaunchPermits` | `select count(*) from node_launch_permits where state in ('RESERVED','GUARDED','COMMIT_AUTHORIZED')` |
+| 7 | `activeRuntimeArtifacts` | `select count(*) from runtime_artifacts where state in ('RESERVED','ACTIVE')` |
+| 8 | `pendingCandidatePublications` | `select count(*) from candidate_publication_intents where state='PENDING'` |
+| 9 | `activeEvidenceJobs` | `select count(*) from account_evidence_jobs where state in ('RUNNING','CANCEL_REQUESTED')` |
+| 10 | `queuedEvidenceJobs` | `select count(*) from account_evidence_jobs where state='QUEUED'` |
+
+Все десять запросов выполняются в указанном порядке в одном снимке под
+`BEGIN IMMEDIATE`. Для каждого запроса строится объект ровно с четырьмя
+полями `{name,sql,parameters,result}`: `name` и `sql` берутся из таблицы,
+`parameters` равен пустому массиву `[]`, а `result` равен фактическому
+неотрицательному целому результату `COUNT(*)` и одноимённому значению в
+`workCounts`. Порядок массива закрыт порядком строк 1–10 и не сортируется:
+
+```text
+projection = {
+  "predicates": [
+    {"name": Q1.name,  "sql": Q1.sql,  "parameters": [], "result": workCounts.nonterminalRoutes},
+    {"name": Q2.name,  "sql": Q2.sql,  "parameters": [], "result": workCounts.nonterminalNodes},
+    {"name": Q3.name,  "sql": Q3.sql,  "parameters": [], "result": workCounts.activeAttempts},
+    {"name": Q4.name,  "sql": Q4.sql,  "parameters": [], "result": workCounts.activeLeases},
+    {"name": Q5.name,  "sql": Q5.sql,  "parameters": [], "result": workCounts.openIntents},
+    {"name": Q6.name,  "sql": Q6.sql,  "parameters": [], "result": workCounts.inflightLaunchPermits},
+    {"name": Q7.name,  "sql": Q7.sql,  "parameters": [], "result": workCounts.activeRuntimeArtifacts},
+    {"name": Q8.name,  "sql": Q8.sql,  "parameters": [], "result": workCounts.pendingCandidatePublications},
+    {"name": Q9.name,  "sql": Q9.sql,  "parameters": [], "result": workCounts.activeEvidenceJobs},
+    {"name": Q10.name, "sql": Q10.sql, "parameters": [], "result": workCounts.queuedEvidenceJobs}
+  ]
+}
+
+databasePredicatesFingerprint =
+  SHA256(UTF8("codex-smart/database-predicates/v2") || 0x00 ||
+         UTF8(canonical-json-v1(projection)))
+```
+
+Реестр отпечатков закрепляет для `databasePredicates` единственное поле
+проекции `predicates` и исключает сам `databasePredicatesFingerprint`.
+Изменение текста, порядка, параметров или любого фактического результата
+меняет отпечаток. Он не заменяет `workCounts`, идентичность экземпляра,
+эпоху или признак удержания барьера.
 
 Для неизменяемого снимка версии 1 применяется отдельная полная проекция
 `quiescence-proof-v2` с `proofKind=legacy-migration`. Под остановленным старым
@@ -1100,13 +1253,13 @@ RETRYABLE RECOVERING CANCELLING CANCELLED FAILED STALE SKIPPED SPLIT
 `gatewayFenceProofFingerprint`, `bridgeFenceProofFingerprint`, полный
 `databaseFile`, `databaseIdentityFingerprint`,
 `databaseSnapshotFingerprint`, доказательства исключительной аренды базы и
-внешнего барьера, восемь нулевых счётчиков и `quiescent=true`.
+внешнего барьера, десять нулевых счётчиков и `quiescent=true`.
 
 Закрытый запрос сначала выделяет маршрут как виртуально переносимый, только
 если маршрут и все его узлы находятся в `PLANNED` или `BLOCKED` и у него нет
 попыток, аренд, намерений, активных рабочих артефактов или незакрытых
 публикаций. Только эти маршруты и узлы исключаются из первых двух
-проецируемых счётчиков; остальные шесть счётчиков и вся прочая
+проецируемых счётчиков; остальные восемь счётчиков и вся прочая
 нетерминальная работа обязаны быть нулевыми. Исходная база не изменяется. Уже
 в новой базе версии 2 копии выделенных узлов, затем маршрута получают
 `STALE` и события переноса. Иное сочетание даёт `ACTIVE_WORK_REMAINS`.
@@ -1114,7 +1267,7 @@ RETRYABLE RECOVERING CANCELLING CANCELLED FAILED STALE SKIPPED SPLIT
 Двойное чтение счётчиков без барьера не является доказательством: между
 чтениями мог появиться запуск. Сначала шлюз закрывает новые команды, затем
 контроллер устанавливает барьер в памяти и подтверждает идентичность и эпоху,
-после чего одна транзакция читает все восемь значений и сохраняет всю
+после чего одна транзакция читает все десять значений и сохраняет всю
 проекцию. Голый хеш, отдельная строка `quiescent=1` или повторное чтение после
 освобождения барьера отвергаются.
 
@@ -1227,7 +1380,7 @@ RETRYABLE RECOVERING CANCELLING CANCELLED FAILED STALE SKIPPED SPLIT
 - неоднозначность закрывает контроллер и требует `recover`, а не создаёт
   вторую попытку.
 
-На каждом из рубежей `smart_start`, `reserve_launch_permit` и
+На каждом из рубежей `admit_node`, `reserve_launch_permit` и
 `commit_launch_permit` восстановитель заново строит фактический
 `activationGate`. Несовпадение любого компонента, канонических байтов или
 `gateFingerprint` завершает известный допуск состоянием
@@ -1277,7 +1430,8 @@ RETRYABLE RECOVERING CANCELLING CANCELLED FAILED STALE SKIPPED SPLIT
   `legacy-migration` проекции покоя и закрытые ссылки
   `schema_migrations` на неизменяемые внешние объекты;
 - инварианты `sqlite_sequence`;
-- восемь счётчиков покоя для установочной операции;
+- десять счётчиков покоя для установочной операции, включая
+  `activeEvidenceJobs` и `queuedEvidenceJobs`;
 - совпадение базы, активации, манифеста и контроллера;
 - отрицательные пробы неизвестной формы, чужой базы, подменённого SQL,
   дополнительного триггера, незавершённого WAL, подмены каждого компонента
@@ -1289,7 +1443,8 @@ RETRYABLE RECOVERING CANCELLING CANCELLED FAILED STALE SKIPPED SPLIT
 наполняют законные законченные формы граничными данными, переносят их и
 сравнивают смысловые строки. Отдельные испытания обрывают процесс перед и
 после каждого постоянного действия, в том числе каждого перехода
-`ATTESTING → RESERVED → GUARDED → COMMIT_AUTHORIZED → STARTED`, транзакции
+`startRequest/ATTESTING → evidence/SUCCEEDED → ADMITTED → RESERVED → GUARDED
+→ COMMIT_AUTHORIZED → STARTED`, транзакции
 `shutdown`, выхода процесса, построения конечного `shutdown-intent-v2`,
 `unlinkat` и синхронизации каталога. Они повторяют `recover` не менее двух раз
 и доказывают один и тот же итоговый `resultFingerprint` без второго запуска.

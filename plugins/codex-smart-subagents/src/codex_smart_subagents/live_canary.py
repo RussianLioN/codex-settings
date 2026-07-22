@@ -11,7 +11,6 @@ import os
 import re
 import selectors
 import shlex
-import signal
 import socket
 import stat
 import subprocess
@@ -22,18 +21,37 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, Mapping, Protocol, Sequence
+from typing import Callable, Mapping, Protocol, Sequence, TypeVar
 
+from .operation_deadline_v2 import (
+    OperationDeadlineExceededV2,
+    OperationDeadlineV2,
+    current_operation_deadline_v2,
+)
+from .operation_process_group_supervisor_v2 import (
+    OperationProcessGroupSupervisorV2,
+    ProcessGroupTerminationResultV2,
+    TransientProcessIdentityErrorV2,
+    TransientProcessLeaseV2,
+    current_process_group_supervisor_v2,
+)
 from .permissions import (
     REQUIRED_CANARY_CHECKS,
     CanaryEvidence,
     CanaryRequest,
+)
+from .supervised_subprocess_v2 import (
+    SupervisedCommandCleanupRequiredV2,
+    SupervisedCommandOutputLimitExceededV2,
+    SupervisedCommandV2Error,
+    run_supervised_command_v2,
 )
 
 
 FIXED_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 MAX_COMMAND_OUTPUT = 4 * 1024 * 1024
 MAX_APP_SERVER_REQUEST = 64 * 1024
+MAX_APP_SERVER_SESSION_REQUESTS = 128
 SANDBOX_RESULT_PREFIX = "CODEX_PERMISSION_CANARY_V1:"
 EXEC_RESULT_PREFIX = "CODEX_EXEC_PERMISSION_CANARY_V1:"
 EXEC_STDIN_NOTICE = b"Reading prompt from stdin...\n"
@@ -80,6 +98,7 @@ _APP_SERVER_METHOD = re.compile(
 _DENIED_ERRNOS = frozenset((errno.EACCES, errno.EPERM))
 _ALLOWED_AUTH_ENVIRONMENT = frozenset(("OPENAI_API_KEY",))
 _MAX_AUTH_BYTES = 1024 * 1024
+_SessionResult = TypeVar("_SessionResult")
 
 
 @dataclass
@@ -118,7 +137,7 @@ class ManagedConfigInspector(Protocol):
 
 
 class StrictAppServerClient:
-    """Run one bounded, strict app-server JSON-RPC request over stdio."""
+    """Run one bounded, strict app-server JSON-RPC session over stdio."""
 
     def __init__(
         self,
@@ -133,6 +152,8 @@ class StrictAppServerClient:
         client_name: str = "codex_smart_subagents",
         client_title: str = "Codex Smart Subagents",
         client_version: str = "0.1.0",
+        use_temporary_sqlite_home: bool = True,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> None:
         self._codex = _safe_executable(codex_executable, "Codex")
         self._codex_home = _safe_owned_directory(codex_home, "CODEX_HOME")
@@ -142,9 +163,9 @@ class StrictAppServerClient:
         if (
             not isinstance(timeout_seconds, (int, float))
             or isinstance(timeout_seconds, bool)
-            or not 0 < float(timeout_seconds) <= 60
+            or not 0 < float(timeout_seconds) <= 180
         ):
-            raise ValueError("timeout_seconds must be in (0, 60]")
+            raise ValueError("timeout_seconds must be in (0, 180]")
         if (
             type(max_output_bytes) is not int
             or not 1024 <= max_output_bytes <= 16 * 1024 * 1024
@@ -170,46 +191,52 @@ class StrictAppServerClient:
             "title": client_title,
             "version": client_version,
         }
+        if type(use_temporary_sqlite_home) is not bool:
+            raise TypeError("use_temporary_sqlite_home must be boolean")
+        self._use_temporary_sqlite_home = use_temporary_sqlite_home
+        if cancel_check is not None and not callable(cancel_check):
+            raise TypeError("cancel_check must be callable")
+        self._cancel_check = cancel_check
 
     def call(self, method: str, params: Mapping[str, object]) -> object:
-        if (
-            not isinstance(method, str)
-            or _APP_SERVER_METHOD.fullmatch(method) is None
-        ):
-            raise ValueError("app-server method is invalid")
-        try:
-            copied_params = dict(params)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("app-server params must be a mapping") from exc
-        request = {
-            "method": method,
-            "id": 2,
-            "params": copied_params,
-        }
-        encoded_request = _encode_json_line(request)
-        if len(encoded_request) > MAX_APP_SERVER_REQUEST:
-            raise ValueError("app-server request exceeds the byte limit")
+        return self.run_session(lambda session_call: session_call(method, params))
 
+    def run_session(
+        self,
+        operation: Callable[
+            [Callable[[str, Mapping[str, object]], object]], _SessionResult
+        ],
+    ) -> _SessionResult:
+        """Execute bounded sequential calls in one initialized process."""
+
+        if not callable(operation):
+            raise TypeError("app-server session operation must be callable")
+        if not self._use_temporary_sqlite_home:
+            return self._run_session_with_sqlite_home(
+                operation,
+                sqlite_home=None,
+            )
         with tempfile.TemporaryDirectory(
             prefix="app-server-sqlite-",
             dir=self._tmpdir,
         ) as raw_sqlite_home:
             sqlite_home = Path(raw_sqlite_home)
             os.chmod(sqlite_home, 0o700)
-            return self._call_with_sqlite_home(
-                encoded_request,
+            return self._run_session_with_sqlite_home(
+                operation,
                 sqlite_home=sqlite_home,
             )
 
-    def _call_with_sqlite_home(
+    def _run_session_with_sqlite_home(
         self,
-        encoded_request: bytes,
+        operation: Callable[
+            [Callable[[str, Mapping[str, object]], object]], _SessionResult
+        ],
         *,
-        sqlite_home: Path,
-    ) -> object:
-        environment = {
+        sqlite_home: Path | None,
+    ) -> _SessionResult:
+        environment: dict[str, str] = {
             "CODEX_HOME": os.fspath(self._codex_home),
-            "CODEX_SQLITE_HOME": os.fspath(sqlite_home),
             "HOME": os.fspath(self._home),
             "LANG": "C",
             "LC_ALL": "C",
@@ -217,9 +244,21 @@ class StrictAppServerClient:
             "PATH": FIXED_PATH,
             "TMPDIR": os.fspath(self._tmpdir),
         }
+        if sqlite_home is not None:
+            environment["CODEX_SQLITE_HOME"] = os.fspath(sqlite_home)
+        operation_deadline, process_supervisor = _process_runtime_v2(
+            operation="strict-app-server-session",
+            standalone_timeout_seconds=self._timeout_seconds + 1.0,
+        )
+        session_deadline = operation_deadline.child(
+            phase="strict-app-server-session",
+            max_seconds=self._timeout_seconds,
+            timeout_code="APP_SERVER_TIMEOUT",
+        )
         try:
-            process = subprocess.Popen(
-                (
+            process_lease = process_supervisor.spawn_transient(
+                label="strict-app-server",
+                argv=(
                     os.fspath(self._codex),
                     "app-server",
                     "--strict-config",
@@ -231,21 +270,20 @@ class StrictAppServerClient:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                shell=False,
-                close_fds=True,
-                start_new_session=True,
                 restore_signals=True,
                 umask=0o077,
             )
-        except OSError as exc:
+        except (OSError, TransientProcessIdentityErrorV2) as exc:
             raise AppServerError("APP_SERVER_SPAWN_FAILED", str(exc)) from exc
 
-        deadline = time.monotonic() + self._timeout_seconds
+        process = process_lease.process
         reader: _StrictJsonLineReader | None = None
+        root_deadline_error: OperationDeadlineExceededV2 | None = None
         try:
             reader = _StrictJsonLineReader(
                 process,
                 maximum=self._max_output_bytes,
+                cancel_check=self._cancel_check,
             )
             initialize = {
                 "method": "initialize",
@@ -262,11 +300,14 @@ class StrictAppServerClient:
             _write_app_server_message(
                 process,
                 _encode_json_line(initialize),
+                deadline=session_deadline,
             )
+            notification_count = [0]
             initialized = _read_app_server_response(
                 reader,
                 expected_id=1,
-                deadline=deadline,
+                deadline=session_deadline,
+                notification_count=notification_count,
             )
             _validate_initialize_result(
                 initialized,
@@ -277,17 +318,93 @@ class StrictAppServerClient:
                 _encode_json_line(
                     {"method": "initialized", "params": {}}
                 ),
+                deadline=session_deadline,
             )
-            _write_app_server_message(process, encoded_request)
-            return _read_app_server_response(
+            next_request_id = 2
+
+            def session_call(
+                method: str, params: Mapping[str, object]
+            ) -> object:
+                nonlocal next_request_id
+                if (
+                    not isinstance(method, str)
+                    or _APP_SERVER_METHOD.fullmatch(method) is None
+                ):
+                    raise ValueError("app-server method is invalid")
+                if next_request_id >= 2 + MAX_APP_SERVER_SESSION_REQUESTS:
+                    raise AppServerError(
+                        "APP_SERVER_REQUEST_LIMIT",
+                        "app-server session request limit exceeded",
+                    )
+                try:
+                    copied_params = dict(params)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        "app-server params must be a mapping"
+                    ) from exc
+                request_id = next_request_id
+                encoded_request = _encode_json_line(
+                    {
+                        "method": method,
+                        "id": request_id,
+                        "params": copied_params,
+                    }
+                )
+                if len(encoded_request) > MAX_APP_SERVER_REQUEST:
+                    raise ValueError(
+                        "app-server request exceeds the byte limit"
+                    )
+                next_request_id += 1
+                _write_app_server_message(
+                    process,
+                    encoded_request,
+                    deadline=session_deadline,
+                )
+                return _read_app_server_response(
+                    reader,
+                    expected_id=request_id,
+                    deadline=session_deadline,
+                    notification_count=notification_count,
+                )
+
+            result = operation(session_call)
+            trailing_deadline = session_deadline.child(
+                phase="strict-app-server-trailing-message-check",
+                max_seconds=0.05,
+                timeout_code="APP_SERVER_TRAILING_WAIT_COMPLETE",
+            )
+            _assert_no_app_server_message(
                 reader,
-                expected_id=2,
-                deadline=deadline,
+                process=process,
+                deadline=trailing_deadline,
             )
+            return result
+        except OperationDeadlineExceededV2 as exc:
+            try:
+                operation_deadline.checkpoint()
+            except OperationDeadlineExceededV2 as root_exc:
+                root_deadline_error = root_exc
+                raise
+            if exc.code == "APP_SERVER_TIMEOUT":
+                raise AppServerError(
+                    "APP_SERVER_TIMEOUT",
+                    "app-server request exceeded its timeout",
+                ) from exc
+            raise
         finally:
             if reader is not None:
                 reader.close()
-            _close_app_server_process(process)
+            try:
+                _close_app_server_process(
+                    process,
+                    supervisor=process_supervisor,
+                    lease=process_lease,
+                    deadline=operation_deadline,
+                )
+            except AppServerError as cleanup_error:
+                if root_deadline_error is not None:
+                    raise root_deadline_error from cleanup_error
+                raise
 
 
 class AppServerManagedConfigInspector:
@@ -613,27 +730,41 @@ class SubprocessExecutor:
     """Bounded process-group executor that never invokes a shell."""
 
     def run(self, command: CanaryCommand) -> CommandResult:
+        deadline, supervisor = _process_runtime_v2(
+            operation="permission-canary-command",
+            standalone_timeout_seconds=float(command.timeout_seconds) + 1.0,
+        )
         try:
-            process = subprocess.Popen(
-                command.argv,
+            result = run_supervised_command_v2(
+                argv=command.argv,
+                label="permission-canary",
+                local_timeout_seconds=command.timeout_seconds,
+                cleanup_wait_seconds=0.5,
+                stdin=command.stdin,
+                max_output_bytes=command.max_output_bytes,
                 cwd=command.cwd,
                 env=dict(command.environment),
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                shell=False,
-                close_fds=True,
-                start_new_session=True,
-                restore_signals=True,
-                umask=0o077,
+                deadline=deadline,
+                supervisor=supervisor,
             )
-        except OSError as exc:
+        except SupervisedCommandOutputLimitExceededV2 as exc:
+            raise LiveCanaryError(
+                "CANARY_OUTPUT_LIMIT", _terminal_message("CANARY_OUTPUT_LIMIT")
+            ) from exc
+        except OperationDeadlineExceededV2 as exc:
+            raise LiveCanaryError(
+                "CANARY_TIMEOUT", _terminal_message("CANARY_TIMEOUT")
+            ) from exc
+        except SupervisedCommandCleanupRequiredV2 as exc:
+            raise LiveCanaryError(
+                "CANARY_PROCESS_CLEANUP_REQUIRED",
+                "permission canary process group cleanup remains pending",
+            ) from exc
+        except (OSError, TransientProcessIdentityErrorV2) as exc:
             raise LiveCanaryError("CANARY_SPAWN_FAILED", str(exc)) from exc
-
-        stdout, stderr, reason = _collect_output(process, command)
-        if reason is not None:
-            raise LiveCanaryError(reason, _terminal_message(reason))
-        return CommandResult(int(process.returncode), stdout, stderr)
+        except SupervisedCommandV2Error as exc:
+            raise LiveCanaryError("CANARY_PROCESS_FAILED", str(exc)) from exc
+        return CommandResult(result.returncode, result.stdout, result.stderr)
 
 
 class _StrictJsonLineReader:
@@ -642,6 +773,7 @@ class _StrictJsonLineReader:
         process: subprocess.Popen[bytes],
         *,
         maximum: int,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> None:
         if process.stdout is None or process.stderr is None:
             raise AppServerError(
@@ -659,9 +791,16 @@ class _StrictJsonLineReader:
             self._selector.register(descriptor, selectors.EVENT_READ)
         self._stdout_fd = process.stdout.fileno()
         self._stderr_fd = process.stderr.fileno()
+        self._cancel_check = cancel_check
 
-    def read(self, *, deadline: float) -> object:
+    def read(self, *, deadline: OperationDeadlineV2) -> object:
         while True:
+            deadline.checkpoint()
+            if self._cancel_check is not None and self._cancel_check():
+                raise AppServerError(
+                    "APP_SERVER_CANCELLED",
+                    "app-server operation was cancelled",
+                )
             newline = self._stdout.find(b"\n")
             if newline >= 0:
                 raw = bytes(self._stdout[:newline])
@@ -682,13 +821,11 @@ class _StrictJsonLineReader:
                         "app-server emitted invalid JSON",
                     ) from exc
 
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise AppServerError(
-                    "APP_SERVER_TIMEOUT",
-                    "app-server request exceeded its timeout",
-                )
-            events = self._selector.select(timeout=min(0.05, remaining))
+            select_timeout = deadline.bounded_timeout_seconds(
+                local_cap_seconds=0.05,
+            )
+            events = self._selector.select(timeout=select_timeout)
+            deadline.checkpoint()
             stderr_seen = False
             for key, _ in events:
                 descriptor = int(key.fd)
@@ -734,7 +871,8 @@ def _read_app_server_response(
     reader: _StrictJsonLineReader,
     *,
     expected_id: int,
-    deadline: float,
+    deadline: OperationDeadlineV2,
+    notification_count: list[int] | None = None,
 ) -> object:
     while True:
         message = reader.read(deadline=deadline)
@@ -747,12 +885,20 @@ def _read_app_server_response(
             if (
                 set(message) != {"method", "params"}
                 or not isinstance(message["method"], str)
+                or not 1 <= len(message["method"].encode("utf-8")) <= 256
                 or not isinstance(message["params"], dict)
             ):
                 raise AppServerError(
                     "APP_SERVER_INVALID",
                     "app-server notification is malformed",
                 )
+            if notification_count is not None:
+                notification_count[0] += 1
+                if notification_count[0] > 128:
+                    raise AppServerError(
+                        "APP_SERVER_NOTIFICATION_LIMIT",
+                        "app-server emitted too many unanswered messages",
+                    )
             continue
         if type(message["id"]) is not int or message["id"] != expected_id:
             raise AppServerError(
@@ -760,8 +906,21 @@ def _read_app_server_response(
                 "app-server response id is invalid",
             )
         if set(message) == {"id", "error"}:
+            error = message["error"]
+            if (
+                not isinstance(error, dict)
+                or "message" not in error
+                or "code" not in error
+                or not isinstance(error["message"], str)
+                or not error["message"]
+                or type(error["code"]) not in {str, int}
+            ):
+                raise AppServerError(
+                    "APP_SERVER_INVALID",
+                    "app-server error envelope is malformed",
+                )
             raise AppServerError(
-                "APP_SERVER_INVALID",
+                "APP_SERVER_REMOTE_ERROR",
                 "app-server rejected the request",
             )
         if set(message) != {"id", "result"}:
@@ -785,7 +944,7 @@ def _validate_initialize_result(
     }
     if (
         not isinstance(result, dict)
-        or set(result) != expected_fields
+        or not expected_fields.issubset(result)
         or not all(isinstance(result[name], str) for name in expected_fields)
         or not result["userAgent"]
         or not result["platformFamily"]
@@ -802,9 +961,35 @@ def _validate_initialize_result(
         )
 
 
+def _assert_no_app_server_message(
+    reader: _StrictJsonLineReader,
+    *,
+    process: subprocess.Popen[bytes],
+    deadline: OperationDeadlineV2,
+) -> None:
+    """Запрещает ответ, запрос или уведомление после итогового ответа."""
+
+    try:
+        reader.read(deadline=deadline)
+    except OperationDeadlineExceededV2 as exc:
+        if exc.code == "APP_SERVER_TRAILING_WAIT_COMPLETE":
+            return
+        raise
+    except AppServerError as exc:
+        if process.poll() is not None and "exited before" in exc.message:
+            return
+        raise
+    raise AppServerError(
+        "APP_SERVER_TRAILING_MESSAGE",
+        "app-server emitted a message after the final response",
+    )
+
+
 def _write_app_server_message(
     process: subprocess.Popen[bytes],
     payload: bytes,
+    *,
+    deadline: OperationDeadlineV2,
 ) -> None:
     if process.stdin is None:
         raise AppServerError(
@@ -812,13 +997,46 @@ def _write_app_server_message(
             "app-server stdin is unavailable",
         )
     try:
-        process.stdin.write(payload)
-        process.stdin.flush()
+        descriptor = process.stdin.fileno()
+        os.set_blocking(descriptor, False)
+    except (AttributeError, OSError, ValueError) as exc:
+        raise AppServerError(
+            "APP_SERVER_INVALID",
+            "app-server stdin is unavailable",
+        ) from exc
+    selector = selectors.DefaultSelector()
+    try:
+        selector.register(descriptor, selectors.EVENT_WRITE)
+        view = memoryview(payload)
+        written = 0
+        while written < len(view):
+            deadline.checkpoint()
+            wait_seconds = deadline.bounded_timeout_seconds(
+                local_cap_seconds=0.05,
+            )
+            if not selector.select(timeout=wait_seconds):
+                continue
+            deadline.checkpoint()
+            try:
+                count = os.write(
+                    descriptor,
+                    view[written : written + 64 * 1024],
+                )
+            except (BlockingIOError, InterruptedError):
+                continue
+            if count <= 0:
+                raise AppServerError(
+                    "APP_SERVER_INVALID",
+                    "app-server closed its input unexpectedly",
+                )
+            written += count
     except (BrokenPipeError, OSError) as exc:
         raise AppServerError(
             "APP_SERVER_INVALID",
             "app-server closed its input unexpectedly",
         ) from exc
+    finally:
+        selector.close()
 
 
 def _encode_json_line(value: object) -> bytes:
@@ -881,19 +1099,64 @@ def _validate_json_tree(value: object) -> None:
         raise ValueError("value contains a non-JSON type")
 
 
-def _close_app_server_process(process: subprocess.Popen[bytes]) -> None:
+def _close_app_server_process(
+    process: subprocess.Popen[bytes],
+    *,
+    supervisor: OperationProcessGroupSupervisorV2,
+    lease: TransientProcessLeaseV2,
+    deadline: OperationDeadlineV2,
+) -> None:
     if process.stdin is not None and not process.stdin.closed:
         process.stdin.close()
-    if process.poll() is None:
-        _terminate_process_group(process)
     try:
-        process.wait(timeout=1)
-    except subprocess.TimeoutExpired:
-        _terminate_process_group(process)
-        process.wait()
-    for stream in (process.stdout, process.stderr):
-        if stream is not None and not stream.closed:
-            stream.close()
+        if process.poll() is None:
+            termination = supervisor.terminate_transient(
+                lease,
+                deadline=deadline,
+                max_wait_seconds=0.5,
+                reason_code="STRICT_APP_SERVER_SESSION_FINISHED",
+            )
+            if not termination.continuation_allowed:
+                assert termination.cleanup_obligation is not None
+                raise AppServerError(
+                    "APP_SERVER_PROCESS_CLEANUP_REQUIRED",
+                    "app-server process group cleanup remains pending",
+                )
+        else:
+            released = supervisor.release_after_verified_exit(
+                lease,
+                deadline=deadline,
+                reason_code="APP_SERVER_GROUP_REMAINS_AFTER_EXIT",
+            )
+            if isinstance(released, ProcessGroupTerminationResultV2):
+                raise AppServerError(
+                    "APP_SERVER_PROCESS_CLEANUP_REQUIRED",
+                    "app-server descendant remained after leader exit",
+                )
+    finally:
+        for stream in (process.stdout, process.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
+
+
+def _process_runtime_v2(
+    *,
+    operation: str,
+    standalone_timeout_seconds: float,
+) -> tuple[OperationDeadlineV2, OperationProcessGroupSupervisorV2]:
+    deadline = current_operation_deadline_v2()
+    if deadline is None:
+        deadline = OperationDeadlineV2.start(
+            operation=operation,
+            timeout_seconds=standalone_timeout_seconds,
+            timeout_code=f"{operation.upper().replace('-', '_')}_TIMEOUT",
+        )
+    supervisor = current_process_group_supervisor_v2()
+    if supervisor is None:
+        supervisor = OperationProcessGroupSupervisorV2(
+            popen_factory=subprocess.Popen
+        )
+    return deadline, supervisor
 
 
 def _managed_config_app_server_error(
@@ -1096,6 +1359,8 @@ class LivePermissionCanary:
     def _inspect_managed_config(self) -> ManagedConfigState:
         try:
             state = self._managed_config_inspector.inspect()
+        except OperationDeadlineExceededV2:
+            raise
         except Exception as exc:
             raise LiveCanaryError(
                 "MANAGED_CONFIG_UNAVAILABLE",
@@ -1842,128 +2107,6 @@ def _shell_environment_override(runtime: _Runtime) -> str:
         f"{name}={json.dumps(value)}" for name, value in values
     )
     return f"shell_environment_policy.set={{{encoded}}}"
-
-
-def _collect_output(
-    process: subprocess.Popen[bytes],
-    command: CanaryCommand,
-) -> tuple[bytes, bytes, str | None]:
-    assert process.stdin is not None
-    assert process.stdout is not None
-    assert process.stderr is not None
-    selector = selectors.DefaultSelector()
-    stdin_fd = process.stdin.fileno()
-    stdout_fd = process.stdout.fileno()
-    stderr_fd = process.stderr.fileno()
-    outputs = {
-        stdout_fd: bytearray(),
-        stderr_fd: bytearray(),
-    }
-    for descriptor in outputs:
-        os.set_blocking(descriptor, False)
-        selector.register(descriptor, selectors.EVENT_READ)
-    os.set_blocking(stdin_fd, False)
-    if command.stdin:
-        selector.register(stdin_fd, selectors.EVENT_WRITE)
-    else:
-        process.stdin.close()
-    deadline = time.monotonic() + float(command.timeout_seconds)
-    stdin_offset = 0
-    total = 0
-    reason: str | None = None
-    while selector.get_map() or process.poll() is None:
-        if reason is None and time.monotonic() >= deadline:
-            reason = "CANARY_TIMEOUT"
-            _close_stdin(selector, process, stdin_fd)
-            _terminate_process_group(process)
-        for key, _ in selector.select(timeout=0.05):
-            descriptor = int(key.fd)
-            if descriptor == stdin_fd:
-                try:
-                    written = os.write(
-                        stdin_fd,
-                        command.stdin[stdin_offset:],
-                    )
-                except (BrokenPipeError, OSError):
-                    _close_stdin(selector, process, stdin_fd)
-                    continue
-                stdin_offset += written
-                if stdin_offset == len(command.stdin):
-                    _close_stdin(selector, process, stdin_fd)
-                continue
-            try:
-                chunk = os.read(descriptor, 64 * 1024)
-            except BlockingIOError:
-                continue
-            if not chunk:
-                selector.unregister(descriptor)
-                continue
-            total += len(chunk)
-            remaining = max(
-                0,
-                command.max_output_bytes - sum(len(value) for value in outputs.values()),
-            )
-            outputs[descriptor].extend(chunk[:remaining])
-            if reason is None and total > command.max_output_bytes:
-                reason = "CANARY_OUTPUT_LIMIT"
-                _close_stdin(selector, process, stdin_fd)
-                _terminate_process_group(process)
-        if process.poll() is not None and stdin_fd in selector.get_map():
-            _close_stdin(selector, process, stdin_fd)
-        if process.poll() is not None and not selector.get_map():
-            break
-    selector.close()
-    if process.poll() is None:
-        _terminate_process_group(process)
-    process.wait()
-    stdout = bytes(outputs[stdout_fd])
-    stderr = bytes(outputs[stderr_fd])
-    process.stdout.close()
-    process.stderr.close()
-    if not process.stdin.closed:
-        process.stdin.close()
-    return stdout, stderr, reason
-
-
-def _close_stdin(
-    selector: selectors.BaseSelector,
-    process: subprocess.Popen[bytes],
-    descriptor: int,
-) -> None:
-    try:
-        selector.unregister(descriptor)
-    except KeyError:
-        pass
-    if process.stdin is not None and not process.stdin.closed:
-        process.stdin.close()
-
-
-def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
-    group = process.pid
-    try:
-        os.killpg(group, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    deadline = time.monotonic() + 0.5
-    while time.monotonic() < deadline:
-        process.poll()
-        if not _process_group_exists(group):
-            return
-        time.sleep(0.01)
-    try:
-        os.killpg(group, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-
-
-def _process_group_exists(group: int) -> bool:
-    try:
-        os.killpg(group, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
 
 
 def _terminal_message(code: str) -> str:

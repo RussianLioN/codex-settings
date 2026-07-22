@@ -16,10 +16,10 @@ from .child_runner import (
     MAX_PROMPT_BYTES,
     MAX_SCHEMA_BYTES,
     MODEL_EFFORTS,
-    SUPPORTED_CODEX_VERSION,
     ChildResourceLimits,
     ChildTelemetryConfig,
 )
+from .compatibility import codex_version_supported
 from .execution import (
     NodeExecutionError,
     NodeExecutionOutcome,
@@ -147,7 +147,7 @@ class RuntimeExecutorConfig:
             executable=True,
         )
         output_schema = _assert_reader_schema(self.output_schema)
-        if self.codex_version != SUPPORTED_CODEX_VERSION:
+        if not codex_version_supported(self.codex_version):
             raise ValueError("unsupported Codex CLI version")
         if _OPAQUE_ID.fullmatch(self.reader_permission_profile_id) is None:
             raise ValueError("reader_permission_profile_id is invalid")

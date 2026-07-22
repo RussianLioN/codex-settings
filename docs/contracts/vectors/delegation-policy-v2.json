@@ -1,0 +1,225 @@
+{
+  "schemaVersion": 2,
+  "contractVersion": "codex-delegation-policy-vector-v2",
+  "policy": {
+    "schemaVersion": 2,
+    "contractVersion": "codex-delegation-policy-v2",
+    "policyId": "codex-delegation-policy-v2/default",
+    "decisionOrder": [
+      "clarify",
+      "direct",
+      "delegate"
+    ],
+    "hardBanReasons": [
+      {
+        "reason": "authority-conflict",
+        "decision": "clarify"
+      },
+      {
+        "reason": "owner-decision-required",
+        "decision": "clarify"
+      },
+      {
+        "reason": "required-fact-unavailable",
+        "decision": "clarify"
+      },
+      {
+        "reason": "delegation-explicitly-forbidden",
+        "decision": "direct"
+      },
+      {
+        "reason": "delegation-not-explicitly-allowed",
+        "decision": "direct"
+      },
+      {
+        "reason": "no-objectively-verifiable-unit",
+        "decision": "direct"
+      },
+      {
+        "reason": "no-independent-work-unit",
+        "decision": "direct"
+      }
+    ],
+    "delegateRequirements": {
+      "permission": "allow",
+      "objectivelyVerifiable": true,
+      "minimumIndependentWorkUnits": 1,
+      "missingFactDecision": "direct"
+    },
+    "accountEvidence": {
+      "directRequired": false,
+      "clarifyRequired": false,
+      "smartPlanRequired": false,
+      "nodeAttemptRequired": true,
+      "fullCollectionJobsPerAttempt": 1,
+      "processesPerFullCollection": 5,
+      "cacheAcrossAttempts": false,
+      "hiddenRetry": false,
+      "missingAttemptEvidenceError": "ACCOUNT_EVIDENCE_REQUIRED"
+    },
+    "pairAvailability": {
+      "selection": "exact-atomic-pair",
+      "smartPlanSources": [
+        "policyPairs",
+        "bundledSnapshotPairs"
+      ],
+      "nodeAttemptSources": [
+        "policyPairs",
+        "bundledSnapshotPairs",
+        "accountPairs"
+      ],
+      "unavailable": "reject",
+      "errorCode": "ROUTING_PAIR_UNAVAILABLE",
+      "fallback": "forbidden"
+    },
+    "reassessment": {
+      "mode": "promote-only",
+      "explicitPolicyRequired": true,
+      "missingPolicyError": "REASSESSMENT_POLICY_REQUIRED",
+      "unavailableCandidate": "reject"
+    }
+  },
+  "decisionCases": [
+    {
+      "name": "clarify-precedes-direct",
+      "facts": {
+        "permission": "forbid",
+        "objectivelyVerifiable": false,
+        "independentWorkUnits": 0,
+        "hardBanReasons": [
+          "delegation-explicitly-forbidden",
+          "owner-decision-required"
+        ]
+      },
+      "expected": {
+        "decision": "clarify",
+        "reasons": [
+          "owner-decision-required"
+        ]
+      }
+    },
+    {
+      "name": "explicit-forbid-is-direct",
+      "facts": {
+        "permission": "forbid",
+        "objectivelyVerifiable": true,
+        "independentWorkUnits": 2,
+        "hardBanReasons": []
+      },
+      "expected": {
+        "decision": "direct",
+        "reasons": [
+          "delegation-explicitly-forbidden"
+        ]
+      }
+    },
+    {
+      "name": "missing-allow-is-direct",
+      "facts": {
+        "permission": "unspecified",
+        "objectivelyVerifiable": true,
+        "independentWorkUnits": 2,
+        "hardBanReasons": []
+      },
+      "expected": {
+        "decision": "direct",
+        "reasons": [
+          "delegation-not-explicitly-allowed"
+        ]
+      }
+    },
+    {
+      "name": "unverifiable-is-direct",
+      "facts": {
+        "permission": "allow",
+        "objectivelyVerifiable": false,
+        "independentWorkUnits": 2,
+        "hardBanReasons": []
+      },
+      "expected": {
+        "decision": "direct",
+        "reasons": [
+          "no-objectively-verifiable-unit"
+        ]
+      }
+    },
+    {
+      "name": "no-independent-unit-is-direct",
+      "facts": {
+        "permission": "allow",
+        "objectivelyVerifiable": true,
+        "independentWorkUnits": 0,
+        "hardBanReasons": []
+      },
+      "expected": {
+        "decision": "direct",
+        "reasons": [
+          "no-independent-work-unit"
+        ]
+      }
+    },
+    {
+      "name": "all-requirements-enable-delegation",
+      "facts": {
+        "permission": "allow",
+        "objectivelyVerifiable": true,
+        "independentWorkUnits": 2,
+        "hardBanReasons": []
+      },
+      "expected": {
+        "decision": "delegate",
+        "reasons": [
+          "delegation-requirements-satisfied"
+        ]
+      }
+    }
+  ],
+  "mutations": [
+    {
+      "name": "decision-order-drift",
+      "path": "/decisionOrder",
+      "value": [
+        "direct",
+        "clarify",
+        "delegate"
+      ],
+      "expectedError": "DELEGATION_POLICY_DRIFT"
+    },
+    {
+      "name": "smart-plan-must-not-collect-account-evidence",
+      "path": "/accountEvidence/smartPlanRequired",
+      "value": true,
+      "expectedError": "DELEGATION_POLICY_DRIFT"
+    },
+    {
+      "name": "more-than-one-full-collection-per-attempt",
+      "path": "/accountEvidence/fullCollectionJobsPerAttempt",
+      "value": 2,
+      "expectedError": "DELEGATION_POLICY_DRIFT"
+    },
+    {
+      "name": "account-evidence-cache",
+      "path": "/accountEvidence/cacheAcrossAttempts",
+      "value": true,
+      "expectedError": "DELEGATION_POLICY_DRIFT"
+    },
+    {
+      "name": "hidden-account-evidence-retry",
+      "path": "/accountEvidence/hiddenRetry",
+      "value": true,
+      "expectedError": "DELEGATION_POLICY_DRIFT"
+    },
+    {
+      "name": "hidden-pair-fallback",
+      "path": "/pairAvailability/fallback",
+      "value": "nearest",
+      "expectedError": "DELEGATION_POLICY_DRIFT"
+    },
+    {
+      "name": "implicit-promote-only",
+      "path": "/reassessment/explicitPolicyRequired",
+      "value": false,
+      "expectedError": "DELEGATION_POLICY_DRIFT"
+    }
+  ]
+}

@@ -10,12 +10,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .compatibility import codex_version_supported
+
 
 ROOT_KEYS = {
     "schema_version",
     "algorithm_version",
-    "supported_codex_versions",
+    "minimum_codex_version",
     "supported_platforms",
+    "coordinator",
     "models",
     "limits",
     "profiles",
@@ -23,6 +26,7 @@ ROOT_KEYS = {
     "validation",
 }
 MODEL_KEYS = {"reasoning_efforts", "rank"}
+COORDINATOR_KEYS = {"model", "reasoning_effort"}
 LIMIT_KEYS = {
     "global_processes",
     "root_processes",
@@ -75,8 +79,9 @@ class Catalog:
     generation: str
     canonical_sha256: str
     algorithm_version: str
-    supported_codex_versions: tuple[str, ...]
+    minimum_codex_version: str
     supported_platforms: tuple[str, ...]
+    coordinator: dict[str, str]
     models: dict[str, dict[str, Any]]
     limits: dict[str, int]
     profiles: dict[str, dict[str, Any]]
@@ -103,8 +108,9 @@ class Catalog:
             generation=f"cg1_{digest[:16]}",
             canonical_sha256=digest,
             algorithm_version=data["algorithm_version"],
-            supported_codex_versions=tuple(data["supported_codex_versions"]),
+            minimum_codex_version=data["minimum_codex_version"],
             supported_platforms=tuple(data["supported_platforms"]),
+            coordinator=dict(data["coordinator"]),
             models={
                 name: dict(settings)
                 for name, settings in data["models"].items()
@@ -129,6 +135,12 @@ class Catalog:
         )
         return f"{kind}_{hashlib.sha256(material).hexdigest()[:16]}"
 
+    def supports_codex_version(self, version: str) -> bool:
+        return codex_version_supported(
+            version,
+            minimum=self.minimum_codex_version,
+        )
+
 
 def _validate_catalog(data: dict[str, Any]) -> None:
     _exact_keys(data, ROOT_KEYS, "catalog")
@@ -136,7 +148,11 @@ def _validate_catalog(data: dict[str, Any]) -> None:
         raise CatalogError("schema_version must be 1")
     if data["algorithm_version"] != "route-v1":
         raise CatalogError("algorithm_version must be route-v1")
-    _string_list(data["supported_codex_versions"], "supported_codex_versions")
+    minimum = data["minimum_codex_version"]
+    if not isinstance(minimum, str) or not codex_version_supported(minimum):
+        raise CatalogError(
+            "minimum_codex_version must be a supported canonical stable version"
+        )
     _string_list(data["supported_platforms"], "supported_platforms")
 
     models = _mapping(data["models"], "models")
@@ -151,6 +167,21 @@ def _validate_catalog(data: dict[str, Any]) -> None:
             raise CatalogError(
                 f"models.{name}.reasoning_efforts must be {efforts}"
             )
+
+    coordinator = _mapping(data["coordinator"], "coordinator")
+    _exact_keys(coordinator, COORDINATOR_KEYS, "coordinator")
+    coordinator_model = coordinator["model"]
+    coordinator_effort = coordinator["reasoning_effort"]
+    if not isinstance(coordinator_model, str) or coordinator_model not in models:
+        raise CatalogError("coordinator.model must reference a configured model")
+    configured_efforts = models[coordinator_model]["reasoning_efforts"]
+    if (
+        not isinstance(coordinator_effort, str)
+        or coordinator_effort not in configured_efforts
+    ):
+        raise CatalogError(
+            "coordinator.reasoning_effort must be supported by coordinator.model"
+        )
 
     limits = _mapping(data["limits"], "limits")
     _exact_keys(limits, LIMIT_KEYS, "limits")

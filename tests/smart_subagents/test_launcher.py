@@ -5,6 +5,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Mapping, Sequence
+from unittest import mock
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -13,9 +15,11 @@ sys.path.insert(0, str(PLUGIN_ROOT / "src"))
 
 from codex_smart_subagents.launcher import (  # noqa: E402
     LauncherError,
+    apply_coordinator_defaults,
     build_adaptive_environment,
     classify_invocation,
     parse_codex_version,
+    run_launcher,
     validate_real_binary,
 )
 
@@ -75,11 +79,179 @@ class InvocationClassificationTests(unittest.TestCase):
 
 
 class LauncherSafetyTests(unittest.TestCase):
+    def test_coordinator_defaults_are_added_as_one_validated_pair(self) -> None:
+        original = ["-C", "/tmp/project", "проверь задачу"]
+        rewritten = apply_coordinator_defaults(
+            original,
+            {
+                "model": "gpt-5.6-terra",
+                "reasoning_effort": "medium",
+            },
+        )
+        self.assertEqual(
+            [
+                *original,
+                "--model",
+                "gpt-5.6-terra",
+                "-c",
+                'model_reasoning_effort="medium"',
+            ],
+            rewritten,
+        )
+        self.assertEqual(["-C", "/tmp/project", "проверь задачу"], original)
+
+        for invalid in (
+            {"model": "gpt-5.6-terra"},
+            {"model": "", "reasoning_effort": "medium"},
+            {"model": "gpt-5.6-terra", "reasoning_effort": "medium\nmax"},
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(LauncherError):
+                apply_coordinator_defaults([], invalid)
+
     def test_version_parser_is_exact(self) -> None:
-        self.assertEqual("0.144.4", parse_codex_version("codex-cli 0.144.4\n"))
-        for value in ("0.144.4", "codex 0.144.4", "codex-cli latest"):
+        self.assertEqual("0.144.6", parse_codex_version("codex-cli 0.144.6\n"))
+        for value in (
+            "0.144.6",
+            "codex 0.144.6",
+            "codex-cli latest",
+            "codex-cli 00.144.6\n",
+        ):
             with self.subTest(value=value), self.assertRaises(LauncherError):
                 parse_codex_version(value)
+
+    def test_newer_stable_version_enables_adaptive_launch(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            wrapper = root / "codex-smart"
+            wrapper.write_text("#!/bin/sh\n", encoding="utf-8")
+            wrapper.chmod(0o700)
+            real = root / "codex"
+            real.write_text("#!/bin/sh\n", encoding="utf-8")
+            real.chmod(0o700)
+            controller_environments: list[dict[str, str]] = []
+            executions: list[tuple[str, tuple[str, ...], dict[str, str]]] = []
+
+            def expected_exec(
+                path: str,
+                arguments: Sequence[str],
+                environment: Mapping[str, str],
+            ) -> object:
+                executions.append(
+                    (
+                        path,
+                        tuple(arguments),
+                        dict(environment),
+                    )
+                )
+                raise RuntimeError("expected exec")
+
+            with mock.patch(
+                "codex_smart_subagents.launcher.probe_codex_version",
+                return_value="0.144.6",
+            ), self.assertRaisesRegex(RuntimeError, "expected exec"):
+                run_launcher(
+                    [],
+                    real_binary=real,
+                    wrapper=wrapper,
+                    environment={"PATH": "/usr/bin"},
+                    ensure_controller=lambda environment: (
+                        controller_environments.append(dict(environment))
+                    ),
+                    execve=expected_exec,
+                )
+
+            self.assertEqual(1, len(controller_environments))
+            self.assertEqual(1, len(executions))
+            self.assertEqual(
+                "1",
+                executions[0][2]["CODEX_SMART_LAUNCHER_ACTIVE"],
+            )
+
+    def test_controller_failure_preserves_ordinary_codex_launch(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            wrapper = root / "codex-smart"
+            wrapper.write_text("#!/bin/sh\n", encoding="utf-8")
+            wrapper.chmod(0o700)
+            real = root / "codex"
+            real.write_text("#!/bin/sh\n", encoding="utf-8")
+            real.chmod(0o700)
+            executions: list[tuple[tuple[str, ...], dict[str, str]]] = []
+
+            def unavailable(_environment: Mapping[str, str]) -> None:
+                raise RuntimeError("controller offline")
+
+            def expected_exec(
+                _path: str,
+                arguments: Sequence[str],
+                environment: Mapping[str, str],
+            ) -> object:
+                executions.append((tuple(arguments), dict(environment)))
+                raise RuntimeError("expected exec")
+
+            with mock.patch(
+                "codex_smart_subagents.launcher.probe_codex_version",
+                return_value="0.144.6",
+            ), self.assertRaisesRegex(RuntimeError, "expected exec"):
+                run_launcher(
+                    ["проверь"],
+                    real_binary=real,
+                    wrapper=wrapper,
+                    environment={"PATH": "/usr/bin"},
+                    coordinator={"model": "unused", "reasoning_effort": "low"},
+                    ensure_controller=unavailable,
+                    execve=expected_exec,
+                )
+
+            self.assertEqual((str(real.resolve()), "проверь"), executions[0][0])
+            self.assertEqual({"PATH": "/usr/bin"}, executions[0][1])
+
+    def test_ready_launch_uses_catalog_coordinator_pair(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            wrapper = root / "codex-smart"
+            wrapper.write_text("#!/bin/sh\n", encoding="utf-8")
+            wrapper.chmod(0o700)
+            real = root / "codex"
+            real.write_text("#!/bin/sh\n", encoding="utf-8")
+            real.chmod(0o700)
+            executions: list[tuple[str, ...]] = []
+
+            def expected_exec(
+                _path: str,
+                arguments: Sequence[str],
+                _environment: Mapping[str, str],
+            ) -> object:
+                executions.append(tuple(arguments))
+                raise RuntimeError("expected exec")
+
+            with mock.patch(
+                "codex_smart_subagents.launcher.probe_codex_version",
+                return_value="0.144.6",
+            ), self.assertRaisesRegex(RuntimeError, "expected exec"):
+                run_launcher(
+                    ["проверь задачу"],
+                    real_binary=real,
+                    wrapper=wrapper,
+                    environment={"PATH": "/usr/bin"},
+                    coordinator={
+                        "model": "gpt-5.6-terra",
+                        "reasoning_effort": "medium",
+                    },
+                    execve=expected_exec,
+                )
+
+            self.assertEqual(
+                (
+                    str(real.resolve()),
+                    "проверь задачу",
+                    "--model",
+                    "gpt-5.6-terra",
+                    "-c",
+                    'model_reasoning_effort="medium"',
+                ),
+                executions[0],
+            )
 
     def test_environment_adds_fresh_session_without_mutating_input(self) -> None:
         original = {"PATH": "/usr/bin", "CODEX_HOME": "/tmp/codex"}

@@ -28,6 +28,11 @@ from codex_smart_subagents.identity import RequestContext  # noqa: E402
 from codex_smart_subagents.installation_rollback import (  # noqa: E402
     RollbackError,
     RollbackPreflight,
+    probe_rollback_preflight,
+)
+from codex_smart_subagents import installation_rollback  # noqa: E402
+from codex_smart_subagents.operation_deadline_v2 import (  # noqa: E402
+    OperationDeadlineExceededV2,
 )
 from codex_smart_subagents.state import RouteState  # noqa: E402
 from codex_smart_subagents.store import SmartStore  # noqa: E402
@@ -76,6 +81,40 @@ class AdminTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.directory.cleanup()
+
+    def test_rollback_preflight_does_not_mask_operation_deadline(self) -> None:
+        database_path = self.root / "state.sqlite3"
+        database_path.touch()
+        original = OperationDeadlineExceededV2(
+            code="ROOT_OPERATION_EXPIRED",
+            operation="rollback",
+            phase="database-probe",
+            deadline_kind="operation",
+            configured_timeout_nanoseconds=1,
+            elapsed_monotonic_nanoseconds=2,
+        )
+        context = SimpleNamespace(
+            database_path=database_path,
+            runtime_paths=SimpleNamespace(
+                socket_path=self.root / "absent-controller.sock"
+            ),
+        )
+        with (
+            patch.object(
+                installation_rollback,
+                "_controller_lock_is_free",
+                return_value=True,
+            ),
+            patch.object(
+                installation_rollback,
+                "_active_database_counts",
+                side_effect=original,
+            ),
+        ):
+            with self.assertRaises(OperationDeadlineExceededV2) as caught:
+                probe_rollback_preflight(context)
+
+        self.assertIs(original, caught.exception)
 
     def invoke(
         self,

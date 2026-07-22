@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import hashlib
 import json
@@ -42,10 +43,36 @@ HOOK_CONTROLLER_TIMEOUT_SECONDS = 0.3
 MCP_PLAN_TIMEOUT_SECONDS = 420.0
 MCP_SHORT_TIMEOUT_SECONDS = 10.0
 MCP_WAIT_GRACE_SECONDS = 5.0
+COORDINATION_LOCK_TIMEOUT_SECONDS = 5.0
+COORDINATION_LOCK_POLL_INTERVAL_SECONDS = 0.05
 
 
 class IntegrationError(RuntimeError):
     """A sanitized integration-boundary error."""
+
+
+def _acquire_coordination_lock(descriptor: int) -> None:
+    """Получить локальную блокировку до одного монотонного срока."""
+
+    deadline = time.monotonic() + COORDINATION_LOCK_TIMEOUT_SECONDS
+    busy_errors = {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK}
+    while True:
+        if time.monotonic() >= deadline:
+            raise IntegrationError(
+                "срок ожидания блокировки координации истёк"
+            ) from None
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except OSError as error:
+            if error.errno not in busy_errors:
+                raise
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise IntegrationError(
+                "срок ожидания блокировки координации истёк"
+            ) from None
+        time.sleep(min(COORDINATION_LOCK_POLL_INTERVAL_SECONDS, remaining))
 
 
 @dataclass(frozen=True)
@@ -195,8 +222,10 @@ class CoordinationStore:
             0o600,
         )
         os.fchmod(descriptor, 0o600)
+        acquired = False
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            _acquire_coordination_lock(descriptor)
+            acquired = True
             current = self.load()
             updated = mutator(current)
             if updated is None:
@@ -205,8 +234,11 @@ class CoordinationStore:
                 self.save(updated)
             return updated
         finally:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-            os.close(descriptor)
+            try:
+                if acquired:
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
 
     def _prepare_directory(self) -> None:
         for directory in (

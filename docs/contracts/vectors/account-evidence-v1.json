@@ -16,7 +16,7 @@
     "subject": {
       "snapshotPath": "/private/codex",
       "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "subjectFingerprint": "c7a60f70c3c0c976bbe4ed83c88c7e718bf0a187e0c3f5657e5ba9dd1795db0f"
+      "subjectFingerprint": "6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723"
     },
     "codexHome": "/private/codex-home",
     "requirements": null,
@@ -34,10 +34,10 @@
         "reasoningEffort": "medium"
       }
     ],
-    "compatibilityFingerprint": "de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e",
+    "compatibilityFingerprint": "bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9",
     "requirementsFingerprint": "a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4",
     "accountCatalogFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29",
-    "accountContextFingerprint": "d48d7eb9f7c6067386208551f18fb555e7a17545d9530000b76b2f7f11c69890",
+    "accountContextFingerprint": "b0c97ce00d480b51284ad0fc3e7ff613755167237521204b84b8588414482e40",
     "collection": {
       "rootReferences": {
         "executablePath": "#/subject/snapshotPath",
@@ -67,51 +67,51 @@
           "ordinal": 1,
           "stage": "requirements-a",
           "resultFingerprintRef": "#/requirementsFingerprint",
-          "processFingerprint": "8051ae5dc1fd725babbd8e5a0e67e0470ac27962029da8a037818361e439bbeb"
+          "processFingerprint": "cead170adcd913acac29ce09bfe2a247930af4295d5268224cb76a54ba3e8222"
         },
         {
           "ordinal": 2,
           "stage": "catalog-a",
           "resultFingerprintRef": "#/accountCatalogFingerprint",
-          "processFingerprint": "935c617ca05446211c78424447f926eaebee1c650e4a486636e158e2bb1ac9d5"
+          "processFingerprint": "934c30844cab0a5f758e77ef4d6c8b371ae16bc66b96a7adc8cb8b06a679f65f"
         },
         {
           "ordinal": 3,
           "stage": "requirements-b",
           "resultFingerprintRef": "#/requirementsFingerprint",
-          "processFingerprint": "685778a63863887a645460754aada7064e74c3abfd2668deb608a69d24631748"
+          "processFingerprint": "ba0e9e4c97c2030ce6443b7ff6c277772733873e771a5bcc9a6acee9da51c229"
         },
         {
           "ordinal": 4,
           "stage": "catalog-b",
           "resultFingerprintRef": "#/accountCatalogFingerprint",
-          "processFingerprint": "0d492f0bebd081543e438501eacb6118f605f603fdef326db425deced230c8ad"
+          "processFingerprint": "793d3329f5b9edf3f2a86ce1db03dd94b81b3c64d7a8d8c08a2832599ec3773a"
         },
         {
           "ordinal": 5,
           "stage": "requirements-c",
           "resultFingerprintRef": "#/requirementsFingerprint",
-          "processFingerprint": "324dd79d233f12f0a82ff23a7b2fa20981dba39c3fe4b1885d6ed9327181452f"
+          "processFingerprint": "805174c738df645244374b5b4c326fb4ecf5f6a4ab11ecac7fb651baf3a0076f"
         }
       ],
-      "collectionFingerprint": "c7df2e4443d79b9c44c9be0beeade3d230fafcb29d699c228763d5a4d7b5eba9"
+      "collectionFingerprint": "428f0ecd847fda9e4722a0a714684ad4532b8f826687c927bf94d4ac48f678c1"
     },
-    "recordFingerprint": "94e4a21d871c38fb6527afdcf9100b21a3057d60b9329c310530abb64f8dca9d"
+    "recordFingerprint": "3713f0d6948c9848a70c14e565c608f3c0c66b07233dfc7bc6e7586946c327d9"
   },
   "canonical": {
     "requirementsUtf8": "null",
     "accountCatalogUtf8": "[{\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"low\"},{\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"medium\"},{\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":\"medium\"}]",
     "environmentUtf8": "{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"}",
     "processUtf8": [
-      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":1,\"resultFingerprintRef\":\"#/requirementsFingerprint\",\"stage\":\"requirements-a\"},\"resolved\":{\"compatibilityFingerprint\":\"de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"subjectFingerprint\":\"c7a60f70c3c0c976bbe4ed83c88c7e718bf0a187e0c3f5657e5ba9dd1795db0f\"}}",
-      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":2,\"resultFingerprintRef\":\"#/accountCatalogFingerprint\",\"stage\":\"catalog-a\"},\"resolved\":{\"compatibilityFingerprint\":\"de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29\",\"subjectFingerprint\":\"c7a60f70c3c0c976bbe4ed83c88c7e718bf0a187e0c3f5657e5ba9dd1795db0f\"}}",
-      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":3,\"resultFingerprintRef\":\"#/requirementsFingerprint\",\"stage\":\"requirements-b\"},\"resolved\":{\"compatibilityFingerprint\":\"de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"subjectFingerprint\":\"c7a60f70c3c0c976bbe4ed83c88c7e718bf0a187e0c3f5657e5ba9dd1795db0f\"}}",
-      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":4,\"resultFingerprintRef\":\"#/accountCatalogFingerprint\",\"stage\":\"catalog-b\"},\"resolved\":{\"compatibilityFingerprint\":\"de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29\",\"subjectFingerprint\":\"c7a60f70c3c0c976bbe4ed83c88c7e718bf0a187e0c3f5657e5ba9dd1795db0f\"}}",
-      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":5,\"resultFingerprintRef\":\"#/requirementsFingerprint\",\"stage\":\"requirements-c\"},\"resolved\":{\"compatibilityFingerprint\":\"de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"subjectFingerprint\":\"c7a60f70c3c0c976bbe4ed83c88c7e718bf0a187e0c3f5657e5ba9dd1795db0f\"}}"
+      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":1,\"resultFingerprintRef\":\"#/requirementsFingerprint\",\"stage\":\"requirements-a\"},\"resolved\":{\"compatibilityFingerprint\":\"bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"subjectFingerprint\":\"6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723\"}}",
+      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":2,\"resultFingerprintRef\":\"#/accountCatalogFingerprint\",\"stage\":\"catalog-a\"},\"resolved\":{\"compatibilityFingerprint\":\"bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29\",\"subjectFingerprint\":\"6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723\"}}",
+      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":3,\"resultFingerprintRef\":\"#/requirementsFingerprint\",\"stage\":\"requirements-b\"},\"resolved\":{\"compatibilityFingerprint\":\"bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"subjectFingerprint\":\"6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723\"}}",
+      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":4,\"resultFingerprintRef\":\"#/accountCatalogFingerprint\",\"stage\":\"catalog-b\"},\"resolved\":{\"compatibilityFingerprint\":\"bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29\",\"subjectFingerprint\":\"6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723\"}}",
+      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":5,\"resultFingerprintRef\":\"#/requirementsFingerprint\",\"stage\":\"requirements-c\"},\"resolved\":{\"compatibilityFingerprint\":\"bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"subjectFingerprint\":\"6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723\"}}"
     ],
-    "collectionUtf8": "{\"processFingerprints\":[\"8051ae5dc1fd725babbd8e5a0e67e0470ac27962029da8a037818361e439bbeb\",\"935c617ca05446211c78424447f926eaebee1c650e4a486636e158e2bb1ac9d5\",\"685778a63863887a645460754aada7064e74c3abfd2668deb608a69d24631748\",\"0d492f0bebd081543e438501eacb6118f605f603fdef326db425deced230c8ad\",\"324dd79d233f12f0a82ff23a7b2fa20981dba39c3fe4b1885d6ed9327181452f\"]}",
-    "accountContextUtf8": "{\"accountCatalogFingerprint\":\"18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29\",\"codexHome\":\"/private/codex-home\",\"collectionFingerprint\":\"c7df2e4443d79b9c44c9be0beeade3d230fafcb29d699c228763d5a4d7b5eba9\",\"compatibilityFingerprint\":\"de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e\",\"requirementsFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"subjectFingerprint\":\"c7a60f70c3c0c976bbe4ed83c88c7e718bf0a187e0c3f5657e5ba9dd1795db0f\"}",
-    "recordUtf8": "{\"accountCatalogFingerprint\":\"18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29\",\"accountContextFingerprint\":\"d48d7eb9f7c6067386208551f18fb555e7a17545d9530000b76b2f7f11c69890\",\"collectionFingerprint\":\"c7df2e4443d79b9c44c9be0beeade3d230fafcb29d699c228763d5a4d7b5eba9\",\"compatibilityFingerprint\":\"de8ab835798cb977ec72f0dfa9aa2d07ffcb15f34861ea21f7f8cc171af1979e\",\"contractVersion\":\"codex-account-v1\",\"requirementsFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"schemaVersion\":1,\"subjectFingerprint\":\"c7a60f70c3c0c976bbe4ed83c88c7e718bf0a187e0c3f5657e5ba9dd1795db0f\"}"
+    "collectionUtf8": "{\"processFingerprints\":[\"cead170adcd913acac29ce09bfe2a247930af4295d5268224cb76a54ba3e8222\",\"934c30844cab0a5f758e77ef4d6c8b371ae16bc66b96a7adc8cb8b06a679f65f\",\"ba0e9e4c97c2030ce6443b7ff6c277772733873e771a5bcc9a6acee9da51c229\",\"793d3329f5b9edf3f2a86ce1db03dd94b81b3c64d7a8d8c08a2832599ec3773a\",\"805174c738df645244374b5b4c326fb4ecf5f6a4ab11ecac7fb651baf3a0076f\"]}",
+    "accountContextUtf8": "{\"accountCatalogFingerprint\":\"18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29\",\"codexHome\":\"/private/codex-home\",\"collectionFingerprint\":\"428f0ecd847fda9e4722a0a714684ad4532b8f826687c927bf94d4ac48f678c1\",\"compatibilityFingerprint\":\"bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9\",\"requirementsFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"subjectFingerprint\":\"6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723\"}",
+    "recordUtf8": "{\"accountCatalogFingerprint\":\"18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29\",\"accountContextFingerprint\":\"b0c97ce00d480b51284ad0fc3e7ff613755167237521204b84b8588414482e40\",\"collectionFingerprint\":\"428f0ecd847fda9e4722a0a714684ad4532b8f826687c927bf94d4ac48f678c1\",\"compatibilityFingerprint\":\"bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9\",\"contractVersion\":\"codex-account-v1\",\"requirementsFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"schemaVersion\":1,\"subjectFingerprint\":\"6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723\"}"
   },
   "mutations": [
     {
@@ -333,15 +333,15 @@
         "accountCatalogUtf8": "[{\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":\"medium\"},{\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"medium\"},{\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"low\"}]",
         "accountCatalogFingerprint": "2d0e1fac7409751313b153062f9cacdf31f951e96944710a912e7c6e2948ec9d",
         "processFingerprints": [
-          "8051ae5dc1fd725babbd8e5a0e67e0470ac27962029da8a037818361e439bbeb",
-          "e4504919d2c4f57bc1e78b5364ffb5e7cd848c6f7045d83ac7fadbb7bd85078e",
-          "685778a63863887a645460754aada7064e74c3abfd2668deb608a69d24631748",
-          "e30889ed5a62aa1ae44b0863452b5d6d506bc62c616f463eaa46b30cb0d6bda4",
-          "324dd79d233f12f0a82ff23a7b2fa20981dba39c3fe4b1885d6ed9327181452f"
+          "cead170adcd913acac29ce09bfe2a247930af4295d5268224cb76a54ba3e8222",
+          "fa6440d255dc6570be90585e13acfbf8173f68a447e49d8f3c33186d42faf3f2",
+          "ba0e9e4c97c2030ce6443b7ff6c277772733873e771a5bcc9a6acee9da51c229",
+          "beba1fbb2ed2dfa279bc649571c11b518c2d11a02486010cdc3cd29634285fe8",
+          "805174c738df645244374b5b4c326fb4ecf5f6a4ab11ecac7fb651baf3a0076f"
         ],
-        "collectionFingerprint": "a369c9de96c0137c1c912e37587f57cd5610e6f936bc8e29f9b3dd4d94b8f272",
-        "accountContextFingerprint": "483a713332e9b347db5698ae30d9fdaefb94a7db73872cb1e798582e14a4ee1f",
-        "recordFingerprint": "8138e27a6c3769a6258a768bdfabc0a7f3d320b5371e5e16b1f7b983a61c6314"
+        "collectionFingerprint": "d72ccae9b024eb5cee143a318d400622f2f9875d1c9e89f125fb09f8417dbd06",
+        "accountContextFingerprint": "615b23ba3c7b447389dba02a89c88037609280eb5025b94873c1b3a6dcf111a8",
+        "recordFingerprint": "ca37e5f6b3f8caf292adb48e19ef1bd608e9f326004a65aed28dee6ca54c1143"
       },
       "expected": "ordering-invalid"
     },

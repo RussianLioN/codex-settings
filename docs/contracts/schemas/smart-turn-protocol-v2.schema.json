@@ -1,0 +1,1177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/smart-turn-protocol-v2.schema.json",
+  "title": "smart-turn-protocol-v2",
+  "oneOf": [
+    {"$ref": "#/$defs/issueTurnBindingRequest"},
+    {"$ref": "#/$defs/smartPlanRequest"},
+    {"$ref": "#/$defs/routeStartRequest"},
+    {"$ref": "#/$defs/smartWaitRequest"},
+    {"$ref": "#/$defs/smartCancelRequest"},
+    {"$ref": "#/$defs/issueTurnBindingResponse"},
+    {"$ref": "#/$defs/smartPlanResponse"},
+    {"$ref": "#/$defs/routeStartResponse"},
+    {"$ref": "#/$defs/smartWaitResponse"},
+    {"$ref": "#/$defs/smartCancelResponse"},
+    {"$ref": "#/$defs/ordinaryResponse"},
+    {"$ref": "#/$defs/staleResponse"},
+    {"$ref": "#/$defs/unavailableResponse"},
+    {"$ref": "#/$defs/errorResponse"}
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "method": {
+      "enum": [
+        "issue_turn_binding",
+        "smart_plan",
+        "route_start",
+        "smart_wait",
+        "smart_cancel"
+      ]
+    },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shellSessionId", "sessionId", "turnId", "ownerFingerprint"],
+      "properties": {
+        "shellSessionId": {"type": "string", "minLength": 1, "maxLength": 256},
+        "sessionId": {"type": "string", "minLength": 1, "maxLength": 256},
+        "turnId": {"type": "string", "minLength": 1, "maxLength": 256},
+        "ownerFingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "requestContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "shellSessionId",
+        "sessionId",
+        "turnId",
+        "codexHome",
+        "repoRoot",
+        "baseSha",
+        "worktreeFingerprint",
+        "activationFingerprint",
+        "compatibilityFingerprint",
+        "issuedControlEpoch"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 2},
+        "shellSessionId": {"type": "string", "minLength": 1, "maxLength": 256},
+        "sessionId": {"type": "string", "minLength": 1, "maxLength": 256},
+        "turnId": {"type": "string", "minLength": 1, "maxLength": 256},
+        "codexHome": {"type": "string", "pattern": "^/", "maxLength": 4096},
+        "repoRoot": {"type": "string", "pattern": "^/", "maxLength": 4096},
+        "baseSha": {"$ref": "#/$defs/sha256"},
+        "worktreeFingerprint": {"$ref": "#/$defs/sha256"},
+        "activationFingerprint": {"$ref": "#/$defs/sha256"},
+        "compatibilityFingerprint": {"$ref": "#/$defs/sha256"},
+        "issuedControlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}
+      }
+    },
+    "turnBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bindingId",
+        "owner",
+        "contextFingerprint",
+        "issuedControlEpoch",
+        "issuedAt",
+        "expiresAt",
+        "state"
+      ],
+      "properties": {
+        "bindingId": {"type": "string", "pattern": "^tb2_[0-9a-f]{32}$"},
+        "owner": {"$ref": "#/$defs/owner"},
+        "contextFingerprint": {"$ref": "#/$defs/sha256"},
+        "issuedControlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "issuedAt": {"type": "string", "format": "date-time"},
+        "expiresAt": {"type": "string", "format": "date-time"},
+        "state": {"enum": ["ACTIVE", "CONSUMED", "EXPIRED"]}
+      }
+    },
+    "requestBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messageType",
+        "protocolVersion",
+        "release",
+        "requestId",
+        "owner",
+        "turnBinding",
+        "idempotencyKey",
+        "requestDeadlineAt",
+        "method",
+        "params",
+        "requestFingerprint",
+        "extensions"
+      ],
+      "properties": {
+        "messageType": {"const": "request"},
+        "protocolVersion": {"const": 2},
+        "release": {"const": "0.2.0"},
+        "requestId": {"type": "string", "pattern": "^strq2_[0-9a-f]{32}$"},
+        "owner": {"$ref": "#/$defs/owner"},
+        "turnBinding": {
+          "oneOf": [
+            {"$ref": "#/$defs/turnBinding"},
+            {"type": "null"}
+          ]
+        },
+        "idempotencyKey": {
+          "oneOf": [
+            {"type": "string", "pattern": "^idem2_[0-9a-f]{32}$"},
+            {"type": "null"}
+          ]
+        },
+        "requestDeadlineAt": {"type": "string", "format": "date-time"},
+        "method": {"$ref": "#/$defs/method"},
+        "params": {},
+        "requestFingerprint": {"$ref": "#/$defs/sha256"},
+        "extensions": {"type": "object", "maxProperties": 32}
+      }
+    },
+    "bindingIssueFence": {
+      "properties": {
+        "turnBinding": {"type": "null"},
+        "idempotencyKey": {"type": "string", "pattern": "^idem2_[0-9a-f]{32}$"}
+      }
+    },
+    "planFence": {
+      "properties": {
+        "turnBinding": {"$ref": "#/$defs/turnBinding", "properties": {"state": {"const": "ACTIVE"}}},
+        "idempotencyKey": {"type": "string", "pattern": "^idem2_[0-9a-f]{32}$"}
+      }
+    },
+    "routeMutationFence": {
+      "properties": {
+        "turnBinding": {"type": "null"},
+        "idempotencyKey": {"type": "string", "pattern": "^idem2_[0-9a-f]{32}$"}
+      }
+    },
+    "routeWaitFence": {
+      "properties": {
+        "turnBinding": {"type": "null"},
+        "idempotencyKey": {"type": "null"}
+      }
+    },
+    "issueTurnBindingParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requestContext", "ttlSeconds"],
+      "properties": {
+        "requestContext": {"$ref": "#/$defs/requestContext"},
+        "ttlSeconds": {"type": "integer", "minimum": 30, "maximum": 300}
+      }
+    },
+    "smartPlanRefIds": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(?!server\\.)[a-z0-9][a-z0-9._:-]{0,127}$"
+      }
+    },
+    "smartPlanEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidenceRefId", "kind", "statement", "sha256"],
+      "properties": {
+        "evidenceRefId": {
+          "type": "string",
+          "pattern": "^(?!server\\.)[a-z0-9][a-z0-9._:-]{0,127}$"
+        },
+        "kind": {
+          "enum": [
+            "user-request",
+            "repository-file",
+            "command-output",
+            "official-source",
+            "account-evidence",
+            "explicit-policy"
+          ]
+        },
+        "statement": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "smartPlanCountFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "evidenceRefIds"],
+      "properties": {
+        "value": {
+          "anyOf": [
+            {"type": "integer", "minimum": 0, "maximum": 10000},
+            {"type": "null"}
+          ]
+        },
+        "evidenceRefIds": {"$ref": "#/$defs/smartPlanRefIds"}
+      }
+    },
+    "smartPlanClaim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "evidenceRefIds"],
+      "properties": {
+        "state": {"enum": ["false", "true", "unknown", "conflict"]},
+        "evidenceRefIds": {"$ref": "#/$defs/smartPlanRefIds"}
+      }
+    },
+    "smartPlanBooleanFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "evidenceRefIds"],
+      "properties": {
+        "value": {"type": ["boolean", "null"]},
+        "evidenceRefIds": {"$ref": "#/$defs/smartPlanRefIds"}
+      }
+    },
+    "smartPlanHardFloorReason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "evidenceRefIds"],
+      "properties": {
+        "reason": {
+          "enum": [
+            "architecture-decision",
+            "public-contract",
+            "risky-migration",
+            "security-sensitive",
+            "critical-incident",
+            "final-author-review-before-publish",
+            "irreversible-action",
+            "rollback-unproven"
+          ]
+        },
+        "evidenceRefIds": {"$ref": "#/$defs/smartPlanRefIds"}
+      }
+    },
+    "smartPlanHardBanReason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "decision", "evidenceRefIds"],
+      "properties": {
+        "reason": {
+          "enum": [
+            "authority-conflict",
+            "owner-decision-required",
+            "required-fact-unavailable",
+            "delegation-explicitly-forbidden",
+            "no-objectively-verifiable-unit",
+            "no-independent-work-unit"
+          ]
+        },
+        "decision": {"enum": ["direct", "clarify"]},
+        "evidenceRefIds": {"$ref": "#/$defs/smartPlanRefIds"}
+      }
+    },
+    "smartPlanTaskFacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taskText",
+        "evidence",
+        "workShape",
+        "factorClaims",
+        "delegation",
+        "hardFloorReasons",
+        "hardBanReasons"
+      ],
+      "properties": {
+        "taskText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384,
+          "description": "Проверяемая миссия одного узла без пути запуска и служебных настроек."
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 63,
+          "items": {"$ref": "#/$defs/smartPlanEvidence"}
+        },
+        "workShape": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scopeUnits", "workUnits", "boundaries", "workstreams"],
+          "description": "Порог p: p=0 при известных scopeUnits<=1, workUnits<=1, boundaries<=1 и workstreams<=1; p=1 при max(scopeUnits,workUnits)=2..5, одной границе и одном потоке; p=2 при scopeUnits>=6, workUnits>=6, boundaries>=2 или workstreams>=2. Любой null оставляет связанные критерии неизвестными и консервативно поднимает выбранную верхнюю границу до наибольшего возможного уровня.",
+          "properties": {
+            "scopeUnits": {
+              "$ref": "#/$defs/smartPlanCountFact",
+              "description": "Число отдельно адресуемых файлов, схем, страниц, наборов данных или результатов."
+            },
+            "workUnits": {
+              "$ref": "#/$defs/smartPlanCountFact",
+              "description": "Число независимо проверяемых изменений или исследований."
+            },
+            "boundaries": {
+              "$ref": "#/$defs/smartPlanCountFact",
+              "description": "Число репозиториев, процессов, внешних служб или учётных сред."
+            },
+            "workstreams": {
+              "$ref": "#/$defs/smartPlanCountFact",
+              "description": "Число независимых ветвей работы до общего синтеза."
+            }
+          }
+        },
+        "factorClaims": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["q", "v", "o"],
+          "properties": {
+            "q": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Для q состояние true задаёт нижнюю границу, а true, unknown или conflict задают верхнюю; выбирается верхняя граница. Поэтому q=0 только при всех известных false, q=1 при наибольшем сработавшем q1 и q=2 при любом сработавшем q2.",
+              "properties": {
+                "q1-dependent-chain": {"$ref": "#/$defs/smartPlanClaim", "description": "Нужны не менее двух зависимых выводов."},
+                "q1-bounded-tradeoff": {"$ref": "#/$defs/smartPlanClaim", "description": "Сравниваются не менее двух вариантов по двум ограничениям в одной границе."},
+                "q2-cross-boundary-invariant": {"$ref": "#/$defs/smartPlanClaim", "description": "Нужно сохранить инвариант через две или более границы."},
+                "q2-adversarial-concurrency": {"$ref": "#/$defs/smartPlanClaim", "description": "Нужен контрпример для доверия, конкурентности, атомарности, восстановления или отката."},
+                "q2-conflict-synthesis": {"$ref": "#/$defs/smartPlanClaim", "description": "Нужно разрешить конфликт доказательств или нормативных требований."}
+              }
+            },
+            "v": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Для v состояние true задаёт нижнюю границу, а true, unknown или conflict задают верхнюю; выбирается верхняя граница. Поэтому v=0 только при всех известных false, v=1 при наибольшем сработавшем v1 и v=2 при любом сработавшем v2.",
+              "properties": {
+                "v1-reversible-persistent": {"$ref": "#/$defs/smartPlanClaim", "description": "Изменяется сохраняемое состояние с доказанным откатом."},
+                "v1-user-visible-isolated": {"$ref": "#/$defs/smartPlanClaim", "description": "Есть изолированное видимое пользователю изменение."},
+                "v2-shared-or-production": {"$ref": "#/$defs/smartPlanClaim", "description": "Затрагивается совместное или производственное состояние."},
+                "v2-destructive-or-unproven-rollback": {"$ref": "#/$defs/smartPlanClaim", "description": "Действие разрушительно либо откат не доказан."},
+                "v2-trust-secret-permission": {"$ref": "#/$defs/smartPlanClaim", "description": "Затрагиваются доверие, секреты или разрешения целевой системы."},
+                "v2-high-stakes": {"$ref": "#/$defs/smartPlanClaim", "description": "Ошибка имеет медицинские, юридические, финансовые или иные критические последствия."},
+                "v2-release-or-migration": {"$ref": "#/$defs/smartPlanClaim", "description": "Выполняется выпуск, публикация или миграция."}
+              }
+            },
+            "o": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Для o состояние true задаёт нижнюю границу, а true, unknown или conflict задают верхнюю; выбирается верхняя граница. Поэтому o=0 только при всех известных false, o=1 при наибольшем сработавшем o1 и o=2 при любом сработавшем o2.",
+              "properties": {
+                "o1-discoverable-missing-fact": {"$ref": "#/$defs/smartPlanClaim", "description": "Недостающий факт можно получить безопасным чтением."},
+                "o1-mutable-current-state": {"$ref": "#/$defs/smartPlanClaim", "description": "Решение зависит от изменяемого текущего состояния."},
+                "o1-explicit-reversible-assumption": {"$ref": "#/$defs/smartPlanClaim", "description": "Нужна явно отмеченная обратимая гипотеза."},
+                "o2-authority-conflict": {"$ref": "#/$defs/smartPlanClaim", "description": "Источники полномочий или требования конфликтуют."},
+                "o2-undiscoverable-required-fact": {"$ref": "#/$defs/smartPlanClaim", "description": "Обязательный факт недоступен либо требует решения владельца."},
+                "o2-unreproducible-conflict": {"$ref": "#/$defs/smartPlanClaim", "description": "Конфликт доказательств нельзя воспроизвести и разрешить чтением."},
+                "o2-uncontracted-interface": {"$ref": "#/$defs/smartPlanClaim", "description": "Решение зависит от незафиксированного интерфейса."}
+              }
+            }
+          }
+        },
+        "delegation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["objectivelyVerifiable", "independentWorkUnits"],
+          "properties": {
+            "objectivelyVerifiable": {"$ref": "#/$defs/smartPlanBooleanFact"},
+            "independentWorkUnits": {"$ref": "#/$defs/smartPlanCountFact"}
+          }
+        },
+        "hardFloorReasons": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {"$ref": "#/$defs/smartPlanHardFloorReason"}
+        },
+        "hardBanReasons": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {"$ref": "#/$defs/smartPlanHardBanReason"}
+        }
+      }
+    },
+    "smartPlanRoutingInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskFacts", "contextBundle", "roleTemplateId"],
+      "description": "Передавай только доказанные смысловые факты. Рубрика: q=0 без сложной цепочки, q=1 для ограниченной цепочки или сравнения, q=2 для межграничного инварианта, состязательного контрпримера или синтеза конфликта; p=0 для одной единицы, p=1 для 2..5 единиц, p=2 для 6+ единиц либо 2+ границ или потоков; v и o определяются по описаниям критериев. Служебные настройки добавляет сервер.",
+      "properties": {
+        "taskFacts": {"$ref": "#/$defs/smartPlanTaskFacts"},
+        "contextBundle": {
+          "allOf": [
+            {"$ref": "context-bundle-v1.schema.json"},
+            {
+              "properties": {
+                "entries": {
+                  "items": {
+                    "properties": {
+                      "sourceEvidenceRefs": {
+                        "items": {
+                          "properties": {
+                            "evidenceRefId": {
+                              "pattern": "^(?!server\\.)[a-z0-9][a-z0-9._:-]{0,127}$"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "roleTemplateId": {
+          "type": "string",
+          "pattern": "^(researcher|diagnostician|validator|risk_auditor|implementer)-v1$"
+        }
+      }
+    },
+    "smartPlanParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodes"],
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {"$ref": "#/$defs/planNodeInput"}
+        }
+      }
+    },
+    "planNodeInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clientNodeId", "dependencyIds", "routingInput"],
+      "properties": {
+        "clientNodeId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{2,63}$"
+        },
+        "dependencyIds": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 64,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{2,63}$"
+          }
+        },
+        "routingInput": {"$ref": "#/$defs/smartPlanRoutingInput"}
+      }
+    },
+    "routeStartParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["routeId", "nodeId", "activationGate"],
+      "properties": {
+        "routeId": {"type": "string", "pattern": "^route2_[0-9a-f]{32}$"},
+        "nodeId": {"type": "string", "pattern": "^node2_[0-9a-f]{32}$"},
+        "activationGate": {"$ref": "controller-protocol-v2.schema.json#/$defs/activationGate"}
+      }
+    },
+    "smartWaitParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startRequestId", "cursor", "pageSize", "waitDeadlineAt"],
+      "properties": {
+        "startRequestId": {"type": "string", "pattern": "^sr2_[0-9a-f]{32}$"},
+        "cursor": {
+          "oneOf": [
+            {"type": "string", "pattern": "^cur2_[0-9a-f]{32}$"},
+            {"type": "null"}
+          ]
+        },
+        "pageSize": {"type": "integer", "minimum": 1, "maximum": 100},
+        "waitDeadlineAt": {"type": "string", "format": "date-time"}
+      }
+    },
+    "smartCancelParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startRequestId", "reasonCode"],
+      "properties": {
+        "startRequestId": {"type": "string", "pattern": "^sr2_[0-9a-f]{32}$"},
+        "reasonCode": {"enum": ["USER_REQUESTED", "TURN_ENDED", "ROUTE_SUPERSEDED"]}
+      }
+    },
+    "issueTurnBindingRequest": {
+      "$ref": "#/$defs/requestBase",
+      "allOf": [{"$ref": "#/$defs/bindingIssueFence"}],
+      "properties": {
+        "method": {"const": "issue_turn_binding"},
+        "params": {"$ref": "#/$defs/issueTurnBindingParams"}
+      }
+    },
+    "smartPlanRequest": {
+      "$ref": "#/$defs/requestBase",
+      "allOf": [{"$ref": "#/$defs/planFence"}],
+      "properties": {
+        "method": {"const": "smart_plan"},
+        "params": {"$ref": "#/$defs/smartPlanParams"}
+      }
+    },
+    "routeStartRequest": {
+      "$ref": "#/$defs/requestBase",
+      "allOf": [{"$ref": "#/$defs/routeMutationFence"}],
+      "properties": {
+        "method": {"const": "route_start"},
+        "params": {"$ref": "#/$defs/routeStartParams"}
+      }
+    },
+    "smartWaitRequest": {
+      "$ref": "#/$defs/requestBase",
+      "allOf": [{"$ref": "#/$defs/routeWaitFence"}],
+      "properties": {
+        "method": {"const": "smart_wait"},
+        "params": {"$ref": "#/$defs/smartWaitParams"}
+      }
+    },
+    "smartCancelRequest": {
+      "$ref": "#/$defs/requestBase",
+      "allOf": [{"$ref": "#/$defs/routeMutationFence"}],
+      "properties": {
+        "method": {"const": "smart_cancel"},
+        "params": {"$ref": "#/$defs/smartCancelParams"}
+      }
+    },
+    "sqliteTransition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table", "entityId", "beforeState", "afterState"],
+      "properties": {
+        "table": {"enum": ["turn_bindings", "routes", "start_requests", "account_evidence_jobs"]},
+        "entityId": {"type": "string", "minLength": 1, "maxLength": 128},
+        "beforeState": {"type": ["string", "null"], "maxLength": 64},
+        "afterState": {"type": ["string", "null"], "maxLength": 64}
+      }
+    },
+    "resultLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resultKind", "resultId", "resultFingerprint"],
+      "properties": {
+        "resultKind": {"enum": ["TURN_BINDING", "ROUTE_PLAN", "START_REQUEST", "WAIT_PAGE", "CANCELLATION", "ORDINARY_DECISION", "PROBLEM"]},
+        "resultId": {"type": "string", "minLength": 1, "maxLength": 128},
+        "resultFingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "sqliteEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "transactionMode", "transitions", "completedAt", "result"],
+      "properties": {
+        "operation": {"enum": ["TRANSITION", "READ"]},
+        "transactionMode": {"enum": ["BEGIN_IMMEDIATE", "READ_ONLY"]},
+        "transitions": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {"$ref": "#/$defs/sqliteTransition"}
+        },
+        "completedAt": {"type": "string", "format": "date-time"},
+        "result": {"$ref": "#/$defs/resultLink"}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "operation": {"const": "TRANSITION"},
+            "transactionMode": {"const": "BEGIN_IMMEDIATE"},
+            "transitions": {"minItems": 1}
+          }
+        },
+        {
+          "properties": {
+            "operation": {"const": "READ"},
+            "transactionMode": {"const": "READ_ONLY"},
+            "transitions": {"maxItems": 0}
+          }
+        }
+      ]
+    },
+    "modelPair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "reasoningEffort"],
+      "properties": {
+        "model": {"type": "string", "minLength": 1, "maxLength": 128},
+        "reasoningEffort": {"type": "string", "minLength": 1, "maxLength": 32}
+      }
+    },
+    "nodeDecision": {
+      "type": "object",
+      "$comment": "Для DELEGATE ручной валидатор требует score = q + p + v + o.",
+      "additionalProperties": false,
+      "required": [
+        "clientNodeId",
+        "nodeId",
+        "dependencyNodeIds",
+        "disposition",
+        "selectedPair",
+        "score",
+        "factors"
+      ],
+      "properties": {
+        "clientNodeId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{2,63}$"
+        },
+        "nodeId": {"type": "string", "pattern": "^node2_[0-9a-f]{32}$"},
+        "dependencyNodeIds": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^node2_[0-9a-f]{32}$"}
+        },
+        "disposition": {"enum": ["DIRECT", "DELEGATE", "CLARIFY"]},
+        "selectedPair": {
+          "oneOf": [
+            {"$ref": "#/$defs/modelPair"},
+            {"type": "null"}
+          ]
+        },
+        "score": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 8
+        },
+        "factors": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["q", "p", "v", "o"],
+              "properties": {
+                "q": {"type": "integer", "minimum": 0, "maximum": 2},
+                "p": {"type": "integer", "minimum": 0, "maximum": 2},
+                "v": {"type": "integer", "minimum": 0, "maximum": 2},
+                "o": {"type": "integer", "minimum": 0, "maximum": 2}
+              }
+            },
+            {"type": "null"}
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"disposition": {"const": "DELEGATE"}},
+            "required": ["disposition"]
+          },
+          "then": {
+            "properties": {
+              "selectedPair": {"$ref": "#/$defs/modelPair"},
+              "score": {"type": "integer"},
+              "factors": {"type": "object"}
+            }
+          },
+          "else": {
+            "properties": {
+              "selectedPair": {"type": "null"},
+              "score": {"type": "null"},
+              "factors": {"type": "null"}
+            }
+          }
+        }
+      ]
+    },
+    "evidenceJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidenceJobId", "state", "owner", "queuePosition", "deadlineAt", "stage"],
+      "properties": {
+        "evidenceJobId": {"type": "string", "pattern": "^aej2_[0-9a-f]{32}$"},
+        "state": {"enum": ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCEL_REQUESTED", "CANCELLED"]},
+        "owner": {"$ref": "#/$defs/owner"},
+        "queuePosition": {"type": ["integer", "null"], "minimum": 1, "maximum": 32},
+        "deadlineAt": {"type": "string", "format": "date-time"},
+        "stage": {"enum": [null, "requirements-a", "catalog-a", "requirements-b", "catalog-b", "requirements-c"]}
+      },
+      "oneOf": [
+        {"properties": {"state": {"const": "QUEUED"}, "queuePosition": {"type": "integer", "minimum": 1, "maximum": 32}, "stage": {"type": "null"}}},
+        {"properties": {"state": {"enum": ["RUNNING", "CANCEL_REQUESTED"]}, "queuePosition": {"type": "null"}, "stage": {"enum": ["requirements-a", "catalog-a", "requirements-b", "catalog-b", "requirements-c"]}}},
+        {"properties": {"state": {"enum": ["SUCCEEDED", "FAILED", "CANCELLED"]}, "queuePosition": {"type": "null"}}}
+      ]
+    },
+    "issueTurnBindingPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "turnBinding", "effect"],
+      "properties": {
+        "status": {"const": "ISSUED"},
+        "turnBinding": {"$ref": "#/$defs/turnBinding"},
+        "effect": {"$ref": "#/$defs/sqliteEffect"}
+      }
+    },
+    "smartPlanPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "routeId", "disposition", "nodeDecisions", "clarification", "planFingerprint", "effect"],
+      "properties": {
+        "status": {"const": "PLANNED"},
+        "routeId": {"type": "string", "pattern": "^route2_[0-9a-f]{32}$"},
+        "disposition": {"enum": ["DIRECT", "DELEGATE", "CLARIFY"]},
+        "nodeDecisions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/nodeDecision"}
+        },
+        "clarification": {"type": ["string", "null"], "maxLength": 2048},
+        "planFingerprint": {"$ref": "#/$defs/sha256"},
+        "effect": {"$ref": "#/$defs/sqliteEffect"}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "disposition": {"const": "DIRECT"},
+            "clarification": {"type": "null"},
+            "nodeDecisions": {
+              "contains": {
+                "properties": {"disposition": {"const": "DIRECT"}},
+                "required": ["disposition"]
+              },
+              "minContains": 1
+            }
+          }
+        },
+        {
+          "properties": {
+            "disposition": {"const": "DELEGATE"},
+            "clarification": {"type": "null"},
+            "nodeDecisions": {
+              "items": {
+                "properties": {"disposition": {"const": "DELEGATE"}},
+                "required": ["disposition"]
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "disposition": {"const": "CLARIFY"},
+            "clarification": {"type": "string", "minLength": 1, "maxLength": 2048},
+            "nodeDecisions": {
+              "contains": {
+                "properties": {"disposition": {"const": "CLARIFY"}},
+                "required": ["disposition"]
+              },
+              "minContains": 1
+            }
+          }
+        }
+      ]
+    },
+    "routeStartPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "routeId", "nodeId", "startRequestId", "evidenceJob", "admissionId", "effect"],
+      "properties": {
+        "status": {"const": "ATTESTING"},
+        "routeId": {"type": "string", "pattern": "^route2_[0-9a-f]{32}$"},
+        "nodeId": {"type": "string", "pattern": "^node2_[0-9a-f]{32}$"},
+        "startRequestId": {"type": "string", "pattern": "^sr2_[0-9a-f]{32}$"},
+        "evidenceJob": {"$ref": "#/$defs/evidenceJob", "properties": {"state": {"const": "QUEUED"}}},
+        "admissionId": {"type": "null"},
+        "effect": {"$ref": "#/$defs/sqliteEffect"}
+      }
+    },
+    "waitEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "eventAt", "kind", "startState", "evidenceJobId", "admissionId", "attestation", "problem"],
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "eventAt": {"type": "string", "format": "date-time"},
+        "kind": {
+          "enum": [
+            "EVIDENCE_QUEUED",
+            "EVIDENCE_RUNNING",
+            "EVIDENCE_PROGRESS",
+            "EVIDENCE_SUCCEEDED",
+            "EVIDENCE_FAILED",
+            "CANCEL_REQUESTED",
+            "CANCELLED",
+            "ADMITTED",
+            "CHILD_STARTED",
+            "CHILD_ATTESTED",
+            "CHILD_SUCCEEDED",
+            "CHILD_FAILED",
+            "CHILD_CANCELLED",
+            "CHILD_QUARANTINED",
+            "CHILD_FAILED_BEFORE_START",
+            "ROUTE_COMPLETED",
+            "ROUTE_STALE"
+          ]
+        },
+        "startState": {"enum": ["ATTESTING", "READY", "STARTED", "SUCCEEDED", "QUARANTINED", "STALE", "FAILED", "CANCELLED"]},
+        "evidenceJobId": {
+          "oneOf": [
+            {"type": "string", "pattern": "^aej2_[0-9a-f]{32}$"},
+            {"type": "null"}
+          ]
+        },
+        "admissionId": {
+          "oneOf": [
+            {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"},
+            {"type": "null"}
+          ]
+        },
+        "attestation": {
+          "oneOf": [
+            {"$ref": "child-attestation-v2.schema.json"},
+            {"type": "null"}
+          ]
+        },
+        "problem": {
+          "oneOf": [
+            {"$ref": "#/$defs/problem"},
+            {"type": "null"}
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"kind": {"const": "CHILD_ATTESTED"}},
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "startState": {"const": "STARTED"},
+              "attestation": {
+                "$ref": "child-attestation-v2.schema.json",
+                "properties": {"disposition": {"const": "MATCH"}}
+              },
+              "problem": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"kind": {"const": "CHILD_FAILED_BEFORE_START"}},
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "startState": {"const": "FAILED"},
+              "attestation": {
+                "oneOf": [
+                  {"type": "null"},
+                  {
+                    "$ref": "child-attestation-v2.schema.json",
+                    "properties": {
+                      "disposition": {"enum": ["STALE", "UNAVAILABLE"]}
+                    }
+                  }
+                ]
+              },
+              "problem": {"$ref": "#/$defs/problem"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"kind": {"const": "ROUTE_COMPLETED"}},
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "startState": {"enum": ["SUCCEEDED", "FAILED", "CANCELLED", "QUARANTINED", "STALE"]},
+              "attestation": {"type": "null"}
+            }
+          }
+        }
+      ]
+    },
+    "waitPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cursor", "nextCursor", "items"],
+      "properties": {
+        "cursor": {
+          "oneOf": [
+            {"type": "string", "pattern": "^cur2_[0-9a-f]{32}$"},
+            {"type": "null"}
+          ]
+        },
+        "nextCursor": {
+          "oneOf": [
+            {"type": "string", "pattern": "^cur2_[0-9a-f]{32}$"},
+            {"type": "null"}
+          ]
+        },
+        "items": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/waitEvent"}}
+      }
+    },
+    "terminalResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attemptId", "state", "resultFingerprint", "resultBytes", "inlineResult", "resultTruncated", "errorCode"],
+      "properties": {
+        "attemptId": {"type": "string", "pattern": "^att2_[0-9a-f]{32}$"},
+        "state": {"enum": ["SUCCEEDED", "FAILED", "CANCELLED", "QUARANTINED"]},
+        "resultFingerprint": {
+          "oneOf": [
+            {"$ref": "#/$defs/sha256"},
+            {"type": "null"}
+          ]
+        },
+        "resultBytes": {"type": "integer", "minimum": 0, "maximum": 67108864},
+        "inlineResult": {"type": "object"},
+        "resultTruncated": {"type": "boolean"},
+        "errorCode": {
+          "oneOf": [
+            {"type": "string", "minLength": 1, "maxLength": 256},
+            {"type": "null"}
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"state": {"const": "SUCCEEDED"}}, "required": ["state"]},
+          "then": {"properties": {"errorCode": {"type": "null"}}},
+          "else": {"properties": {"errorCode": {"type": "string", "minLength": 1, "maxLength": 256}}}
+        }
+      ]
+    },
+    "smartWaitPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startRequestId", "state", "evidenceJobState", "admissionId", "terminal", "terminalResult", "page", "effect"],
+      "properties": {
+        "startRequestId": {"type": "string", "pattern": "^sr2_[0-9a-f]{32}$"},
+        "state": {"enum": ["ATTESTING", "READY", "STARTED", "SUCCEEDED", "QUARANTINED", "STALE", "FAILED", "CANCELLED"]},
+        "evidenceJobState": {"enum": ["QUEUED", "RUNNING", "SUCCEEDED", "FAILED", "CANCEL_REQUESTED", "CANCELLED"]},
+        "admissionId": {
+          "oneOf": [
+            {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"},
+            {"type": "null"}
+          ]
+        },
+        "terminal": {"type": "boolean"},
+        "terminalResult": {
+          "oneOf": [
+            {"$ref": "#/$defs/terminalResult"},
+            {"type": "null"}
+          ]
+        },
+        "page": {"$ref": "#/$defs/waitPage"},
+        "effect": {"$ref": "#/$defs/sqliteEffect"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"terminal": {"const": true}}, "required": ["terminal"]},
+          "then": {"properties": {"state": {"enum": ["SUCCEEDED", "QUARANTINED", "STALE", "FAILED", "CANCELLED"]}}},
+          "else": {"properties": {"state": {"enum": ["ATTESTING", "READY", "STARTED"]}, "terminalResult": {"type": "null"}}}
+        },
+        {"if": {"properties": {"state": {"enum": ["ATTESTING", "READY"]}}, "required": ["state"]}, "then": {"properties": {"admissionId": {"type": "null"}}}},
+        {"if": {"properties": {"state": {"const": "STARTED"}}, "required": ["state"]}, "then": {"properties": {"admissionId": {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"}, "evidenceJobState": {"const": "SUCCEEDED"}, "terminal": {"const": false}, "terminalResult": {"type": "null"}}}},
+        {"if": {"properties": {"state": {"const": "SUCCEEDED"}}, "required": ["state"]}, "then": {"properties": {"admissionId": {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"}, "evidenceJobState": {"const": "SUCCEEDED"}, "terminalResult": {"$ref": "#/$defs/terminalResult", "properties": {"state": {"const": "SUCCEEDED"}}}}}},
+        {"if": {"properties": {"state": {"const": "QUARANTINED"}}, "required": ["state"]}, "then": {"properties": {"admissionId": {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"}, "evidenceJobState": {"const": "SUCCEEDED"}, "terminalResult": {"$ref": "#/$defs/terminalResult", "properties": {"state": {"const": "QUARANTINED"}}}}}},
+        {"if": {"properties": {"state": {"const": "FAILED"}}, "required": ["state"]}, "then": {"properties": {"evidenceJobState": {"enum": ["SUCCEEDED", "FAILED"]}}}},
+        {"if": {"properties": {"state": {"const": "CANCELLED"}}, "required": ["state"]}, "then": {"properties": {"evidenceJobState": {"enum": ["SUCCEEDED", "CANCELLED"]}}}}
+      ]
+    },
+    "smartCancelPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "startRequestId", "state", "terminal", "idempotencyKey", "idempotencyStatus", "effect"],
+      "properties": {
+        "status": {"enum": ["CANCEL_REQUESTED", "CANCELLED", "ALREADY_TERMINAL"]},
+        "startRequestId": {"type": "string", "pattern": "^sr2_[0-9a-f]{32}$"},
+        "state": {"enum": ["ATTESTING", "READY", "STALE", "FAILED", "CANCELLED"]},
+        "terminal": {"type": "boolean"},
+        "idempotencyKey": {"type": "string", "pattern": "^idem2_[0-9a-f]{32}$"},
+        "idempotencyStatus": {"enum": ["COMMITTED", "REPLAYED"]},
+        "effect": {"$ref": "#/$defs/sqliteEffect"}
+      },
+      "oneOf": [
+        {"properties": {"status": {"const": "CANCEL_REQUESTED"}, "state": {"const": "ATTESTING"}, "terminal": {"const": false}}},
+        {"properties": {"status": {"const": "CANCELLED"}, "state": {"const": "CANCELLED"}, "terminal": {"const": true}}},
+        {"properties": {"status": {"const": "ALREADY_TERMINAL"}, "state": {"enum": ["STALE", "FAILED", "CANCELLED"]}, "terminal": {"const": true}}}
+      ]
+    },
+    "responseBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messageType",
+        "protocolVersion",
+        "release",
+        "requestId",
+        "owner",
+        "method",
+        "responseKind",
+        "requestFingerprint",
+        "payload",
+        "responseFingerprint",
+        "extensions"
+      ],
+      "properties": {
+        "messageType": {"const": "response"},
+        "protocolVersion": {"const": 2},
+        "release": {"const": "0.2.0"},
+        "requestId": {"type": "string", "pattern": "^strq2_[0-9a-f]{32}$"},
+        "owner": {"$ref": "#/$defs/owner"},
+        "method": {"$ref": "#/$defs/method"},
+        "responseKind": {"enum": ["SUCCESS", "ORDINARY", "STALE", "UNAVAILABLE", "ERROR"]},
+        "requestFingerprint": {"$ref": "#/$defs/sha256"},
+        "payload": {},
+        "responseFingerprint": {"$ref": "#/$defs/sha256"},
+        "extensions": {"type": "object", "maxProperties": 32}
+      }
+    },
+    "successResponse": {
+      "$ref": "#/$defs/responseBase",
+      "properties": {"responseKind": {"const": "SUCCESS"}}
+    },
+    "issueTurnBindingResponse": {
+      "$ref": "#/$defs/successResponse",
+      "properties": {
+        "method": {"const": "issue_turn_binding"},
+        "payload": {"$ref": "#/$defs/issueTurnBindingPayload"}
+      }
+    },
+    "smartPlanResponse": {
+      "$ref": "#/$defs/successResponse",
+      "properties": {
+        "method": {"const": "smart_plan"},
+        "payload": {"$ref": "#/$defs/smartPlanPayload"}
+      }
+    },
+    "routeStartResponse": {
+      "$ref": "#/$defs/successResponse",
+      "properties": {
+        "method": {"const": "route_start"},
+        "payload": {"$ref": "#/$defs/routeStartPayload"}
+      }
+    },
+    "smartWaitResponse": {
+      "$ref": "#/$defs/successResponse",
+      "properties": {
+        "method": {"const": "smart_wait"},
+        "payload": {"$ref": "#/$defs/smartWaitPayload"}
+      }
+    },
+    "smartCancelResponse": {
+      "$ref": "#/$defs/successResponse",
+      "properties": {
+        "method": {"const": "smart_cancel"},
+        "payload": {"$ref": "#/$defs/smartCancelPayload"}
+      }
+    },
+    "ordinaryPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reasonCode", "ordinaryCommand", "preserveUserRequest", "message", "effect"],
+      "properties": {
+        "status": {"const": "ORDINARY"},
+        "reasonCode": {"enum": ["SMART_DISABLED", "DIRECT_SELECTED", "CLARIFICATION_REQUIRED"]},
+        "ordinaryCommand": {"const": "codex"},
+        "preserveUserRequest": {"const": true},
+        "message": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "effect": {"$ref": "#/$defs/sqliteEffect"}
+      }
+    },
+    "problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "code", "message", "retryable"],
+      "properties": {
+        "category": {"enum": ["STALE", "UNAVAILABLE", "INVALID", "CONFLICT", "INTERNAL"]},
+        "code": {
+          "enum": [
+            "TURN_BINDING_EXPIRED",
+            "TURN_BINDING_OWNERSHIP_MISMATCH",
+            "ROUTE_STALE",
+            "ACCOUNT_CONTEXT_CHANGED",
+            "CHILD_ATTESTATION_STALE",
+            "ADAPTIVE_ACTIVATION_UNCOMMITTED",
+            "ACCOUNT_EVIDENCE_UNAVAILABLE",
+            "ACCOUNT_EVIDENCE_QUEUE_FULL",
+            "ROUTING_PAIR_UNAVAILABLE",
+            "CONTROLLER_UNAVAILABLE",
+            "REQUEST_DEADLINE_EXCEEDED",
+            "INVALID_REQUEST",
+            "IDEMPOTENCY_CONFLICT",
+            "CURSOR_INVALID",
+            "ROUTE_OWNERSHIP_MISMATCH",
+            "INTERNAL_ERROR"
+          ]
+        },
+        "message": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "retryable": {"type": "boolean"}
+      },
+      "oneOf": [
+        {"properties": {"category": {"const": "STALE"}, "code": {"enum": ["TURN_BINDING_EXPIRED", "ROUTE_STALE", "ACCOUNT_CONTEXT_CHANGED", "CHILD_ATTESTATION_STALE"]}}},
+        {"properties": {"category": {"const": "UNAVAILABLE"}, "code": {"enum": ["ADAPTIVE_ACTIVATION_UNCOMMITTED", "ACCOUNT_EVIDENCE_UNAVAILABLE", "ACCOUNT_EVIDENCE_QUEUE_FULL", "ROUTING_PAIR_UNAVAILABLE", "CONTROLLER_UNAVAILABLE", "REQUEST_DEADLINE_EXCEEDED"]}}},
+        {"properties": {"category": {"const": "INVALID"}, "code": {"enum": ["TURN_BINDING_OWNERSHIP_MISMATCH", "INVALID_REQUEST", "CURSOR_INVALID", "ROUTE_OWNERSHIP_MISMATCH"]}}},
+        {"properties": {"category": {"const": "CONFLICT"}, "code": {"const": "IDEMPOTENCY_CONFLICT"}}},
+        {"properties": {"category": {"const": "INTERNAL"}, "code": {"const": "INTERNAL_ERROR"}}}
+      ]
+    },
+    "problemPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "problem", "effect"],
+      "properties": {
+        "status": {"enum": ["STALE", "UNAVAILABLE", "ERROR"]},
+        "problem": {"$ref": "#/$defs/problem"},
+        "effect": {"$ref": "#/$defs/sqliteEffect"}
+      }
+    },
+    "ordinaryResponse": {
+      "$ref": "#/$defs/responseBase",
+      "properties": {
+        "method": {"enum": ["smart_plan", "route_start"]},
+        "responseKind": {"const": "ORDINARY"},
+        "payload": {"$ref": "#/$defs/ordinaryPayload"}
+      }
+    },
+    "staleResponse": {
+      "$ref": "#/$defs/responseBase",
+      "properties": {
+        "method": {"enum": ["smart_plan", "route_start", "smart_wait", "smart_cancel"]},
+        "responseKind": {"const": "STALE"},
+        "payload": {
+          "$ref": "#/$defs/problemPayload",
+          "properties": {
+            "status": {"const": "STALE"},
+            "problem": {"properties": {"category": {"const": "STALE"}}}
+          }
+        }
+      }
+    },
+    "unavailableResponse": {
+      "$ref": "#/$defs/responseBase",
+      "properties": {
+        "responseKind": {"const": "UNAVAILABLE"},
+        "payload": {
+          "$ref": "#/$defs/problemPayload",
+          "properties": {
+            "status": {"const": "UNAVAILABLE"},
+            "problem": {"properties": {"category": {"const": "UNAVAILABLE"}}}
+          }
+        }
+      }
+    },
+    "errorResponse": {
+      "$ref": "#/$defs/responseBase",
+      "properties": {
+        "responseKind": {"const": "ERROR"},
+        "payload": {
+          "$ref": "#/$defs/problemPayload",
+          "properties": {
+            "status": {"const": "ERROR"},
+            "problem": {"properties": {"category": {"enum": ["INVALID", "CONFLICT", "INTERNAL"]}}}
+          }
+        }
+      }
+    }
+  }
+}

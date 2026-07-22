@@ -64,8 +64,6 @@
               "disposition": "CONTINUE_COMMON_MACHINE",
               "orderedSteps": [
                 "gate_close",
-                "stage",
-                "verify_staged",
                 "maintenance_begin",
                 "wait_runtime_quiescent",
                 "maintenance_strengthen",
@@ -80,9 +78,7 @@
               "processLockSocketPredicate": "UNOWNED_OR_MISMATCHED",
               "candidatePredicate": "UNKNOWN",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             }
           }
         },
@@ -105,9 +101,7 @@
               "processLockSocketPredicate": "PROVEN_PROCESS_LOCK_SOCKET_ABSENT",
               "candidatePredicate": "ABSENT",
               "disposition": "CONTINUE_COMMON_MACHINE",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "fresh-staged": {
               "sourcePredicate": "FRESH_ABORT",
@@ -156,9 +150,7 @@
               "processLockSocketPredicate": "UNKNOWN",
               "candidatePredicate": "UNKNOWN",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "standard-gate-closed-before-stage": {
               "sourcePredicate": "STANDARD_ABORT",
@@ -168,9 +160,7 @@
               "processLockSocketPredicate": "MATCHED_OLD_LIVE",
               "candidatePredicate": "ABSENT",
               "disposition": "CONTINUE_COMMON_MACHINE",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "standard-old-live-before-maintenance": {
               "sourcePredicate": "STANDARD_ABORT",
@@ -269,9 +259,7 @@
               "processLockSocketPredicate": "UNKNOWN",
               "candidatePredicate": "UNKNOWN",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "rollback-gate-closed": {
               "sourcePredicate": "ROLLBACK_ABORT",
@@ -281,9 +269,7 @@
               "processLockSocketPredicate": "MATCHED_OLD_LIVE",
               "candidatePredicate": "ABSENT",
               "disposition": "CONTINUE_COMMON_MACHINE",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "rollback-maintenance": {
               "sourcePredicate": "ROLLBACK_ABORT",
@@ -349,9 +335,7 @@
               "processLockSocketPredicate": "UNKNOWN",
               "candidatePredicate": "UNKNOWN",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "uninstall-active-gate-closed": {
               "sourcePredicate": "UNINSTALL_ABORT",
@@ -361,9 +345,7 @@
               "processLockSocketPredicate": "MATCHED_OLD_LIVE",
               "candidatePredicate": "ABSENT",
               "disposition": "CONTINUE_COMMON_MACHINE",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "uninstall-active-maintenance": {
               "sourcePredicate": "UNINSTALL_ABORT",
@@ -414,9 +396,7 @@
               "processLockSocketPredicate": "PROVEN_PROCESS_LOCK_SOCKET_ABSENT",
               "candidatePredicate": "ABSENT",
               "disposition": "CONTINUE_COMMON_MACHINE",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "uninstall-ambiguous": {
               "sourcePredicate": "UNINSTALL_ABORT",
@@ -426,9 +406,7 @@
               "processLockSocketPredicate": "UNKNOWN",
               "candidatePredicate": "UNKNOWN",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "legacy-gate-only": {
               "sourcePredicate": "LEGACY_ABORT",
@@ -438,9 +416,7 @@
               "processLockSocketPredicate": "MATCHED_LEGACY_PROCESS_SOCKET",
               "candidatePredicate": "ABSENT",
               "disposition": "CONTINUE_COMMON_MACHINE",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "legacy-gateway-fenced": {
               "sourcePredicate": "LEGACY_ABORT",
@@ -553,9 +529,7 @@
               "processLockSocketPredicate": "UNKNOWN",
               "candidatePredicate": "UNKNOWN",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             }
           }
         },
@@ -602,9 +576,7 @@
               "processLockSocketPredicate": "UNOWNED_OR_MISMATCHED",
               "candidatePredicate": "UNKNOWN",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             }
           }
         },
@@ -617,11 +589,8 @@
             "uninstall_marketplace_remove",
             "uninstall_launchers_restore",
             "uninstall_activation_link_remove",
-            "uninstall_database_remove",
             "uninstall_activation_remove",
             "uninstall_manifest_remove",
-            "uninstall_fallback_remove",
-            "uninstall_admin_remove",
             "terminal_journal_freeze",
             "uninstall_receipt_publish",
             "uninstall_tombstone_publish",
@@ -664,9 +633,7 @@
               "processLockSocketPredicate": "UNOWNED_OR_MISMATCHED",
               "candidatePredicate": "UNKNOWN",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             }
           }
         },
@@ -790,9 +757,7 @@
               "planPredicate": "FROZEN_SELECTED_PLAN_FIRST_INCOMPLETE_EXACT",
               "durablePrerequisitePredicate": "MISMATCHED_PROCESS_LOCK_SOCKET_OR_CANDIDATE",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "nonterminal-journal-present-receipt-present": {
               "phasePredicate": "NOT_TERMINAL_FROZEN",
@@ -804,9 +769,7 @@
               "planPredicate": "FROZEN_SELECTED_PLAN_FIRST_INCOMPLETE_EXACT",
               "durablePrerequisitePredicate": "NOT_APPLICABLE",
               "disposition": "INVALID_RECEIPT_BEFORE_FREEZE",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "terminal-standard-journal-present-receipt-absent": {
               "phasePredicate": "TERMINAL_FROZEN",
@@ -849,9 +812,7 @@
               "planPredicate": "TERMINAL_FROZEN_INTENT_EXACT",
               "durablePrerequisitePredicate": "TERMINAL_INTENT_EXACT",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "journal-absent-unsynced-standard-receipt-present": {
               "phasePredicate": "JOURNAL_ABSENT_UNSYNCED",
@@ -877,9 +838,7 @@
               "planPredicate": "NOT_APPLICABLE",
               "durablePrerequisitePredicate": "NOT_APPLICABLE",
               "disposition": "COMPLETE",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "journal-absent-standard-receipt-mismatched": {
               "phasePredicate": "JOURNAL_ABSENT",
@@ -891,9 +850,7 @@
               "planPredicate": "NOT_APPLICABLE",
               "durablePrerequisitePredicate": "NOT_APPLICABLE",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "terminal-uninstall-journal-present-receipt-absent-tombstone-absent": {
               "phasePredicate": "TERMINAL_FROZEN",
@@ -946,9 +903,7 @@
               "planPredicate": "TERMINAL_FROZEN_INTENT_EXACT",
               "durablePrerequisitePredicate": "TERMINAL_INTENT_EXACT",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "terminal-uninstall-journal-present-receipt-absent-tombstone-unowned-or-corrupt": {
               "phasePredicate": "TERMINAL_FROZEN",
@@ -960,9 +915,7 @@
               "planPredicate": "TERMINAL_FROZEN_INTENT_EXACT",
               "durablePrerequisitePredicate": "TERMINAL_INTENT_EXACT",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "terminal-uninstall-journal-present-receipt-present-tombstone-absent": {
               "phasePredicate": "TERMINAL_FROZEN",
@@ -1028,9 +981,7 @@
               "planPredicate": "TERMINAL_FROZEN_INTENT_EXACT",
               "durablePrerequisitePredicate": "TERMINAL_INTENT_EXACT",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "terminal-uninstall-journal-present-receipt-mismatched": {
               "phasePredicate": "TERMINAL_FROZEN",
@@ -1042,9 +993,7 @@
               "planPredicate": "TERMINAL_FROZEN_INTENT_EXACT",
               "durablePrerequisitePredicate": "TERMINAL_INTENT_EXACT",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "journal-absent-unsynced-uninstall-receipt-present-tombstone-matched": {
               "phasePredicate": "JOURNAL_ABSENT_UNSYNCED",
@@ -1070,9 +1019,7 @@
               "planPredicate": "NOT_APPLICABLE",
               "durablePrerequisitePredicate": "NOT_APPLICABLE",
               "disposition": "COMPLETE_UNINSTALL",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "journal-absent-uninstall-receipt-present-tombstone-absent": {
               "phasePredicate": "JOURNAL_ABSENT",
@@ -1084,9 +1031,7 @@
               "planPredicate": "NOT_APPLICABLE",
               "durablePrerequisitePredicate": "NOT_APPLICABLE",
               "disposition": "INVALID_UNINSTALL_WITHOUT_TOMBSTONE",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "journal-absent-uninstall-receipt-present-tombstone-stale-prior-installation": {
               "phasePredicate": "JOURNAL_ABSENT",
@@ -1098,9 +1043,7 @@
               "planPredicate": "NOT_APPLICABLE",
               "durablePrerequisitePredicate": "NOT_APPLICABLE",
               "disposition": "INVALID_UNINSTALL_WITHOUT_CURRENT_TOMBSTONE",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "journal-absent-uninstall-receipt-present-tombstone-unowned-or-corrupt": {
               "phasePredicate": "JOURNAL_ABSENT",
@@ -1112,9 +1055,7 @@
               "planPredicate": "NOT_APPLICABLE",
               "durablePrerequisitePredicate": "NOT_APPLICABLE",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "journal-absent-uninstall-receipt-mismatched": {
               "phasePredicate": "JOURNAL_ABSENT",
@@ -1126,9 +1067,7 @@
               "planPredicate": "NOT_APPLICABLE",
               "durablePrerequisitePredicate": "NOT_APPLICABLE",
               "disposition": "RECOVERY_STATE_AMBIGUOUS",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             },
             "journal-absent-receipt-absent": {
               "phasePredicate": "JOURNAL_ABSENT",
@@ -1140,9 +1079,7 @@
               "planPredicate": "NOT_APPLICABLE",
               "durablePrerequisitePredicate": "NOT_APPLICABLE",
               "disposition": "INVALID_ABSENCE_WITHOUT_RECEIPT",
-              "orderedSteps": [
-
-              ]
+              "orderedSteps": []
             }
           }
         },
@@ -1465,6 +1402,165 @@
           "terminalStateFingerprint"
         ]
       },
+      "activationPreparationDefinition": {
+        "domain": "codex-smart/activation-preparation-definition/v2",
+        "projectionFields": [
+          "journalPath",
+          "receiptPath",
+          "lockPath",
+          "activationIntent",
+          "desiredSeed",
+          "snapshotFile",
+          "activationTreeLogical",
+          "activationFileLogical",
+          "databaseEmptyFileLogical"
+        ],
+        "excludedFields": []
+      },
+      "activationPreparationIntent": {
+        "domain": "codex-smart/activation-preparation-intent/v2",
+        "projectionFields": [
+          "sourceRoot",
+          "codexHome",
+          "codexBinary",
+          "stateHome",
+          "socketPath",
+          "controllerLockPath",
+          "installationId",
+          "operationId",
+          "databaseId",
+          "activationBindingNonce",
+          "activationId",
+          "activationFingerprint",
+          "controllerIdentity",
+          "compatibilityFingerprint",
+          "routingPolicyFingerprint",
+          "bundledCatalogFingerprint",
+          "schemaFingerprint",
+          "schemaArtifactSha256",
+          "activationDir",
+          "snapshotPath",
+          "databasePath",
+          "bundledCatalogPath",
+          "identity",
+          "activationDocument",
+          "sourceLocator",
+          "snapshotLocator",
+          "bundledCatalog",
+          "interfaceEvidence",
+          "completedAt"
+        ],
+        "excludedFields": [
+          "activationIntentFingerprint"
+        ]
+      },
+      "preparationLogicalObject": {
+        "domain": "codex-smart/preparation-logical-object/v2",
+        "projectionFields": [
+          "path",
+          "objectType",
+          "mode",
+          "contentSha256"
+        ],
+        "excludedFields": [
+          "logicalFingerprint"
+        ]
+      },
+      "activationPreparationStep": {
+        "domain": "codex-smart/activation-preparation-step/v2",
+        "projectionFields": [
+          "stepId",
+          "ordinal",
+          "kind",
+          "state",
+          "expectedLogical",
+          "observedPhysical",
+          "observedCompanions",
+          "intentAt",
+          "completedAt"
+        ],
+        "excludedFields": [
+          "stepFingerprint"
+        ]
+      },
+      "activationPreparationJournal": {
+        "domain": "codex-smart/activation-preparation-journal/v2",
+        "projectionFields": [
+          "schemaVersion",
+          "journalKind",
+          "installationId",
+          "operationId",
+          "phase",
+          "definitionFingerprint",
+          "definition",
+          "intentBoundary",
+          "steps",
+          "contentGeneration",
+          "createdAt",
+          "updatedAt",
+          "frozenAt",
+          "frozenJournalFingerprint",
+          "desired"
+        ],
+        "excludedFields": [
+          "journalFingerprint"
+        ]
+      },
+      "activationPreparationFrozenJournal": {
+        "domain": "codex-smart/activation-preparation-frozen-journal/v2",
+        "projectionFields": [
+          "schemaVersion",
+          "journalKind",
+          "installationId",
+          "operationId",
+          "phase",
+          "definitionFingerprint",
+          "definition",
+          "intentBoundary",
+          "steps",
+          "contentGeneration",
+          "createdAt",
+          "updatedAt",
+          "frozenAt",
+          "frozenJournalFingerprint",
+          "desired"
+        ],
+        "excludedFields": [
+          "journalFingerprint"
+        ]
+      },
+      "databaseBindingTarget": {
+        "domain": "codex-smart/database-binding-target/v2",
+        "projectionFields": [
+          "schemaId",
+          "schemaSha256",
+          "value"
+        ],
+        "excludedFields": [
+          "valueFingerprint"
+        ]
+      },
+      "activationPreparationReceipt": {
+        "domain": "codex-smart/activation-preparation-receipt/v2",
+        "projectionFields": [
+          "schemaVersion",
+          "receiptKind",
+          "installationId",
+          "operationId",
+          "activationIntent",
+          "snapshotFile",
+          "activationTree",
+          "activationFile",
+          "databaseEmptyFile",
+          "databaseBindingTarget",
+          "desired",
+          "frozenJournalFingerprint",
+          "completedAt"
+        ],
+        "excludedFields": [
+          "receiptFingerprint"
+        ]
+      },
       "activationCommitReceipt": {
         "domain": "codex-smart/activation-commit-receipt/v2",
         "projectionFields": [
@@ -1474,8 +1570,11 @@
           "operationId",
           "frozenJournalFingerprint",
           "manifest",
+          "manifestDocument",
+          "transitionLineage",
           "activation",
-          "database",
+          "databaseBinding",
+          "journalAbsenceTarget",
           "controllerIdentity",
           "completedStepIds",
           "completedAt"
@@ -1509,6 +1608,8 @@
           "installationId",
           "operationId",
           "frozenJournalFingerprint",
+          "dataRetentionMode",
+          "retainedData",
           "removedState",
           "restoredOriginalBackup",
           "absenceProof",
@@ -1650,6 +1751,26 @@
           "actionFingerprint"
         ]
       },
+      "lifecycleCommandResult": {
+        "domain": "codex-smart/command-result/v2",
+        "projectionFields": [
+          "schemaVersion",
+          "command",
+          "status",
+          "readiness",
+          "smokeInvocationId",
+          "changes",
+          "problems"
+        ],
+        "excludedFields": [
+          "operationId",
+          "attemptId",
+          "resultFingerprint",
+          "problems.message",
+          "problems.remediation",
+          "extensions"
+        ]
+      },
       "controllerRequest": {
         "domain": "codex-smart/controller-request/v2",
         "projectionFields": [
@@ -1706,6 +1827,26 @@
         "excludedFields": [
           "responseFingerprint",
           "extensions"
+        ]
+      },
+      "databaseBinding": {
+        "domain": "codex-smart/database-binding/v2",
+        "projectionFields": [
+          "schemaId",
+          "schemaSha256",
+          "value"
+        ],
+        "excludedFields": [
+          "valueFingerprint"
+        ]
+      },
+      "databasePredicates": {
+        "domain": "codex-smart/database-predicates/v2",
+        "projectionFields": [
+          "predicates"
+        ],
+        "excludedFields": [
+          "databasePredicatesFingerprint"
         ]
       }
     },
@@ -1857,37 +1998,54 @@
       "intentAt": "2026-07-18T00:00:00Z",
       "completedAt": "2026-07-18T00:00:01Z"
     },
-    "shutdownSocketCleanupStep": {
-      "stepId": "st2_cccccccccccccccccccccccccccccccc",
-      "ordinal": 7,
+    "controllerShutdownStep": {
+      "stepId": "st2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb1",
+      "ordinal": 6,
       "planId": "pl2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "planOrdinal": 7,
+      "planOrdinal": 6,
       "recordCarrier": "JOURNAL_MUTABLE",
-      "kind": "shutdown_socket_cleanup",
+      "kind": "controller_shutdown",
       "state": "COMPLETED",
-      "commandId": null,
+      "commandId": "cc2_33333333333333333333333333333333",
       "action": {
-        "actionKind": "socket-cleanup",
-        "method": "unlink-proven-orphan",
-        "proofSource": "CONTROLLER_SHUTDOWN_INTENT",
-        "proofSourceId": "cc2_33333333333333333333333333333333",
-        "proofSourceFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-        "socketPath": "/private/state/controller.sock",
-        "socketDevice": 1,
-        "socketInode": 30,
-        "socketOwnerUid": 501,
-        "socketOwnerGid": 20,
-        "socketMode": "0600",
-        "targetPid": 4000,
-        "targetStartMarker": "darwin:99:1",
-        "targetProcessGroupId": 4000,
-        "processExitProofFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-        "lockPath": "/private/state/controller.lock",
-        "exclusiveLockProofFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-        "durability": "UNLINKAT_FSYNC_PARENT"
+        "actionKind": "controller-command",
+        "method": "shutdown",
+        "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expectedControlEpoch": 10
       },
-      "actionFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "actionFingerprint": "9999999999999999999999999999999999999999999999999999999999999999",
       "before": {
+        "schemaId": "controller-state-v2",
+        "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "value": {
+          "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
+          "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "controllerStartId": "cs2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pid": 4000,
+          "processStartMarker": "darwin:99:1",
+          "processGroupId": 4000,
+          "controlEpoch": 10,
+          "state": "MAINTENANCE",
+          "maintenanceMode": "freeze",
+          "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "socket": {
+            "path": "/private/state/controller.sock",
+            "device": 1,
+            "inode": 30,
+            "ownerUid": 501,
+            "ownerGid": 20,
+            "mode": "0600"
+          },
+          "lockHeld": true,
+          "acceptingNewRoutes": false,
+          "quiescent": true
+        },
+        "valueFingerprint": "8888888888888888888888888888888888888888888888888888888888888888"
+      },
+      "observedAfter": {
         "schemaId": "shutdown-intent-v2",
         "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
         "value": {
@@ -1933,6 +2091,336 @@
           "status": "SHUTDOWN_COMMITTED_EXIT_AND_LOCK_PROVEN"
         },
         "valueFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "expectedAfter": {
+        "schemaId": "shutdown-intent-v2",
+        "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "value": {
+          "controllerAfter": {
+            "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
+            "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "controllerStartId": "cs2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "pid": 4000,
+            "processStartMarker": "darwin:99:1",
+            "processGroupId": 4000,
+            "controlEpoch": 11,
+            "state": "STOPPED",
+            "maintenanceMode": null,
+            "operationId": null,
+            "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "socket": null,
+            "lockHeld": false,
+            "acceptingNewRoutes": false,
+            "quiescent": true
+          },
+          "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "commandId": "cc2_33333333333333333333333333333333",
+          "requestFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "commandReceiptFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "previousControlEpoch": 10,
+          "newControlEpoch": 11,
+          "targetPid": 4000,
+          "targetStartMarker": "darwin:99:1",
+          "targetProcessGroupId": 4000,
+          "socket": {
+            "path": "/private/state/controller.sock",
+            "device": 1,
+            "inode": 30,
+            "ownerUid": 501,
+            "ownerGid": 20,
+            "mode": "0600"
+          },
+          "lockPath": "/private/state/controller.lock",
+          "processExitProofFingerprint": null,
+          "exclusiveLockProofFingerprint": null,
+          "status": "EXPECTED_SHUTDOWN_PROOF"
+        },
+        "valueFingerprint": "9999999999999999999999999999999999999999999999999999999999999999"
+      },
+      "intentAt": "2026-07-18T00:00:00Z",
+      "completedAt": "2026-07-18T00:00:01Z"
+    },
+    "controllerAcceptStep": {
+      "stepId": "st2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2",
+      "ordinal": 15,
+      "planId": "pl2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "planOrdinal": 15,
+      "recordCarrier": "JOURNAL_MUTABLE",
+      "kind": "controller_accept",
+      "state": "COMPLETED",
+      "commandId": "cc2_44444444444444444444444444444444",
+      "action": {
+        "actionKind": "controller-command",
+        "method": "controller_accept",
+        "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "expectedControlEpoch": 10
+      },
+      "actionFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "before": {
+        "schemaId": "controller-candidate-v2",
+        "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "value": {
+          "candidateId": "cand2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
+          "controllerStartId": "cs2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "argvFingerprint": "607a3359e4131219029f8f0fd054cedfacb2ffa18bb8cf363eccc0055aa871a3",
+          "snapshotFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "privateReadyChannelPath": "/private/state/candidate.ready",
+          "privateReadyChannel": null,
+          "readinessTokenHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "readinessWindowMs": 30000,
+          "processGroupPolicy": "NEW_PRIVATE_GROUP",
+          "pid": null,
+          "processStartMarker": null,
+          "processGroupId": null,
+          "registrationFingerprint": null,
+          "databaseLeaseProofFingerprint": null,
+          "databaseOpened": false,
+          "workingSocketPublished": false,
+          "acceptingNewRoutes": false,
+          "status": "EXPECTED_REGISTRATION",
+          "exitProofFingerprint": null
+        },
+        "valueFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "expectedAfter": {
+        "schemaId": "controller-state-v2",
+        "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "value": {
+          "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
+          "instanceId": null,
+          "controllerStartId": "cs2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pid": null,
+          "processStartMarker": null,
+          "processGroupId": null,
+          "controlEpoch": 11,
+          "state": "EXPECTED_MAINTENANCE",
+          "maintenanceMode": "freeze",
+          "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "socket": null,
+          "lockHeld": true,
+          "acceptingNewRoutes": false,
+          "quiescent": true
+        },
+        "valueFingerprint": "5555555555555555555555555555555555555555555555555555555555555555"
+      },
+      "observedAfter": {
+        "schemaId": "controller-state-v2",
+        "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "value": {
+          "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
+          "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "controllerStartId": "cs2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pid": 4100,
+          "processStartMarker": "darwin:100:1",
+          "processGroupId": 4100,
+          "controlEpoch": 11,
+          "state": "MAINTENANCE",
+          "maintenanceMode": "freeze",
+          "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "socket": {
+            "path": "/private/state/controller.sock",
+            "device": 1,
+            "inode": 33,
+            "ownerUid": 501,
+            "ownerGid": 20,
+            "mode": "0600"
+          },
+          "lockHeld": true,
+          "acceptingNewRoutes": false,
+          "quiescent": true
+        },
+        "valueFingerprint": "6666666666666666666666666666666666666666666666666666666666666666"
+      },
+      "intentAt": "2026-07-18T00:00:00Z",
+      "completedAt": "2026-07-18T00:00:01Z"
+    },
+    "manifestCommitStep": {
+      "stepId": "st2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb3",
+      "ordinal": 18,
+      "planId": "pl2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "planOrdinal": 18,
+      "recordCarrier": "JOURNAL_MUTABLE",
+      "kind": "manifest_commit",
+      "state": "COMPLETED",
+      "commandId": null,
+      "action": {
+        "actionKind": "file-mutation",
+        "method": "atomic-prepared-manifest-replace",
+        "sourcePath": "/private/codex/install-manifests/.prepared/op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.manifest.json",
+        "targetPath": "/private/codex/install-manifests/codex-smart-subagents-v2.json",
+        "durability": "FSYNC_FILE_AND_PARENT"
+      },
+      "actionFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "before": {
+        "schemaId": "absence-proof-v2",
+        "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "value": {
+          "proofId": "ap2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "entries": [
+            {
+              "path": "/private/codex/install-manifests/codex-smart-subagents-v2.json",
+              "basename": "codex-smart-subagents-v2.json",
+              "parentDevice": 1,
+              "parentInode": 21,
+              "absent": true
+            }
+          ],
+          "directorySyncCompleted": true,
+          "proofFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "valueFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "expectedAfter": {
+        "schemaId": "manifest-v2",
+        "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "value": {
+          "file": {
+            "path": "/private/codex/install-manifests/codex-smart-subagents-v2.json",
+            "device": 1,
+            "inode": 14,
+            "ownerUid": 501,
+            "ownerGid": 20,
+            "mode": "0600",
+            "linkCount": 1,
+            "size": 1000,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "schemaVersion": 2,
+          "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "release": "0.2.0",
+          "pluginId": "codex-smart-subagents",
+          "stateHome": "/private/state",
+          "activeActivationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "previousActivationId": null,
+          "lastCommittedOperation": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "sourceLocatorFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "artifactsFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "semanticFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "valueFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "observedAfter": {
+        "schemaId": "manifest-v2",
+        "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "value": {
+          "file": {
+            "path": "/private/codex/install-manifests/codex-smart-subagents-v2.json",
+            "device": 1,
+            "inode": 14,
+            "ownerUid": 501,
+            "ownerGid": 20,
+            "mode": "0600",
+            "linkCount": 1,
+            "size": 1000,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "schemaVersion": 2,
+          "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "release": "0.2.0",
+          "pluginId": "codex-smart-subagents",
+          "stateHome": "/private/state",
+          "activeActivationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "previousActivationId": null,
+          "lastCommittedOperation": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "sourceLocatorFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "artifactsFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "semanticFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "valueFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "intentAt": "2026-07-18T00:00:00Z",
+      "completedAt": "2026-07-18T00:00:01Z"
+    },
+    "shutdownSocketCleanupStep": {
+      "stepId": "st2_cccccccccccccccccccccccccccccccc",
+      "ordinal": 7,
+      "planId": "pl2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "planOrdinal": 7,
+      "recordCarrier": "JOURNAL_MUTABLE",
+      "kind": "shutdown_socket_cleanup",
+      "state": "COMPLETED",
+      "commandId": null,
+      "action": {
+        "actionKind": "socket-cleanup",
+        "method": "unlink-proven-orphan",
+        "proofSource": "CONTROLLER_SHUTDOWN_INTENT",
+        "proofSourceId": "cc2_33333333333333333333333333333333",
+        "socketPath": "/private/state/controller.sock",
+        "socketParentDevice": 1,
+        "socketParentInode": 31,
+        "socketDevice": 1,
+        "socketInode": 30,
+        "socketOwnerUid": 501,
+        "socketOwnerGid": 20,
+        "socketMode": "0600",
+        "targetPid": 4000,
+        "targetStartMarker": "darwin:99:1",
+        "targetProcessGroupId": 4000,
+        "lockPath": "/private/state/controller.lock",
+        "durability": "UNLINKAT_FSYNC_PARENT"
+      },
+      "actionFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "before": {
+        "schemaId": "shutdown-intent-v2",
+        "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "value": {
+          "controllerAfter": {
+            "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
+            "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "controllerStartId": "cs2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "pid": 4000,
+            "processStartMarker": "darwin:99:1",
+            "processGroupId": 4000,
+            "controlEpoch": 11,
+            "state": "STOPPED",
+            "maintenanceMode": null,
+            "operationId": null,
+            "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "socket": null,
+            "lockHeld": false,
+            "acceptingNewRoutes": false,
+            "quiescent": true
+          },
+          "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "commandId": "cc2_33333333333333333333333333333333",
+          "requestFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+          "commandReceiptFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "previousControlEpoch": 10,
+          "newControlEpoch": 11,
+          "targetPid": 4000,
+          "targetStartMarker": "darwin:99:1",
+          "targetProcessGroupId": 4000,
+          "socket": {
+            "path": "/private/state/controller.sock",
+            "device": 1,
+            "inode": 30,
+            "ownerUid": 501,
+            "ownerGid": 20,
+            "mode": "0600"
+          },
+          "lockPath": "/private/state/controller.lock",
+          "processExitProofFingerprint": null,
+          "exclusiveLockProofFingerprint": null,
+          "status": "EXPECTED_SHUTDOWN_PROOF"
+        },
+        "valueFingerprint": "9999999999999999999999999999999999999999999999999999999999999999"
       },
       "expectedAfter": {
         "schemaId": "absence-proof-v2",
@@ -2127,15 +2615,9 @@
       "phase": "DISCOVERED",
       "recoveryPolicy": "REVERSIBLE",
       "discoveryBefore": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -2144,28 +2626,16 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
       "fencedBefore": null,
       "desired": null,
-      "attempts": [
-
-      ],
+      "attempts": [],
       "steps": [
         {
           "stepId": "st2_10000000000000000000000000000000",
@@ -2238,9 +2708,8 @@
           "completedAt": "2026-07-18T00:00:01Z"
         }
       ],
-      "changes": [
-
-      ],
+      "changes": [],
+      "terminalDefinitionSnapshot": null,
       "terminalDeleteIntent": null,
       "createdAt": "2026-07-18T00:00:00Z",
       "updatedAt": "2026-07-18T00:00:00Z",
@@ -2285,9 +2754,7 @@
         "planDefinitionFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
       },
       "abortPlan": null,
-      "recoveryPlans": [
-
-      ]
+      "recoveryPlans": []
     },
     "migrationExitPendingJournal": {
       "schemaVersion": 2,
@@ -2298,15 +2765,9 @@
       "phase": "LEGACY_EXIT_PENDING",
       "recoveryPolicy": "FORWARD_ONLY",
       "discoveryBefore": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -2315,28 +2776,16 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
       "fencedBefore": null,
       "desired": null,
-      "attempts": [
-
-      ],
+      "attempts": [],
       "steps": [
         {
           "stepId": "st2_10000000000000000000000000000000",
@@ -3064,7 +3513,9 @@
                 "openIntents": 0,
                 "inflightLaunchPermits": 0,
                 "activeRuntimeArtifacts": 0,
-                "pendingCandidatePublications": 0
+                "pendingCandidatePublications": 0,
+                "activeEvidenceJobs": 0,
+                "queuedEvidenceJobs": 0
               },
               "quiescent": true
             },
@@ -3116,7 +3567,9 @@
                 "openIntents": 0,
                 "inflightLaunchPermits": 0,
                 "activeRuntimeArtifacts": 0,
-                "pendingCandidatePublications": 0
+                "pendingCandidatePublications": 0,
+                "activeEvidenceJobs": 0,
+                "queuedEvidenceJobs": 0
               },
               "quiescent": true
             },
@@ -3190,9 +3643,8 @@
           "completedAt": "2026-07-18T00:00:01Z"
         }
       ],
-      "changes": [
-
-      ],
+      "changes": [],
+      "terminalDefinitionSnapshot": null,
       "terminalDeleteIntent": null,
       "createdAt": "2026-07-18T00:00:00Z",
       "updatedAt": "2026-07-18T00:00:01Z",
@@ -3237,9 +3689,7 @@
         "planDefinitionFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
       },
       "abortPlan": null,
-      "recoveryPlans": [
-
-      ]
+      "recoveryPlans": []
     },
     "migrationFencedJournal": {
       "schemaVersion": 2,
@@ -3250,15 +3700,9 @@
       "phase": "FENCED",
       "recoveryPolicy": "FORWARD_ONLY",
       "discoveryBefore": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -3267,33 +3711,17 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
       "fencedBefore": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -3302,33 +3730,17 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
       "desired": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -3337,26 +3749,14 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
-      "attempts": [
-
-      ],
+      "attempts": [],
       "steps": [
         {
           "stepId": "st2_10000000000000000000000000000000",
@@ -4084,7 +4484,9 @@
                 "openIntents": 0,
                 "inflightLaunchPermits": 0,
                 "activeRuntimeArtifacts": 0,
-                "pendingCandidatePublications": 0
+                "pendingCandidatePublications": 0,
+                "activeEvidenceJobs": 0,
+                "queuedEvidenceJobs": 0
               },
               "quiescent": true
             },
@@ -4136,7 +4538,9 @@
                 "openIntents": 0,
                 "inflightLaunchPermits": 0,
                 "activeRuntimeArtifacts": 0,
-                "pendingCandidatePublications": 0
+                "pendingCandidatePublications": 0,
+                "activeEvidenceJobs": 0,
+                "queuedEvidenceJobs": 0
               },
               "quiescent": true
             },
@@ -4646,8 +5050,9 @@
             "method": "unlink-proven-orphan",
             "proofSource": "LEGACY_EXIT_OBSERVATION",
             "proofSourceId": "ec2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "proofSourceFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             "socketPath": "/private/legacy/controller.sock",
+            "socketParentDevice": 1,
+            "socketParentInode": 31,
             "socketDevice": 1,
             "socketInode": 44,
             "socketOwnerUid": 501,
@@ -4656,9 +5061,7 @@
             "targetPid": 4200,
             "targetStartMarker": "darwin:101:1",
             "targetProcessGroupId": 4200,
-            "processExitProofFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             "lockPath": "/private/legacy/controller.lock",
-            "exclusiveLockProofFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
             "durability": "UNLINKAT_FSYNC_PARENT"
           },
           "actionFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
@@ -4805,9 +5208,8 @@
           "completedAt": "2026-07-18T00:00:01Z"
         }
       ],
-      "changes": [
-
-      ],
+      "changes": [],
+      "terminalDefinitionSnapshot": null,
       "terminalDeleteIntent": null,
       "createdAt": "2026-07-18T00:00:00Z",
       "updatedAt": "2026-07-18T00:00:02Z",
@@ -4852,9 +5254,7 @@
         "planDefinitionFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
       },
       "abortPlan": null,
-      "recoveryPlans": [
-
-      ]
+      "recoveryPlans": []
     },
     "activationCommitReceipt": {
       "schemaVersion": 2,
@@ -4874,8 +5274,8 @@
             "ownerGid": 20,
             "mode": "0600",
             "linkCount": 1,
-            "size": 1000,
-            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "size": 4635,
+            "sha256": "9ea579b122aca1b72b81be1c4511844a0892c849b8f8461edde810f333150b08"
           },
           "schemaVersion": 2,
           "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -4885,11 +5285,11 @@
           "activeActivationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "previousActivationId": null,
           "lastCommittedOperation": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "sourceLocatorFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "artifactsFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "semanticFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          "sourceLocatorFingerprint": "3f1b3149e6f375b482a65b1a22e01806cfe6956496f38fc39e5cb98e397a8365",
+          "artifactsFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "semanticFingerprint": "111411819181a3a573916f8bfc6471989a1853864d0c20476877a2f1a564432d"
         },
-        "valueFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        "valueFingerprint": "3770f97450b5032e47570c79c2a6534f5c3c91c3686a84c3c8e5c053a99f1938"
       },
       "activation": {
         "schemaId": "activation-v2",
@@ -4927,8 +5327,14 @@
         },
         "valueFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       },
-      "database": {
-        "schemaId": "database-object-v2",
+      "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
+      "completedStepIds": [
+        "st2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "receiptFingerprint": "07eb001e9b1240ea6b0a47da2f64b409b36dc2b0fcca6f43820e3e3dc578a449",
+      "completedAt": "2026-07-18T00:00:03Z",
+      "databaseBinding": {
+        "schemaId": "database-binding-v2",
         "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
         "value": {
           "path": "/private/state/databases/db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/smart-subagents.sqlite3",
@@ -4938,8 +5344,6 @@
           "ownerGid": 20,
           "mode": "0600",
           "linkCount": 1,
-          "size": 4096,
-          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
           "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "databaseIdentity": {
             "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -4956,39 +5360,222 @@
           "userVersion": 2,
           "schemaFingerprint": "4444444444444444444444444444444444444444444444444444444444444444",
           "schemaArtifactSha256": "5555555555555555555555555555555555555555555555555555555555555555",
-          "sidecars": {
-            "wal": {
-              "path": "/private/state/databases/db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/smart-subagents.sqlite3-wal",
-              "parentDevice": 1,
-              "parentInode": 9,
-              "basename": "smart-subagents.sqlite3-wal",
-              "absent": true
-            },
-            "shm": {
-              "path": "/private/state/databases/db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/smart-subagents.sqlite3-shm",
-              "parentDevice": 1,
-              "parentInode": 9,
-              "basename": "smart-subagents.sqlite3-shm",
-              "absent": true
-            }
-          },
-          "backup": {
-            "path": "/private/state/source-v1.sqlite3",
-            "parentDevice": 1,
-            "parentInode": 10,
-            "basename": "source-v1.sqlite3",
-            "absent": true
-          },
           "databaseIdentityFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
         },
-        "valueFingerprint": "6666666666666666666666666666666666666666666666666666666666666666"
+        "valueFingerprint": "851c45bff233a8e76a691d3a9f11fbdf462f7d79581fea262d45875ca60cc2ad"
       },
-      "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
-      "completedStepIds": [
-        "st2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      ],
-      "receiptFingerprint": "8888888888888888888888888888888888888888888888888888888888888888",
-      "completedAt": "2026-07-18T00:00:03Z"
+      "journalAbsenceTarget": {
+        "schemaId": "absence-proof-v2",
+        "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "value": {
+          "proofId": "ap2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "entries": [
+            {
+              "path": "/private/codex/install-manifests/codex-smart-subagents-v2.transaction.json",
+              "basename": "codex-smart-subagents-v2.transaction.json",
+              "parentDevice": 1,
+              "parentInode": 21,
+              "absent": true
+            }
+          ],
+          "directorySyncCompleted": true,
+          "proofFingerprint": "3a0deeee282789fe5146a8d593f882f067aa231cbff6acb97fd0629e9eb5e541"
+        },
+        "valueFingerprint": "8d5049b96f7f5a288223574a8773182275e436a0b851a3ef05e49e17ea194a54"
+      },
+      "manifestDocument": {
+        "schemaVersion": 2,
+        "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "release": "0.2.0",
+        "pluginId": "codex-smart-subagents",
+        "marketplaceName": "codex-settings-adaptive",
+        "stateHome": "/private/state",
+        "sourceLocator": {
+          "lexicalPath": "/opt/homebrew/bin/codex",
+          "resolvedPathAtCapture": "/opt/homebrew/bin/codex",
+          "argv0Policy": "lexical",
+          "sourceObservedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "codexSnapshot": {
+          "absolutePath": "/private/codex",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "activeActivation": {
+          "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "symlinkTarget": "activations/act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/marketplace",
+          "generationId": "gen2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "previousActivation": null,
+        "interfaceEvidence": {
+          "schemaVersion": 1,
+          "contractVersion": "codex-interface-v1",
+          "subject": {
+            "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "snapshotPath": "/private/codex",
+            "size": 1,
+            "mode": 320,
+            "uid": 501,
+            "device": 1,
+            "inode": 2,
+            "mtimeNs": "3",
+            "version": "codex-cli 0.144.5",
+            "platform": "darwin",
+            "architecture": "arm64",
+            "signatureIdentifier": "codex",
+            "teamIdentifier": "2DC432GLL2",
+            "cdHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "sourceLocator": "/opt/homebrew/bin/codex",
+            "sourceObservedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "semantic": {
+            "extensionRelease": "0.2.0",
+            "contractVersion": "codex-interface-v1",
+            "platformAdapter": "darwin-arm64-v1",
+            "commands": [
+              "app-server"
+            ],
+            "options": [
+              "--json"
+            ],
+            "appServerMethods": [
+              "model/list"
+            ],
+            "machineSchemas": {
+              "account-evidence-v1": {
+                "schemaId": "account-evidence-v1",
+                "schemaSha256": "35fe24653fe033295c98eefed4650d23d83afc3edfdd04ecf1aaeec4940c21c4"
+              },
+              "boundary-result-v1": {
+                "schemaId": "boundary-result-v1",
+                "schemaSha256": "6744a24ed94a48d20805485b961c7b029ada9d572a57158fe8850d492b803786"
+              },
+              "child-jsonl-v1": {
+                "schemaId": "child-jsonl-v1",
+                "schemaSha256": "8ab243b4227dfc15330e6c11bc72148701049441a4973bab3c13842acf58f101"
+              },
+              "child-profile-v1": {
+                "schemaId": "child-profile-v1",
+                "schemaSha256": "8d662a8220655a2bef84b9bf7a53002f19eb7047ec0e6beb0c964ff83f1558f6"
+              },
+              "config-requirements-normalized-v1": {
+                "schemaId": "config-requirements-normalized-v1",
+                "schemaSha256": "3b89c1072dc1679388004908d74b170d9691ae1c91a5a108d450a4526d6da987"
+              },
+              "config-requirements-vector-recipe-v1": {
+                "schemaId": "config-requirements-vector-recipe-v1",
+                "schemaSha256": "91b9b770bc4370ae125c5b892d4ed1d7b1cdcef3b8fdb5996c1955fca59b2068"
+              },
+              "interface-evidence-v1": {
+                "schemaId": "interface-evidence-v1",
+                "schemaSha256": "5f311e04452cd8d288b40ad468c7be674005f61eab251b33de4e40c121cbe723"
+              },
+              "otel-logs-v1": {
+                "schemaId": "otel-logs-v1",
+                "schemaSha256": "fced1969a64ec84c4dfd0baeca88ae41595abfb6f3144a5b71ffc22419d1c388"
+              },
+              "reader-result-v1": {
+                "schemaId": "reader-result-v1",
+                "schemaSha256": "2d87d9d810f0b640ead4bcfaf75b093c72b53abdc38925ad606c7e2554854bb8"
+              },
+              "routing-policy-v2": {
+                "schemaId": "routing-policy-v2",
+                "schemaSha256": "3aceac0be99dc3d58f18c4ab91848c08ae88c6179b683ebd4abce90e0792ba05"
+              },
+              "writer-result-v1": {
+                "schemaId": "writer-result-v1",
+                "schemaSha256": "c61c228c534819576116a76fb78269e2d7df405ddd6284e25c299c81eaa97f66"
+              }
+            },
+            "probeBudgets": {
+              "full": 300
+            },
+            "negativeProbeIds": [
+              "unknown-event"
+            ],
+            "arg0AdapterVersion": "arg0-v1",
+            "routingPolicyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+            "bundledCatalogFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+            "childProfiles": {
+              "classifier": "5f4e0d4806315e973cc2163eb9cc2c79144490b974adfabcbf8455f8fe661faa",
+              "reader": "420cc6149c82385171ba699854d9b033e415c4549349a6bcb0875d94111a47f6",
+              "writer": "bee300cda286a7404b5beef425d8941b6f38f1e28ab8e79ed32449d536bee020"
+            }
+          },
+          "subjectFingerprint": "6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723",
+          "semanticFingerprint": "4db766fe7c5b316d45002e82d96fceb66376af8166566d8061b85c8950e2dfb7",
+          "compatibilityFingerprint": "bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9"
+        },
+        "routingPolicyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+        "bundledCatalogFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+        "artifacts": [],
+        "originalBackup": {
+          "type": "absent",
+          "path": "/private/codex/original-codex-backup",
+          "parentPath": "/private/codex",
+          "name": "original-codex-backup"
+        },
+        "lastCommittedOperation": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "databaseSchemaVersion": 2,
+        "extensions": {}
+      },
+      "transitionLineage": {
+        "transitionKind": "initial",
+        "sourceReceipt": null,
+        "activationProofFingerprint": null,
+        "shutdownCommandIds": null,
+        "stoppedController": null,
+        "lineageFingerprint": "22cc778fada90b0611058c935d9262de203390ee8ed22189cf096d8a932e11de"
+      }
+    },
+    "updateTransitionLineage": {
+      "transitionKind": "update",
+      "sourceReceipt": {
+        "receiptKind": "activation-preparation",
+        "path": "/private/codex/receipts/ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/op2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.preparation.json",
+        "rawSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "receiptFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "activationProofFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+      "shutdownCommandIds": {
+        "maintenanceBegin": "cc2_11111111111111111111111111111111",
+        "maintenanceStrengthen": "cc2_22222222222222222222222222222222",
+        "shutdown": "cc2_33333333333333333333333333333333"
+      },
+      "stoppedController": {
+        "operationId": "op2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "activationId": "act2_4444444444444444444444444444444444444444444444444444444444444444",
+        "databaseId": "db2_55555555555555555555555555555555",
+        "controllerIdentity": "6666666666666666666666666666666666666666666666666666666666666666",
+        "controlEpoch": 4
+      },
+      "lineageFingerprint": "a8162ef6ed5e3442e879d0de68d36ef8902e330dfc3d5fc3c07f9ecfb6151f43"
+    },
+    "rollbackTransitionLineage": {
+      "transitionKind": "rollback",
+      "sourceReceipt": {
+        "receiptKind": "rollback-manifest-preparation",
+        "path": "/private/codex/receipts/ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/op2_cccccccccccccccccccccccccccccccc.rollback-preparation.json",
+        "rawSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+        "receiptFingerprint": "8888888888888888888888888888888888888888888888888888888888888888"
+      },
+      "activationProofFingerprint": "9999999999999999999999999999999999999999999999999999999999999999",
+      "shutdownCommandIds": {
+        "maintenanceBegin": "cc2_44444444444444444444444444444444",
+        "maintenanceStrengthen": "cc2_55555555555555555555555555555555",
+        "shutdown": "cc2_66666666666666666666666666666666"
+      },
+      "stoppedController": {
+        "operationId": "op2_cccccccccccccccccccccccccccccccc",
+        "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "databaseId": "db2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "controllerIdentity": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "controlEpoch": 8
+      },
+      "lineageFingerprint": "48c77d8446894113ba2306069cd4ecbf2ded94eb9200ef0a4d91c921c1a2ea75"
     },
     "cleanupReceipt": {
       "schemaVersion": 2,
@@ -5018,9 +5605,7 @@
         },
         "valueFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       },
-      "removedObjects": [
-
-      ],
+      "removedObjects": [],
       "absenceProof": {
         "schemaId": "absence-proof-v2",
         "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -5108,13 +5693,11 @@
       "expectedControlEpoch": null,
       "operationId": null,
       "method": "health",
-      "params": {
-      },
+      "params": {},
       "requestFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "extensions": {
-      }
+      "extensions": {}
     },
-    "smartStartRequest": {
+    "admitNodeRequest": {
       "messageType": "request",
       "protocolVersion": 2,
       "release": "0.2.0",
@@ -5126,13 +5709,15 @@
       "commandId": null,
       "expectedControlEpoch": 1,
       "operationId": null,
-      "method": "smart_start",
+      "method": "admit_node",
       "params": {
-        "routeId": "route-1",
-        "nodeId": "node-1",
+        "startRequestId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "routeId": "route2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "nodeId": "node2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "evidenceJobId": "aej2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "activationGate": {
           "manifestSemanticFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-          "activationReceiptFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "activationReceiptFingerprint": "35b1219bc66c1fe9117bc11b28cb39b16caee5e1a2310c3448cc16de03b612c2",
           "journalAbsenceProof": {
             "schemaId": "absence-proof-v2",
             "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -5154,12 +5739,11 @@
             },
             "valueFingerprint": "8d5049b96f7f5a288223574a8773182275e436a0b851a3ef05e49e17ea194a54"
           },
-          "gateFingerprint": "005c3ab70709312e09036fa1c6f93b994d4de6c582760ddd5c3c612c8dd0d44a"
+          "gateFingerprint": "4f8642b1420db872ecc2c7db3dfa97d4de0330628b0c24f151e605d7340ca8c8"
         }
       },
       "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
-      "extensions": {
-      }
+      "extensions": {}
     },
     "reserveLaunchPermitRequest": {
       "messageType": "request",
@@ -5178,7 +5762,7 @@
         "admissionId": "adm2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "activationGate": {
           "manifestSemanticFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-          "activationReceiptFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "activationReceiptFingerprint": "35b1219bc66c1fe9117bc11b28cb39b16caee5e1a2310c3448cc16de03b612c2",
           "journalAbsenceProof": {
             "schemaId": "absence-proof-v2",
             "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -5200,12 +5784,11 @@
             },
             "valueFingerprint": "8d5049b96f7f5a288223574a8773182275e436a0b851a3ef05e49e17ea194a54"
           },
-          "gateFingerprint": "005c3ab70709312e09036fa1c6f93b994d4de6c582760ddd5c3c612c8dd0d44a"
+          "gateFingerprint": "4f8642b1420db872ecc2c7db3dfa97d4de0330628b0c24f151e605d7340ca8c8"
         }
       },
       "requestFingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
-      "extensions": {
-      }
+      "extensions": {}
     },
     "commitLaunchPermitRequest": {
       "messageType": "request",
@@ -5229,7 +5812,7 @@
         "snapshotIdentityFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "activationGate": {
           "manifestSemanticFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-          "activationReceiptFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "activationReceiptFingerprint": "35b1219bc66c1fe9117bc11b28cb39b16caee5e1a2310c3448cc16de03b612c2",
           "journalAbsenceProof": {
             "schemaId": "absence-proof-v2",
             "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -5251,12 +5834,11 @@
             },
             "valueFingerprint": "8d5049b96f7f5a288223574a8773182275e436a0b851a3ef05e49e17ea194a54"
           },
-          "gateFingerprint": "005c3ab70709312e09036fa1c6f93b994d4de6c582760ddd5c3c612c8dd0d44a"
+          "gateFingerprint": "4f8642b1420db872ecc2c7db3dfa97d4de0330628b0c24f151e605d7340ca8c8"
         }
       },
       "requestFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
-      "extensions": {
-      }
+      "extensions": {}
     },
     "healthResponse": {
       "messageType": "response",
@@ -5294,12 +5876,13 @@
           "openIntents": 0,
           "inflightLaunchPermits": 0,
           "activeRuntimeArtifacts": 0,
-          "pendingCandidatePublications": 0
+          "pendingCandidatePublications": 0,
+          "activeEvidenceJobs": 0,
+          "queuedEvidenceJobs": 0
         }
       },
       "responseFingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
-      "extensions": {
-      }
+      "extensions": {}
     },
     "shutdownResponse": {
       "messageType": "response",
@@ -5336,26 +5919,25 @@
         }
       },
       "responseFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-      "extensions": {
-      }
+      "extensions": {}
     },
     "errorResponse": {
       "messageType": "response",
       "protocolVersion": 2,
       "release": "0.2.0",
-      "method": "smart_start",
+      "method": "admit_node",
       "responseKind": "ERROR",
       "commandId": null,
       "requestFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "controlEpoch": 1,
       "payload": {
+        "category": "UNAVAILABLE",
         "code": "ADAPTIVE_ACTIVATION_UNCOMMITTED",
         "message": "activation gate is closed",
         "retryable": false
       },
       "responseFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      "extensions": {
-      }
+      "extensions": {}
     },
     "replayReceiptResponse": {
       "messageType": "response",
@@ -5373,11 +5955,22 @@
           "resultFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
           "controlEpoch": 11
         },
+        "originalControlEpoch": 11,
+        "originalPayload": {
+          "status": "MAINTENANCE_BEGUN",
+          "previousControlEpoch": 10,
+          "newControlEpoch": 11,
+          "commandReceipt": {
+            "commandId": "cc2_11111111111111111111111111111111",
+            "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+            "resultFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "controlEpoch": 11
+          }
+        },
         "originalResponseFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       },
       "responseFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-      "extensions": {
-      }
+      "extensions": {}
     },
     "runtimeQuiescenceProjection": {
       "schemaId": "quiescence-proof-v2",
@@ -5395,7 +5988,9 @@
           "openIntents": 0,
           "inflightLaunchPermits": 0,
           "activeRuntimeArtifacts": 0,
-          "pendingCandidatePublications": 0
+          "pendingCandidatePublications": 0,
+          "activeEvidenceJobs": 0,
+          "queuedEvidenceJobs": 0
         },
         "databasePredicatesFingerprint": "8888888888888888888888888888888888888888888888888888888888888888",
         "barrierHeld": true,
@@ -5449,7 +6044,9 @@
           "openIntents": 0,
           "inflightLaunchPermits": 0,
           "activeRuntimeArtifacts": 0,
-          "pendingCandidatePublications": 0
+          "pendingCandidatePublications": 0,
+          "activeEvidenceJobs": 0,
+          "queuedEvidenceJobs": 0
         },
         "quiescent": true
       },
@@ -5738,15 +6335,9 @@
       "phase": "FENCED",
       "recoveryPolicy": "REVERSIBLE",
       "discoveryBefore": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -5755,33 +6346,17 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
       "fencedBefore": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -5790,33 +6365,17 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
       "desired": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -5825,26 +6384,14 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
-      "attempts": [
-
-      ],
+      "attempts": [],
       "steps": [
         {
           "stepId": "st2_01000000000000000000000000000000",
@@ -5917,9 +6464,8 @@
           "completedAt": "2026-07-18T00:00:01Z"
         }
       ],
-      "changes": [
-
-      ],
+      "changes": [],
+      "terminalDefinitionSnapshot": null,
       "terminalDeleteIntent": null,
       "createdAt": "2026-07-18T00:00:00Z",
       "updatedAt": "2026-07-18T00:00:02Z",
@@ -5931,8 +6477,6 @@
         "selectionSource": "DISCOVERY_BEFORE_FIRST_EFFECT",
         "composedStepKinds": [
           "gate_close",
-          "stage",
-          "verify_staged",
           "maintenance_begin",
           "wait_runtime_quiescent",
           "maintenance_strengthen",
@@ -5957,9 +6501,7 @@
         "planDefinitionFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
       },
       "abortPlan": null,
-      "recoveryPlans": [
-
-      ]
+      "recoveryPlans": []
     },
     "controllerMutationExchanges": [
       {
@@ -5981,8 +6523,7 @@
             "reasonCode": "upgrade"
           },
           "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
-          "extensions": {
-          }
+          "extensions": {}
         },
         "response": {
           "messageType": "response",
@@ -6005,8 +6546,7 @@
             }
           },
           "responseFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-          "extensions": {
-          }
+          "extensions": {}
         }
       },
       {
@@ -6028,8 +6568,7 @@
             "mode": "freeze"
           },
           "requestFingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
-          "extensions": {
-          }
+          "extensions": {}
         },
         "response": {
           "messageType": "response",
@@ -6052,8 +6591,7 @@
             }
           },
           "responseFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-          "extensions": {
-          }
+          "extensions": {}
         }
       },
       {
@@ -6071,11 +6609,9 @@
           "expectedControlEpoch": 10,
           "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "method": "shutdown",
-          "params": {
-          },
+          "params": {},
           "requestFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
-          "extensions": {
-          }
+          "extensions": {}
         },
         "response": {
           "messageType": "response",
@@ -6112,8 +6648,7 @@
             }
           },
           "responseFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-          "extensions": {
-          }
+          "extensions": {}
         }
       },
       {
@@ -6136,11 +6671,11 @@
             "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "pid": 4000,
             "processStartMarker": "darwin:99:1",
-            "processGroupId": 4000
+            "processGroupId": 4000,
+            "expectedOrphanOperationId": null
           },
           "requestFingerprint": "4444444444444444444444444444444444444444444444444444444444444444",
-          "extensions": {
-          }
+          "extensions": {}
         },
         "response": {
           "messageType": "response",
@@ -6166,8 +6701,7 @@
             }
           },
           "responseFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-          "extensions": {
-          }
+          "extensions": {}
         }
       },
       {
@@ -6193,8 +6727,7 @@
             "processGroupId": 4000
           },
           "requestFingerprint": "5555555555555555555555555555555555555555555555555555555555555555",
-          "extensions": {
-          }
+          "extensions": {}
         },
         "response": {
           "messageType": "response",
@@ -6220,8 +6753,7 @@
             }
           },
           "responseFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-          "extensions": {
-          }
+          "extensions": {}
         }
       },
       {
@@ -6239,11 +6771,9 @@
           "expectedControlEpoch": 10,
           "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "method": "maintenance_resume",
-          "params": {
-          },
+          "params": {},
           "requestFingerprint": "6666666666666666666666666666666666666666666666666666666666666666",
-          "extensions": {
-          }
+          "extensions": {}
         },
         "response": {
           "messageType": "response",
@@ -6266,8 +6796,7 @@
             }
           },
           "responseFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-          "extensions": {
-          }
+          "extensions": {}
         }
       }
     ],
@@ -6284,11 +6813,9 @@
       "expectedControlEpoch": 10,
       "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "method": "shutdown",
-      "params": {
-      },
+      "params": {},
       "requestFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
-      "extensions": {
-      }
+      "extensions": {}
     },
     "activationBindingScenario": {
       "receipt": {
@@ -6309,8 +6836,8 @@
               "ownerGid": 20,
               "mode": "0600",
               "linkCount": 1,
-              "size": 1000,
-              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              "size": 4635,
+              "sha256": "9ea579b122aca1b72b81be1c4511844a0892c849b8f8461edde810f333150b08"
             },
             "schemaVersion": 2,
             "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -6320,11 +6847,11 @@
             "activeActivationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "previousActivationId": null,
             "lastCommittedOperation": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "sourceLocatorFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "artifactsFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "semanticFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            "sourceLocatorFingerprint": "3f1b3149e6f375b482a65b1a22e01806cfe6956496f38fc39e5cb98e397a8365",
+            "artifactsFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "semanticFingerprint": "111411819181a3a573916f8bfc6471989a1853864d0c20476877a2f1a564432d"
           },
-          "valueFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          "valueFingerprint": "3770f97450b5032e47570c79c2a6534f5c3c91c3686a84c3c8e5c053a99f1938"
         },
         "activation": {
           "schemaId": "activation-v2",
@@ -6362,8 +6889,14 @@
           },
           "valueFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         },
-        "database": {
-          "schemaId": "database-object-v2",
+        "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
+        "completedStepIds": [
+          "st2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        ],
+        "receiptFingerprint": "07eb001e9b1240ea6b0a47da2f64b409b36dc2b0fcca6f43820e3e3dc578a449",
+        "completedAt": "2026-07-18T00:00:03Z",
+        "databaseBinding": {
+          "schemaId": "database-binding-v2",
           "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
           "value": {
             "path": "/private/state/databases/db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/smart-subagents.sqlite3",
@@ -6373,8 +6906,6 @@
             "ownerGid": 20,
             "mode": "0600",
             "linkCount": 1,
-            "size": 4096,
-            "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
             "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "databaseIdentity": {
               "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -6391,39 +6922,176 @@
             "userVersion": 2,
             "schemaFingerprint": "4444444444444444444444444444444444444444444444444444444444444444",
             "schemaArtifactSha256": "5555555555555555555555555555555555555555555555555555555555555555",
-            "sidecars": {
-              "wal": {
-                "path": "/private/state/databases/db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/smart-subagents.sqlite3-wal",
-                "parentDevice": 1,
-                "parentInode": 9,
-                "basename": "smart-subagents.sqlite3-wal",
-                "absent": true
-              },
-              "shm": {
-                "path": "/private/state/databases/db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/smart-subagents.sqlite3-shm",
-                "parentDevice": 1,
-                "parentInode": 9,
-                "basename": "smart-subagents.sqlite3-shm",
-                "absent": true
-              }
-            },
-            "backup": {
-              "path": "/private/state/source-v1.sqlite3",
-              "parentDevice": 1,
-              "parentInode": 10,
-              "basename": "source-v1.sqlite3",
-              "absent": true
-            },
             "databaseIdentityFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
           },
-          "valueFingerprint": "6666666666666666666666666666666666666666666666666666666666666666"
+          "valueFingerprint": "851c45bff233a8e76a691d3a9f11fbdf462f7d79581fea262d45875ca60cc2ad"
         },
-        "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
-        "completedStepIds": [
-          "st2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        ],
-        "receiptFingerprint": "8888888888888888888888888888888888888888888888888888888888888888",
-        "completedAt": "2026-07-18T00:00:03Z"
+        "journalAbsenceTarget": {
+          "schemaId": "absence-proof-v2",
+          "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "value": {
+            "proofId": "ap2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "entries": [
+              {
+                "path": "/private/codex/install-manifests/codex-smart-subagents-v2.transaction.json",
+                "basename": "codex-smart-subagents-v2.transaction.json",
+                "parentDevice": 1,
+                "parentInode": 21,
+                "absent": true
+              }
+            ],
+            "directorySyncCompleted": true,
+            "proofFingerprint": "3a0deeee282789fe5146a8d593f882f067aa231cbff6acb97fd0629e9eb5e541"
+          },
+          "valueFingerprint": "8d5049b96f7f5a288223574a8773182275e436a0b851a3ef05e49e17ea194a54"
+        },
+        "manifestDocument": {
+          "schemaVersion": 2,
+          "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "release": "0.2.0",
+          "pluginId": "codex-smart-subagents",
+          "marketplaceName": "codex-settings-adaptive",
+          "stateHome": "/private/state",
+          "sourceLocator": {
+            "lexicalPath": "/opt/homebrew/bin/codex",
+            "resolvedPathAtCapture": "/opt/homebrew/bin/codex",
+            "argv0Policy": "lexical",
+            "sourceObservedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "codexSnapshot": {
+            "absolutePath": "/private/codex",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "activeActivation": {
+            "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "symlinkTarget": "activations/act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/marketplace",
+            "generationId": "gen2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "previousActivation": null,
+          "interfaceEvidence": {
+            "schemaVersion": 1,
+            "contractVersion": "codex-interface-v1",
+            "subject": {
+              "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "snapshotPath": "/private/codex",
+              "size": 1,
+              "mode": 320,
+              "uid": 501,
+              "device": 1,
+              "inode": 2,
+              "mtimeNs": "3",
+              "version": "codex-cli 0.144.5",
+              "platform": "darwin",
+              "architecture": "arm64",
+              "signatureIdentifier": "codex",
+              "teamIdentifier": "2DC432GLL2",
+              "cdHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "sourceLocator": "/opt/homebrew/bin/codex",
+              "sourceObservedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "semantic": {
+              "extensionRelease": "0.2.0",
+              "contractVersion": "codex-interface-v1",
+              "platformAdapter": "darwin-arm64-v1",
+              "commands": [
+                "app-server"
+              ],
+              "options": [
+                "--json"
+              ],
+              "appServerMethods": [
+                "model/list"
+              ],
+              "machineSchemas": {
+                "account-evidence-v1": {
+                  "schemaId": "account-evidence-v1",
+                  "schemaSha256": "35fe24653fe033295c98eefed4650d23d83afc3edfdd04ecf1aaeec4940c21c4"
+                },
+                "boundary-result-v1": {
+                  "schemaId": "boundary-result-v1",
+                  "schemaSha256": "6744a24ed94a48d20805485b961c7b029ada9d572a57158fe8850d492b803786"
+                },
+                "child-jsonl-v1": {
+                  "schemaId": "child-jsonl-v1",
+                  "schemaSha256": "8ab243b4227dfc15330e6c11bc72148701049441a4973bab3c13842acf58f101"
+                },
+                "child-profile-v1": {
+                  "schemaId": "child-profile-v1",
+                  "schemaSha256": "8d662a8220655a2bef84b9bf7a53002f19eb7047ec0e6beb0c964ff83f1558f6"
+                },
+                "config-requirements-normalized-v1": {
+                  "schemaId": "config-requirements-normalized-v1",
+                  "schemaSha256": "3b89c1072dc1679388004908d74b170d9691ae1c91a5a108d450a4526d6da987"
+                },
+                "config-requirements-vector-recipe-v1": {
+                  "schemaId": "config-requirements-vector-recipe-v1",
+                  "schemaSha256": "91b9b770bc4370ae125c5b892d4ed1d7b1cdcef3b8fdb5996c1955fca59b2068"
+                },
+                "interface-evidence-v1": {
+                  "schemaId": "interface-evidence-v1",
+                  "schemaSha256": "5f311e04452cd8d288b40ad468c7be674005f61eab251b33de4e40c121cbe723"
+                },
+                "otel-logs-v1": {
+                  "schemaId": "otel-logs-v1",
+                  "schemaSha256": "fced1969a64ec84c4dfd0baeca88ae41595abfb6f3144a5b71ffc22419d1c388"
+                },
+                "reader-result-v1": {
+                  "schemaId": "reader-result-v1",
+                  "schemaSha256": "2d87d9d810f0b640ead4bcfaf75b093c72b53abdc38925ad606c7e2554854bb8"
+                },
+                "routing-policy-v2": {
+                  "schemaId": "routing-policy-v2",
+                  "schemaSha256": "3aceac0be99dc3d58f18c4ab91848c08ae88c6179b683ebd4abce90e0792ba05"
+                },
+                "writer-result-v1": {
+                  "schemaId": "writer-result-v1",
+                  "schemaSha256": "c61c228c534819576116a76fb78269e2d7df405ddd6284e25c299c81eaa97f66"
+                }
+              },
+              "probeBudgets": {
+                "full": 300
+              },
+              "negativeProbeIds": [
+                "unknown-event"
+              ],
+              "arg0AdapterVersion": "arg0-v1",
+              "routingPolicyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+              "bundledCatalogFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+              "childProfiles": {
+                "classifier": "5f4e0d4806315e973cc2163eb9cc2c79144490b974adfabcbf8455f8fe661faa",
+                "reader": "420cc6149c82385171ba699854d9b033e415c4549349a6bcb0875d94111a47f6",
+                "writer": "bee300cda286a7404b5beef425d8941b6f38f1e28ab8e79ed32449d536bee020"
+              }
+            },
+            "subjectFingerprint": "6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723",
+            "semanticFingerprint": "4db766fe7c5b316d45002e82d96fceb66376af8166566d8061b85c8950e2dfb7",
+            "compatibilityFingerprint": "bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9"
+          },
+          "routingPolicyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "bundledCatalogFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+          "artifacts": [],
+          "originalBackup": {
+            "type": "absent",
+            "path": "/private/codex/original-codex-backup",
+            "parentPath": "/private/codex",
+            "name": "original-codex-backup"
+          },
+          "lastCommittedOperation": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "databaseSchemaVersion": 2,
+          "extensions": {}
+        },
+        "transitionLineage": {
+          "transitionKind": "initial",
+          "sourceReceipt": null,
+          "activationProofFingerprint": null,
+          "shutdownCommandIds": null,
+          "stoppedController": null,
+          "lineageFingerprint": "22cc778fada90b0611058c935d9262de203390ee8ed22189cf096d8a932e11de"
+        }
       },
       "manifest": {
         "schemaId": "manifest-v2",
@@ -6437,8 +7105,8 @@
             "ownerGid": 20,
             "mode": "0600",
             "linkCount": 1,
-            "size": 1000,
-            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "size": 4635,
+            "sha256": "9ea579b122aca1b72b81be1c4511844a0892c849b8f8461edde810f333150b08"
           },
           "schemaVersion": 2,
           "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -6448,11 +7116,11 @@
           "activeActivationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "previousActivationId": null,
           "lastCommittedOperation": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "sourceLocatorFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "artifactsFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "semanticFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          "sourceLocatorFingerprint": "3f1b3149e6f375b482a65b1a22e01806cfe6956496f38fc39e5cb98e397a8365",
+          "artifactsFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "semanticFingerprint": "111411819181a3a573916f8bfc6471989a1853864d0c20476877a2f1a564432d"
         },
-        "valueFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        "valueFingerprint": "3770f97450b5032e47570c79c2a6534f5c3c91c3686a84c3c8e5c053a99f1938"
       },
       "activation": {
         "schemaId": "activation-v2",
@@ -6581,7 +7249,7 @@
         "terminalKind": "COMMIT",
         "receiptKind": "activation-commit",
         "receiptPath": "/private/codex/receipts/op.commit.json",
-        "terminalStateFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "terminalStateFingerprint": "7cac67f5c5f3014374a463f98a8800207884cf9ca9af0a0793da1ff45cbe87b5",
         "completedStepIds": [
           "st2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         ],
@@ -6605,8 +7273,8 @@
                 "ownerGid": 20,
                 "mode": "0600",
                 "linkCount": 1,
-                "size": 1000,
-                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                "size": 4635,
+                "sha256": "9ea579b122aca1b72b81be1c4511844a0892c849b8f8461edde810f333150b08"
               },
               "schemaVersion": 2,
               "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -6616,11 +7284,11 @@
               "activeActivationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               "previousActivationId": null,
               "lastCommittedOperation": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "sourceLocatorFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "artifactsFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-              "semanticFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+              "sourceLocatorFingerprint": "3f1b3149e6f375b482a65b1a22e01806cfe6956496f38fc39e5cb98e397a8365",
+              "artifactsFingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+              "semanticFingerprint": "111411819181a3a573916f8bfc6471989a1853864d0c20476877a2f1a564432d"
             },
-            "valueFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            "valueFingerprint": "3770f97450b5032e47570c79c2a6534f5c3c91c3686a84c3c8e5c053a99f1938"
           },
           "activation": {
             "schemaId": "activation-v2",
@@ -6658,8 +7326,13 @@
             },
             "valueFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
           },
-          "database": {
-            "schemaId": "database-object-v2",
+          "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
+          "completedStepIds": [
+            "st2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          ],
+          "completedAt": "2026-07-18T00:00:03Z",
+          "databaseBinding": {
+            "schemaId": "database-binding-v2",
             "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
             "value": {
               "path": "/private/state/databases/db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/smart-subagents.sqlite3",
@@ -6669,8 +7342,6 @@
               "ownerGid": 20,
               "mode": "0600",
               "linkCount": 1,
-              "size": 4096,
-              "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
               "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               "databaseIdentity": {
                 "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -6687,45 +7358,183 @@
               "userVersion": 2,
               "schemaFingerprint": "4444444444444444444444444444444444444444444444444444444444444444",
               "schemaArtifactSha256": "5555555555555555555555555555555555555555555555555555555555555555",
-              "sidecars": {
-                "wal": {
-                  "path": "/private/state/databases/db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/smart-subagents.sqlite3-wal",
-                  "parentDevice": 1,
-                  "parentInode": 9,
-                  "basename": "smart-subagents.sqlite3-wal",
-                  "absent": true
-                },
-                "shm": {
-                  "path": "/private/state/databases/db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/smart-subagents.sqlite3-shm",
-                  "parentDevice": 1,
-                  "parentInode": 9,
-                  "basename": "smart-subagents.sqlite3-shm",
-                  "absent": true
-                }
-              },
-              "backup": {
-                "path": "/private/state/source-v1.sqlite3",
-                "parentDevice": 1,
-                "parentInode": 10,
-                "basename": "source-v1.sqlite3",
-                "absent": true
-              },
               "databaseIdentityFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
             },
-            "valueFingerprint": "6666666666666666666666666666666666666666666666666666666666666666"
+            "valueFingerprint": "851c45bff233a8e76a691d3a9f11fbdf462f7d79581fea262d45875ca60cc2ad"
           },
-          "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
-          "completedStepIds": [
-            "st2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-          ],
-          "completedAt": "2026-07-18T00:00:03Z"
+          "journalAbsenceTarget": {
+            "schemaId": "absence-proof-v2",
+            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "value": {
+              "proofId": "ap2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "entries": [
+                {
+                  "path": "/private/codex/install-manifests/codex-smart-subagents-v2.transaction.json",
+                  "basename": "codex-smart-subagents-v2.transaction.json",
+                  "parentDevice": 1,
+                  "parentInode": 21,
+                  "absent": true
+                }
+              ],
+              "directorySyncCompleted": true,
+              "proofFingerprint": "3a0deeee282789fe5146a8d593f882f067aa231cbff6acb97fd0629e9eb5e541"
+            },
+            "valueFingerprint": "8d5049b96f7f5a288223574a8773182275e436a0b851a3ef05e49e17ea194a54"
+          },
+          "manifestDocument": {
+            "schemaVersion": 2,
+            "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "release": "0.2.0",
+            "pluginId": "codex-smart-subagents",
+            "marketplaceName": "codex-settings-adaptive",
+            "stateHome": "/private/state",
+            "sourceLocator": {
+              "lexicalPath": "/opt/homebrew/bin/codex",
+              "resolvedPathAtCapture": "/opt/homebrew/bin/codex",
+              "argv0Policy": "lexical",
+              "sourceObservedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "codexSnapshot": {
+              "absolutePath": "/private/codex",
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "activeActivation": {
+              "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "symlinkTarget": "activations/act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/marketplace",
+              "generationId": "gen2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "previousActivation": null,
+            "interfaceEvidence": {
+              "schemaVersion": 1,
+              "contractVersion": "codex-interface-v1",
+              "subject": {
+                "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "snapshotPath": "/private/codex",
+                "size": 1,
+                "mode": 320,
+                "uid": 501,
+                "device": 1,
+                "inode": 2,
+                "mtimeNs": "3",
+                "version": "codex-cli 0.144.5",
+                "platform": "darwin",
+                "architecture": "arm64",
+                "signatureIdentifier": "codex",
+                "teamIdentifier": "2DC432GLL2",
+                "cdHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "sourceLocator": "/opt/homebrew/bin/codex",
+                "sourceObservedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              },
+              "semantic": {
+                "extensionRelease": "0.2.0",
+                "contractVersion": "codex-interface-v1",
+                "platformAdapter": "darwin-arm64-v1",
+                "commands": [
+                  "app-server"
+                ],
+                "options": [
+                  "--json"
+                ],
+                "appServerMethods": [
+                  "model/list"
+                ],
+                "machineSchemas": {
+                  "account-evidence-v1": {
+                    "schemaId": "account-evidence-v1",
+                    "schemaSha256": "35fe24653fe033295c98eefed4650d23d83afc3edfdd04ecf1aaeec4940c21c4"
+                  },
+                  "boundary-result-v1": {
+                    "schemaId": "boundary-result-v1",
+                    "schemaSha256": "6744a24ed94a48d20805485b961c7b029ada9d572a57158fe8850d492b803786"
+                  },
+                  "child-jsonl-v1": {
+                    "schemaId": "child-jsonl-v1",
+                    "schemaSha256": "8ab243b4227dfc15330e6c11bc72148701049441a4973bab3c13842acf58f101"
+                  },
+                  "child-profile-v1": {
+                    "schemaId": "child-profile-v1",
+                    "schemaSha256": "8d662a8220655a2bef84b9bf7a53002f19eb7047ec0e6beb0c964ff83f1558f6"
+                  },
+                  "config-requirements-normalized-v1": {
+                    "schemaId": "config-requirements-normalized-v1",
+                    "schemaSha256": "3b89c1072dc1679388004908d74b170d9691ae1c91a5a108d450a4526d6da987"
+                  },
+                  "config-requirements-vector-recipe-v1": {
+                    "schemaId": "config-requirements-vector-recipe-v1",
+                    "schemaSha256": "91b9b770bc4370ae125c5b892d4ed1d7b1cdcef3b8fdb5996c1955fca59b2068"
+                  },
+                  "interface-evidence-v1": {
+                    "schemaId": "interface-evidence-v1",
+                    "schemaSha256": "5f311e04452cd8d288b40ad468c7be674005f61eab251b33de4e40c121cbe723"
+                  },
+                  "otel-logs-v1": {
+                    "schemaId": "otel-logs-v1",
+                    "schemaSha256": "fced1969a64ec84c4dfd0baeca88ae41595abfb6f3144a5b71ffc22419d1c388"
+                  },
+                  "reader-result-v1": {
+                    "schemaId": "reader-result-v1",
+                    "schemaSha256": "2d87d9d810f0b640ead4bcfaf75b093c72b53abdc38925ad606c7e2554854bb8"
+                  },
+                  "routing-policy-v2": {
+                    "schemaId": "routing-policy-v2",
+                    "schemaSha256": "3aceac0be99dc3d58f18c4ab91848c08ae88c6179b683ebd4abce90e0792ba05"
+                  },
+                  "writer-result-v1": {
+                    "schemaId": "writer-result-v1",
+                    "schemaSha256": "c61c228c534819576116a76fb78269e2d7df405ddd6284e25c299c81eaa97f66"
+                  }
+                },
+                "probeBudgets": {
+                  "full": 300
+                },
+                "negativeProbeIds": [
+                  "unknown-event"
+                ],
+                "arg0AdapterVersion": "arg0-v1",
+                "routingPolicyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+                "bundledCatalogFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+                "childProfiles": {
+                  "classifier": "5f4e0d4806315e973cc2163eb9cc2c79144490b974adfabcbf8455f8fe661faa",
+                  "reader": "420cc6149c82385171ba699854d9b033e415c4549349a6bcb0875d94111a47f6",
+                  "writer": "bee300cda286a7404b5beef425d8941b6f38f1e28ab8e79ed32449d536bee020"
+                }
+              },
+              "subjectFingerprint": "6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723",
+              "semanticFingerprint": "4db766fe7c5b316d45002e82d96fceb66376af8166566d8061b85c8950e2dfb7",
+              "compatibilityFingerprint": "bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9"
+            },
+            "routingPolicyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+            "bundledCatalogFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
+            "artifacts": [],
+            "originalBackup": {
+              "type": "absent",
+              "path": "/private/codex/original-codex-backup",
+              "parentPath": "/private/codex",
+              "name": "original-codex-backup"
+            },
+            "lastCommittedOperation": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "databaseSchemaVersion": 2,
+            "extensions": {}
+          },
+          "transitionLineage": {
+            "transitionKind": "initial",
+            "sourceReceipt": null,
+            "activationProofFingerprint": null,
+            "shutdownCommandIds": null,
+            "stoppedController": null,
+            "lineageFingerprint": "22cc778fada90b0611058c935d9262de203390ee8ed22189cf096d8a932e11de"
+          }
         },
         "tombstonePayloadIntent": null,
         "journalAbsenceTarget": {
           "schemaId": "absence-proof-v2",
           "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
           "value": {
-            "proofId": "ap2_cccccccccccccccccccccccccccccccc",
+            "proofId": "ap2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "entries": [
@@ -6733,14 +7542,14 @@
                 "path": "/private/codex/install-manifests/codex-smart-subagents-v2.transaction.json",
                 "basename": "codex-smart-subagents-v2.transaction.json",
                 "parentDevice": 1,
-                "parentInode": 31,
+                "parentInode": 21,
                 "absent": true
               }
             ],
             "directorySyncCompleted": true,
-            "proofFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            "proofFingerprint": "3a0deeee282789fe5146a8d593f882f067aa231cbff6acb97fd0629e9eb5e541"
           },
-          "valueFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          "valueFingerprint": "8d5049b96f7f5a288223574a8773182275e436a0b851a3ef05e49e17ea194a54"
         },
         "frozenAt": "2026-07-18T00:00:03Z"
       }
@@ -6754,15 +7563,9 @@
       "phase": "ABORTING",
       "recoveryPolicy": "REVERSIBLE",
       "discoveryBefore": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -6771,33 +7574,17 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
       "fencedBefore": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -6806,33 +7593,17 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
       "desired": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -6841,26 +7612,14 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
-      "attempts": [
-
-      ],
+      "attempts": [],
       "steps": [
         {
           "stepId": "st2_01000000000000000000000000000000",
@@ -6933,143 +7692,10 @@
           "completedAt": "2026-07-18T00:00:01Z"
         },
         {
-          "stepId": "st2_02000000000000000000000000000000",
+          "stepId": "st2_04000000000000000000000000000000",
           "ordinal": 1,
           "planId": "pl2_dddddddddddddddddddddddddddddddd",
           "planOrdinal": 1,
-          "recordCarrier": "JOURNAL_MUTABLE",
-          "kind": "stage",
-          "state": "COMPLETED",
-          "commandId": null,
-          "action": {
-            "actionKind": "file-mutation",
-            "method": "mkdir-stage",
-            "targetPath": "/private/codex/staged/generation-a",
-            "durability": "FSYNC_FILE_AND_PARENT"
-          },
-          "actionFingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
-          "before": {
-            "schemaId": "absence-proof-v2",
-            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
-            "value": {
-              "proofId": "ap2_02000000000000000000000000000000",
-              "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "entries": [
-                {
-                  "path": "/private/codex/staged/generation-a",
-                  "basename": "generation-a",
-                  "parentDevice": 1,
-                  "parentInode": 31,
-                  "absent": true
-                }
-              ],
-              "directorySyncCompleted": true,
-              "proofFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
-            },
-            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
-          },
-          "expectedAfter": {
-            "schemaId": "tree-object-v2",
-            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
-            "value": {
-              "path": "/private/codex/staged/generation-a",
-              "device": 1,
-              "inode": 250,
-              "ownerUid": 501,
-              "ownerGid": 20,
-              "mode": "0700",
-              "entryCount": 3,
-              "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222"
-            },
-            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
-          },
-          "observedAfter": {
-            "schemaId": "tree-object-v2",
-            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
-            "value": {
-              "path": "/private/codex/staged/generation-a",
-              "device": 1,
-              "inode": 250,
-              "ownerUid": 501,
-              "ownerGid": 20,
-              "mode": "0700",
-              "entryCount": 3,
-              "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222"
-            },
-            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
-          },
-          "intentAt": "2026-07-18T00:00:00Z",
-          "completedAt": "2026-07-18T00:00:01Z"
-        },
-        {
-          "stepId": "st2_03000000000000000000000000000000",
-          "ordinal": 2,
-          "planId": "pl2_dddddddddddddddddddddddddddddddd",
-          "planOrdinal": 2,
-          "recordCarrier": "JOURNAL_MUTABLE",
-          "kind": "verify_staged",
-          "state": "COMPLETED",
-          "commandId": null,
-          "action": {
-            "actionKind": "verify",
-            "predicate": "staged",
-            "timeoutMs": 30000
-          },
-          "actionFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
-          "before": {
-            "schemaId": "tree-object-v2",
-            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
-            "value": {
-              "path": "/private/codex/staged/generation-a",
-              "device": 1,
-              "inode": 250,
-              "ownerUid": 501,
-              "ownerGid": 20,
-              "mode": "0700",
-              "entryCount": 3,
-              "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222"
-            },
-            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
-          },
-          "expectedAfter": {
-            "schemaId": "tree-object-v2",
-            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
-            "value": {
-              "path": "/private/codex/staged/generation-a",
-              "device": 1,
-              "inode": 250,
-              "ownerUid": 501,
-              "ownerGid": 20,
-              "mode": "0700",
-              "entryCount": 3,
-              "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222"
-            },
-            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
-          },
-          "observedAfter": {
-            "schemaId": "tree-object-v2",
-            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
-            "value": {
-              "path": "/private/codex/staged/generation-a",
-              "device": 1,
-              "inode": 250,
-              "ownerUid": 501,
-              "ownerGid": 20,
-              "mode": "0700",
-              "entryCount": 3,
-              "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222"
-            },
-            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
-          },
-          "intentAt": "2026-07-18T00:00:00Z",
-          "completedAt": "2026-07-18T00:00:01Z"
-        },
-        {
-          "stepId": "st2_04000000000000000000000000000000",
-          "ordinal": 3,
-          "planId": "pl2_dddddddddddddddddddddddddddddddd",
-          "planOrdinal": 3,
           "recordCarrier": "JOURNAL_MUTABLE",
           "kind": "maintenance_begin",
           "state": "COMPLETED",
@@ -7178,9 +7804,8 @@
           "completedAt": "2026-07-18T00:00:01Z"
         }
       ],
-      "changes": [
-
-      ],
+      "changes": [],
+      "terminalDefinitionSnapshot": null,
       "terminalDeleteIntent": null,
       "createdAt": "2026-07-18T00:00:00Z",
       "updatedAt": "2026-07-18T00:00:02Z",
@@ -7192,8 +7817,6 @@
         "selectionSource": "DISCOVERY_BEFORE_FIRST_EFFECT",
         "composedStepKinds": [
           "gate_close",
-          "stage",
-          "verify_staged",
           "maintenance_begin",
           "wait_runtime_quiescent",
           "maintenance_strengthen",
@@ -7214,7 +7837,7 @@
           "commit_receipt_publish",
           "gate_open"
         ],
-        "firstIncompleteOrdinal": 4,
+        "firstIncompleteOrdinal": 2,
         "planDefinitionFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
       },
       "abortPlan": {
@@ -7225,8 +7848,6 @@
         "sourceExecutionPlanDefinitionFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
         "sourceCompletedForwardStepKinds": [
           "gate_close",
-          "stage",
-          "verify_staged",
           "maintenance_begin"
         ],
         "composedStepKinds": [
@@ -7239,9 +7860,7 @@
         "firstIncompleteOrdinal": 0,
         "planDefinitionFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
       },
-      "recoveryPlans": [
-
-      ]
+      "recoveryPlans": []
     },
     "abortTerminalJournal": {
       "schemaVersion": 2,
@@ -7252,15 +7871,9 @@
       "phase": "TERMINAL_FROZEN",
       "recoveryPolicy": "REVERSIBLE",
       "discoveryBefore": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -7269,33 +7882,17 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
       "fencedBefore": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -7304,33 +7901,17 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
       "desired": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -7339,26 +7920,14 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
-      "attempts": [
-
-      ],
+      "attempts": [],
       "steps": [
         {
           "stepId": "st2_01000000000000000000000000000000",
@@ -7431,143 +8000,10 @@
           "completedAt": "2026-07-18T00:00:01Z"
         },
         {
-          "stepId": "st2_02000000000000000000000000000000",
+          "stepId": "st2_04000000000000000000000000000000",
           "ordinal": 1,
           "planId": "pl2_dddddddddddddddddddddddddddddddd",
           "planOrdinal": 1,
-          "recordCarrier": "JOURNAL_MUTABLE",
-          "kind": "stage",
-          "state": "COMPLETED",
-          "commandId": null,
-          "action": {
-            "actionKind": "file-mutation",
-            "method": "mkdir-stage",
-            "targetPath": "/private/codex/staged/generation-a",
-            "durability": "FSYNC_FILE_AND_PARENT"
-          },
-          "actionFingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
-          "before": {
-            "schemaId": "absence-proof-v2",
-            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
-            "value": {
-              "proofId": "ap2_02000000000000000000000000000000",
-              "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "entries": [
-                {
-                  "path": "/private/codex/staged/generation-a",
-                  "basename": "generation-a",
-                  "parentDevice": 1,
-                  "parentInode": 31,
-                  "absent": true
-                }
-              ],
-              "directorySyncCompleted": true,
-              "proofFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
-            },
-            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
-          },
-          "expectedAfter": {
-            "schemaId": "tree-object-v2",
-            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
-            "value": {
-              "path": "/private/codex/staged/generation-a",
-              "device": 1,
-              "inode": 250,
-              "ownerUid": 501,
-              "ownerGid": 20,
-              "mode": "0700",
-              "entryCount": 3,
-              "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222"
-            },
-            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
-          },
-          "observedAfter": {
-            "schemaId": "tree-object-v2",
-            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
-            "value": {
-              "path": "/private/codex/staged/generation-a",
-              "device": 1,
-              "inode": 250,
-              "ownerUid": 501,
-              "ownerGid": 20,
-              "mode": "0700",
-              "entryCount": 3,
-              "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222"
-            },
-            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
-          },
-          "intentAt": "2026-07-18T00:00:00Z",
-          "completedAt": "2026-07-18T00:00:01Z"
-        },
-        {
-          "stepId": "st2_03000000000000000000000000000000",
-          "ordinal": 2,
-          "planId": "pl2_dddddddddddddddddddddddddddddddd",
-          "planOrdinal": 2,
-          "recordCarrier": "JOURNAL_MUTABLE",
-          "kind": "verify_staged",
-          "state": "COMPLETED",
-          "commandId": null,
-          "action": {
-            "actionKind": "verify",
-            "predicate": "staged",
-            "timeoutMs": 30000
-          },
-          "actionFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
-          "before": {
-            "schemaId": "tree-object-v2",
-            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
-            "value": {
-              "path": "/private/codex/staged/generation-a",
-              "device": 1,
-              "inode": 250,
-              "ownerUid": 501,
-              "ownerGid": 20,
-              "mode": "0700",
-              "entryCount": 3,
-              "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222"
-            },
-            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
-          },
-          "expectedAfter": {
-            "schemaId": "tree-object-v2",
-            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
-            "value": {
-              "path": "/private/codex/staged/generation-a",
-              "device": 1,
-              "inode": 250,
-              "ownerUid": 501,
-              "ownerGid": 20,
-              "mode": "0700",
-              "entryCount": 3,
-              "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222"
-            },
-            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
-          },
-          "observedAfter": {
-            "schemaId": "tree-object-v2",
-            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
-            "value": {
-              "path": "/private/codex/staged/generation-a",
-              "device": 1,
-              "inode": 250,
-              "ownerUid": 501,
-              "ownerGid": 20,
-              "mode": "0700",
-              "entryCount": 3,
-              "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222"
-            },
-            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
-          },
-          "intentAt": "2026-07-18T00:00:00Z",
-          "completedAt": "2026-07-18T00:00:01Z"
-        },
-        {
-          "stepId": "st2_04000000000000000000000000000000",
-          "ordinal": 3,
-          "planId": "pl2_dddddddddddddddddddddddddddddddd",
-          "planOrdinal": 3,
           "recordCarrier": "JOURNAL_MUTABLE",
           "kind": "maintenance_begin",
           "state": "COMPLETED",
@@ -7677,7 +8113,7 @@
         },
         {
           "stepId": "st2_05000000000000000000000000000000",
-          "ordinal": 4,
+          "ordinal": 2,
           "planId": "pl2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
           "planOrdinal": 0,
           "recordCarrier": "JOURNAL_MUTABLE",
@@ -7727,31 +8163,24 @@
             "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
             "value": {
               "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
-              "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "instanceId": null,
               "controllerStartId": "cs2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "pid": 4000,
-              "processStartMarker": "darwin:99:1",
-              "processGroupId": 4000,
+              "pid": null,
+              "processStartMarker": null,
+              "processGroupId": null,
               "controlEpoch": 2,
-              "state": "ACCEPTING",
+              "state": "EXPECTED_ACCEPTING",
               "maintenanceMode": null,
               "operationId": null,
               "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "socket": {
-                "path": "/private/state/controller.sock",
-                "device": 1,
-                "inode": 30,
-                "ownerUid": 501,
-                "ownerGid": 20,
-                "mode": "0600"
-              },
+              "socket": null,
               "lockHeld": true,
               "acceptingNewRoutes": true,
               "quiescent": false
             },
-            "valueFingerprint": "3333333333333333333333333333333333333333333333333333333333333333"
+            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
           },
           "observedAfter": {
             "schemaId": "controller-state-v2",
@@ -7789,7 +8218,7 @@
         },
         {
           "stepId": "st2_06000000000000000000000000000000",
-          "ordinal": 5,
+          "ordinal": 3,
           "planId": "pl2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
           "planOrdinal": 1,
           "recordCarrier": "JOURNAL_MUTABLE",
@@ -7866,7 +8295,7 @@
         },
         {
           "stepId": "st2_77777777777777777777777777777777",
-          "ordinal": 6,
+          "ordinal": 4,
           "planId": "pl2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
           "planOrdinal": 2,
           "recordCarrier": "JOURNAL_ATOMIC_BOUNDARY",
@@ -7929,9 +8358,124 @@
           "completedAt": "2026-07-18T00:00:01Z"
         }
       ],
-      "changes": [
-
-      ],
+      "changes": [],
+      "terminalDefinitionSnapshot": {
+        "terminalKind": "ABORT",
+        "receiptKind": "operation-abort",
+        "receiptPath": "/private/codex/receipts/op.abort.json",
+        "freeze": {
+          "kind": "terminal_journal_freeze",
+          "commandId": null,
+          "action": {
+            "actionKind": "journal-transition",
+            "transition": "freeze-delete-intent",
+            "journalPath": "/private/codex/install-manifests/codex-smart-subagents-v2.transaction.json",
+            "durability": "FSYNC_FILE_AND_PARENT"
+          },
+          "actionFingerprint": "7777777777777777777777777777777777777777777777777777777777777777",
+          "before": {
+            "schemaId": "journal-state-v2",
+            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "value": {
+              "path": "/private/codex/install-manifests/codex-smart-subagents-v2.transaction.json",
+              "journalKind": "operation",
+              "ownerId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "phase": "ABORTING",
+              "recoveryPolicy": "REVERSIBLE",
+              "executionPlanDefinitionFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "contentGeneration": 40,
+              "frozen": false
+            },
+            "valueFingerprint": "4444444444444444444444444444444444444444444444444444444444444444"
+          },
+          "expectedAfter": {
+            "schemaId": "journal-state-v2",
+            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "value": {
+              "path": "/private/codex/install-manifests/codex-smart-subagents-v2.transaction.json",
+              "journalKind": "operation",
+              "ownerId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "phase": "TERMINAL_FROZEN",
+              "recoveryPolicy": "REVERSIBLE",
+              "executionPlanDefinitionFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "contentGeneration": 41,
+              "frozen": true
+            },
+            "valueFingerprint": "5555555555555555555555555555555555555555555555555555555555555555"
+          }
+        },
+        "journalAbsenceTarget": {
+          "schemaId": "absence-proof-v2",
+          "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "value": {
+            "proofId": "ap2_dddddddddddddddddddddddddddddddd",
+            "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "entries": [
+              {
+                "path": "/private/codex/install-manifests/codex-smart-subagents-v2.transaction.json",
+                "basename": "codex-smart-subagents-v2.transaction.json",
+                "parentDevice": 1,
+                "parentInode": 31,
+                "absent": true
+              }
+            ],
+            "directorySyncCompleted": true,
+            "proofFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          },
+          "valueFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "receiptPayloadStaticIntent": {
+          "payloadKind": "operation-abort",
+          "restoredState": {
+            "fileObjects": [],
+            "treeObjects": [],
+            "symlinks": [],
+            "manifest": null,
+            "activation": null,
+            "database": null,
+            "controller": null,
+            "registry": null,
+            "launchers": null,
+            "legacyProcesses": null,
+            "quiescence": null,
+            "externalCommands": [],
+            "receipts": [],
+            "absenceProofs": [],
+            "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "controllerCandidates": [],
+            "watchdogs": []
+          },
+          "journalAbsenceTarget": {
+            "schemaId": "absence-proof-v2",
+            "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+            "value": {
+              "proofId": "ap2_dddddddddddddddddddddddddddddddd",
+              "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "entries": [
+                {
+                  "path": "/private/codex/install-manifests/codex-smart-subagents-v2.transaction.json",
+                  "basename": "codex-smart-subagents-v2.transaction.json",
+                  "parentDevice": 1,
+                  "parentInode": 31,
+                  "absent": true
+                }
+              ],
+              "directorySyncCompleted": true,
+              "proofFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            },
+            "valueFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          },
+          "reasonCode": "REVERSIBLE_FAILURE"
+        },
+        "tombstonePayloadIntent": null,
+        "postFreezeActionKinds": [
+          "abort_receipt_publish",
+          "abort_journal_close"
+        ],
+        "snapshotFingerprint": "ac59dc2ed9abd4459037caa678de5bf70294f90a205247366890403d9efe88b5"
+      },
       "terminalDeleteIntent": {
         "terminalKind": "ABORT",
         "receiptKind": "operation-abort",
@@ -7939,8 +8483,6 @@
         "terminalStateFingerprint": "6666666666666666666666666666666666666666666666666666666666666666",
         "completedStepIds": [
           "st2_01000000000000000000000000000000",
-          "st2_02000000000000000000000000000000",
-          "st2_03000000000000000000000000000000",
           "st2_04000000000000000000000000000000",
           "st2_05000000000000000000000000000000",
           "st2_06000000000000000000000000000000",
@@ -7955,15 +8497,9 @@
           "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "restoredState": {
-            "fileObjects": [
-
-            ],
-            "treeObjects": [
-
-            ],
-            "symlinks": [
-
-            ],
+            "fileObjects": [],
+            "treeObjects": [],
+            "symlinks": [],
             "manifest": null,
             "activation": null,
             "database": null,
@@ -7972,22 +8508,12 @@
             "launchers": null,
             "legacyProcesses": null,
             "quiescence": null,
-            "externalCommands": [
-
-            ],
-            "receipts": [
-
-            ],
-            "absenceProofs": [
-
-            ],
+            "externalCommands": [],
+            "receipts": [],
+            "absenceProofs": [],
             "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "controllerCandidates": [
-
-            ],
-            "watchdogs": [
-
-            ]
+            "controllerCandidates": [],
+            "watchdogs": []
           },
           "journalAbsenceTarget": {
             "schemaId": "absence-proof-v2",
@@ -8047,8 +8573,6 @@
         "selectionSource": "DISCOVERY_BEFORE_FIRST_EFFECT",
         "composedStepKinds": [
           "gate_close",
-          "stage",
-          "verify_staged",
           "maintenance_begin",
           "wait_runtime_quiescent",
           "maintenance_strengthen",
@@ -8069,7 +8593,7 @@
           "commit_receipt_publish",
           "gate_open"
         ],
-        "firstIncompleteOrdinal": 4,
+        "firstIncompleteOrdinal": 2,
         "planDefinitionFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
       },
       "abortPlan": {
@@ -8080,8 +8604,6 @@
         "sourceExecutionPlanDefinitionFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
         "sourceCompletedForwardStepKinds": [
           "gate_close",
-          "stage",
-          "verify_staged",
           "maintenance_begin"
         ],
         "composedStepKinds": [
@@ -8094,9 +8616,7 @@
         "firstIncompleteOrdinal": 3,
         "planDefinitionFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
       },
-      "recoveryPlans": [
-
-      ]
+      "recoveryPlans": []
     },
     "recoveryOverlayJournal": {
       "schemaVersion": 2,
@@ -8107,15 +8627,9 @@
       "phase": "FENCED",
       "recoveryPolicy": "REVERSIBLE",
       "discoveryBefore": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -8124,33 +8638,17 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
       "fencedBefore": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -8159,33 +8657,17 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
       "desired": {
-        "fileObjects": [
-
-        ],
-        "treeObjects": [
-
-        ],
-        "symlinks": [
-
-        ],
+        "fileObjects": [],
+        "treeObjects": [],
+        "symlinks": [],
         "manifest": null,
         "activation": null,
         "database": null,
@@ -8194,26 +8676,14 @@
         "launchers": null,
         "legacyProcesses": null,
         "quiescence": null,
-        "externalCommands": [
-
-        ],
-        "receipts": [
-
-        ],
-        "absenceProofs": [
-
-        ],
+        "externalCommands": [],
+        "receipts": [],
+        "absenceProofs": [],
         "bundleFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "controllerCandidates": [
-
-        ],
-        "watchdogs": [
-
-        ]
+        "controllerCandidates": [],
+        "watchdogs": []
       },
-      "attempts": [
-
-      ],
+      "attempts": [],
       "steps": [
         {
           "stepId": "st2_11000000000000000000000000000000",
@@ -8301,7 +8771,7 @@
             "recoveryPlanDefinitionFingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
             "sourceStepState": "NO_DURABLE_INTENT_YET",
             "firstIncompleteOrdinal": 1,
-            "firstIncompleteKind": "stage",
+            "firstIncompleteKind": "maintenance_begin",
             "firstIncompleteStepId": null,
             "declaredActionFingerprint": null,
             "observedDisposition": "REEXECUTE_FROM_BEFORE",
@@ -8362,60 +8832,85 @@
           "planId": "pl2_dddddddddddddddddddddddddddddddd",
           "planOrdinal": 1,
           "recordCarrier": "JOURNAL_MUTABLE",
-          "kind": "stage",
+          "kind": "maintenance_begin",
           "state": "INTENT_DURABLE",
-          "commandId": null,
+          "commandId": "cc2_13000000000000000000000000000000",
           "action": {
-            "actionKind": "file-mutation",
-            "method": "mkdir-stage",
-            "targetPath": "/private/codex/staged/generation-a",
-            "durability": "FSYNC_FILE_AND_PARENT"
+            "actionKind": "controller-command",
+            "method": "maintenance_begin",
+            "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "expectedControlEpoch": 2
           },
           "actionFingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
           "before": {
-            "schemaId": "absence-proof-v2",
+            "schemaId": "controller-state-v2",
             "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
             "value": {
-              "proofId": "ap2_02000000000000000000000000000000",
-              "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-              "entries": [
-                {
-                  "path": "/private/codex/staged/generation-a",
-                  "basename": "generation-a",
-                  "parentDevice": 1,
-                  "parentInode": 31,
-                  "absent": true
-                }
-              ],
-              "directorySyncCompleted": true,
-              "proofFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
+              "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
+              "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "controllerStartId": "cs2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "pid": 4000,
+              "processStartMarker": "darwin:99:1",
+              "processGroupId": 4000,
+              "controlEpoch": 2,
+              "state": "ACCEPTING",
+              "maintenanceMode": null,
+              "operationId": null,
+              "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "socket": {
+                "path": "/private/state/controller.sock",
+                "device": 1,
+                "inode": 30,
+                "ownerUid": 501,
+                "ownerGid": 20,
+                "mode": "0600"
+              },
+              "lockHeld": true,
+              "acceptingNewRoutes": true,
+              "quiescent": false
             },
-            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
+            "valueFingerprint": "3333333333333333333333333333333333333333333333333333333333333333"
           },
           "expectedAfter": {
-            "schemaId": "tree-object-v2",
+            "schemaId": "controller-state-v2",
             "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
             "value": {
-              "path": "/private/codex/staged/generation-a",
-              "device": 1,
-              "inode": 250,
-              "ownerUid": 501,
-              "ownerGid": 20,
-              "mode": "0700",
-              "entryCount": 3,
-              "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222"
+              "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
+              "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "controllerStartId": "cs2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "pid": 4000,
+              "processStartMarker": "darwin:99:1",
+              "processGroupId": 4000,
+              "controlEpoch": 2,
+              "state": "DRAINING",
+              "maintenanceMode": "drain",
+              "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "socket": {
+                "path": "/private/state/controller.sock",
+                "device": 1,
+                "inode": 30,
+                "ownerUid": 501,
+                "ownerGid": 20,
+                "mode": "0600"
+              },
+              "lockHeld": true,
+              "acceptingNewRoutes": false,
+              "quiescent": false
             },
-            "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
+            "valueFingerprint": "4444444444444444444444444444444444444444444444444444444444444444"
           },
           "observedAfter": null,
           "intentAt": "2026-07-18T00:00:00Z",
           "completedAt": null
         }
       ],
-      "changes": [
-
-      ],
+      "changes": [],
+      "terminalDefinitionSnapshot": null,
       "terminalDeleteIntent": null,
       "createdAt": "2026-07-18T00:00:00Z",
       "updatedAt": "2026-07-18T00:00:02Z",
@@ -8427,8 +8922,6 @@
         "selectionSource": "DISCOVERY_BEFORE_FIRST_EFFECT",
         "composedStepKinds": [
           "gate_close",
-          "stage",
-          "verify_staged",
           "maintenance_begin",
           "wait_runtime_quiescent",
           "maintenance_strengthen",
@@ -8461,7 +8954,7 @@
           "sourcePlanDefinitionFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
           "sourceStepState": "NO_DURABLE_INTENT_YET",
           "firstIncompleteOrdinal": 1,
-          "firstIncompleteKind": "stage",
+          "firstIncompleteKind": "maintenance_begin",
           "firstIncompleteStepId": null,
           "firstIncompleteActionFingerprint": null,
           "controllerPrerequisite": "NOT_APPLICABLE",
@@ -8480,7 +8973,7 @@
           "sourcePlanDefinitionFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
           "sourceStepState": "DURABLE_STEP_EXISTS",
           "firstIncompleteOrdinal": 1,
-          "firstIncompleteKind": "stage",
+          "firstIncompleteKind": "maintenance_begin",
           "firstIncompleteStepId": "st2_13000000000000000000000000000000",
           "firstIncompleteActionFingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
           "controllerPrerequisite": "MATCHED_LIVE",
@@ -8657,9 +9150,7 @@
         "firstIncompleteOrdinal": 128,
         "planDefinitionFingerprint": "3333333333333333333333333333333333333333333333333333333333333333"
       },
-      "protectedObjects": [
-
-      ],
+      "protectedObjects": [],
       "objects": [
         {
           "objectId": "co2_00000000000000000000000000000001",
@@ -30086,8 +30577,7 @@
           "reasonCode": "upgrade"
         },
         "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
-        "extensions": {
-        }
+        "extensions": {}
       },
       "response": {
         "messageType": "response",
@@ -30105,11 +30595,22 @@
             "resultFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             "controlEpoch": 11
           },
+          "originalControlEpoch": 11,
+          "originalPayload": {
+            "status": "MAINTENANCE_BEGUN",
+            "previousControlEpoch": 10,
+            "newControlEpoch": 11,
+            "commandReceipt": {
+              "commandId": "cc2_11111111111111111111111111111111",
+              "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+              "resultFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "controlEpoch": 11
+            }
+          },
           "originalResponseFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
         },
         "responseFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-        "extensions": {
-        }
+        "extensions": {}
       }
     },
     "watchdogSpawnStep": {
@@ -30312,11 +30813,16 @@
         "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "argvFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "argv": [
+          "/usr/bin/python3",
+          "/private/codex/activations/act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/marketplace/plugins/codex-smart-subagents/controller/server.py",
+          "--serve-candidate-v2"
+        ],
+        "argvFingerprint": "607a3359e4131219029f8f0fd054cedfacb2ffa18bb8cf363eccc0055aa871a3",
         "snapshotFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "privateReadyChannelPath": "/private/state/candidate.ready",
         "readinessTokenHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-        "absoluteDeadlineMonotonicMs": 30000,
+        "readinessWindowMs": 30000,
         "processGroupPolicy": "NEW_PRIVATE_GROUP"
       },
       "actionFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -30352,12 +30858,12 @@
           "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "argvFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "argvFingerprint": "607a3359e4131219029f8f0fd054cedfacb2ffa18bb8cf363eccc0055aa871a3",
           "snapshotFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
           "privateReadyChannelPath": "/private/state/candidate.ready",
           "privateReadyChannel": null,
           "readinessTokenHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-          "absoluteDeadlineMonotonicMs": 30000,
+          "readinessWindowMs": 30000,
           "processGroupPolicy": "NEW_PRIVATE_GROUP",
           "pid": null,
           "processStartMarker": null,
@@ -30383,25 +30889,32 @@
           "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "argvFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "argvFingerprint": "607a3359e4131219029f8f0fd054cedfacb2ffa18bb8cf363eccc0055aa871a3",
           "snapshotFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
           "privateReadyChannelPath": "/private/state/candidate.ready",
-          "privateReadyChannel": null,
+          "privateReadyChannel": {
+            "path": "/private/state/candidate.ready",
+            "device": 1,
+            "inode": 32,
+            "ownerUid": 501,
+            "ownerGid": 20,
+            "mode": "0600"
+          },
           "readinessTokenHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-          "absoluteDeadlineMonotonicMs": 30000,
+          "readinessWindowMs": 30000,
           "processGroupPolicy": "NEW_PRIVATE_GROUP",
-          "pid": null,
-          "processStartMarker": null,
-          "processGroupId": null,
-          "registrationFingerprint": null,
-          "databaseLeaseProofFingerprint": null,
-          "databaseOpened": false,
+          "pid": 4100,
+          "processStartMarker": "darwin:100:1",
+          "processGroupId": 4100,
+          "registrationFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "databaseLeaseProofFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "databaseOpened": true,
           "workingSocketPublished": false,
           "acceptingNewRoutes": false,
-          "status": "EXPECTED_REGISTRATION",
+          "status": "REGISTERED_READY",
           "exitProofFingerprint": null
         },
-        "valueFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        "valueFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
       },
       "intentAt": "2026-07-18T00:00:00Z",
       "completedAt": "2026-07-18T00:00:01Z"
@@ -30932,15 +31445,9 @@
         "phase": "FENCED",
         "recoveryPolicy": "REVERSIBLE",
         "discoveryBefore": {
-          "fileObjects": [
-
-          ],
-          "treeObjects": [
-
-          ],
-          "symlinks": [
-
-          ],
+          "fileObjects": [],
+          "treeObjects": [],
+          "symlinks": [],
           "manifest": null,
           "activation": null,
           "database": null,
@@ -30949,33 +31456,17 @@
           "launchers": null,
           "legacyProcesses": null,
           "quiescence": null,
-          "externalCommands": [
-
-          ],
-          "receipts": [
-
-          ],
-          "absenceProofs": [
-
-          ],
+          "externalCommands": [],
+          "receipts": [],
+          "absenceProofs": [],
           "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "controllerCandidates": [
-
-          ],
-          "watchdogs": [
-
-          ]
+          "controllerCandidates": [],
+          "watchdogs": []
         },
         "fencedBefore": {
-          "fileObjects": [
-
-          ],
-          "treeObjects": [
-
-          ],
-          "symlinks": [
-
-          ],
+          "fileObjects": [],
+          "treeObjects": [],
+          "symlinks": [],
           "manifest": null,
           "activation": null,
           "database": null,
@@ -30984,33 +31475,17 @@
           "launchers": null,
           "legacyProcesses": null,
           "quiescence": null,
-          "externalCommands": [
-
-          ],
-          "receipts": [
-
-          ],
-          "absenceProofs": [
-
-          ],
+          "externalCommands": [],
+          "receipts": [],
+          "absenceProofs": [],
           "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "controllerCandidates": [
-
-          ],
-          "watchdogs": [
-
-          ]
+          "controllerCandidates": [],
+          "watchdogs": []
         },
         "desired": {
-          "fileObjects": [
-
-          ],
-          "treeObjects": [
-
-          ],
-          "symlinks": [
-
-          ],
+          "fileObjects": [],
+          "treeObjects": [],
+          "symlinks": [],
           "manifest": null,
           "activation": null,
           "database": null,
@@ -31019,26 +31494,14 @@
           "launchers": null,
           "legacyProcesses": null,
           "quiescence": null,
-          "externalCommands": [
-
-          ],
-          "receipts": [
-
-          ],
-          "absenceProofs": [
-
-          ],
+          "externalCommands": [],
+          "receipts": [],
+          "absenceProofs": [],
           "bundleFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "controllerCandidates": [
-
-          ],
-          "watchdogs": [
-
-          ]
+          "controllerCandidates": [],
+          "watchdogs": []
         },
-        "attempts": [
-
-        ],
+        "attempts": [],
         "steps": [
           {
             "stepId": "st2_11000000000000000000000000000000",
@@ -31126,7 +31589,7 @@
               "recoveryPlanDefinitionFingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
               "sourceStepState": "NO_DURABLE_INTENT_YET",
               "firstIncompleteOrdinal": 1,
-              "firstIncompleteKind": "stage",
+              "firstIncompleteKind": "maintenance_begin",
               "firstIncompleteStepId": null,
               "declaredActionFingerprint": null,
               "observedDisposition": "REEXECUTE_FROM_BEFORE",
@@ -31182,9 +31645,8 @@
             "completedAt": "2026-07-18T00:00:01Z"
           }
         ],
-        "changes": [
-
-        ],
+        "changes": [],
+        "terminalDefinitionSnapshot": null,
         "terminalDeleteIntent": null,
         "createdAt": "2026-07-18T00:00:00Z",
         "updatedAt": "2026-07-18T00:00:02Z",
@@ -31196,8 +31658,6 @@
           "selectionSource": "DISCOVERY_BEFORE_FIRST_EFFECT",
           "composedStepKinds": [
             "gate_close",
-            "stage",
-            "verify_staged",
             "maintenance_begin",
             "wait_runtime_quiescent",
             "maintenance_strengthen",
@@ -31230,7 +31690,7 @@
             "sourcePlanDefinitionFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
             "sourceStepState": "NO_DURABLE_INTENT_YET",
             "firstIncompleteOrdinal": 1,
-            "firstIncompleteKind": "stage",
+            "firstIncompleteKind": "maintenance_begin",
             "firstIncompleteStepId": null,
             "firstIncompleteActionFingerprint": null,
             "controllerPrerequisite": "NOT_APPLICABLE",
@@ -31253,15 +31713,9 @@
         "phase": "FENCED",
         "recoveryPolicy": "REVERSIBLE",
         "discoveryBefore": {
-          "fileObjects": [
-
-          ],
-          "treeObjects": [
-
-          ],
-          "symlinks": [
-
-          ],
+          "fileObjects": [],
+          "treeObjects": [],
+          "symlinks": [],
           "manifest": null,
           "activation": null,
           "database": null,
@@ -31270,33 +31724,17 @@
           "launchers": null,
           "legacyProcesses": null,
           "quiescence": null,
-          "externalCommands": [
-
-          ],
-          "receipts": [
-
-          ],
-          "absenceProofs": [
-
-          ],
+          "externalCommands": [],
+          "receipts": [],
+          "absenceProofs": [],
           "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "controllerCandidates": [
-
-          ],
-          "watchdogs": [
-
-          ]
+          "controllerCandidates": [],
+          "watchdogs": []
         },
         "fencedBefore": {
-          "fileObjects": [
-
-          ],
-          "treeObjects": [
-
-          ],
-          "symlinks": [
-
-          ],
+          "fileObjects": [],
+          "treeObjects": [],
+          "symlinks": [],
           "manifest": null,
           "activation": null,
           "database": null,
@@ -31305,33 +31743,17 @@
           "launchers": null,
           "legacyProcesses": null,
           "quiescence": null,
-          "externalCommands": [
-
-          ],
-          "receipts": [
-
-          ],
-          "absenceProofs": [
-
-          ],
+          "externalCommands": [],
+          "receipts": [],
+          "absenceProofs": [],
           "bundleFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "controllerCandidates": [
-
-          ],
-          "watchdogs": [
-
-          ]
+          "controllerCandidates": [],
+          "watchdogs": []
         },
         "desired": {
-          "fileObjects": [
-
-          ],
-          "treeObjects": [
-
-          ],
-          "symlinks": [
-
-          ],
+          "fileObjects": [],
+          "treeObjects": [],
+          "symlinks": [],
           "manifest": null,
           "activation": null,
           "database": null,
@@ -31340,26 +31762,14 @@
           "launchers": null,
           "legacyProcesses": null,
           "quiescence": null,
-          "externalCommands": [
-
-          ],
-          "receipts": [
-
-          ],
-          "absenceProofs": [
-
-          ],
+          "externalCommands": [],
+          "receipts": [],
+          "absenceProofs": [],
           "bundleFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "controllerCandidates": [
-
-          ],
-          "watchdogs": [
-
-          ]
+          "controllerCandidates": [],
+          "watchdogs": []
         },
-        "attempts": [
-
-        ],
+        "attempts": [],
         "steps": [
           {
             "stepId": "st2_11000000000000000000000000000000",
@@ -31447,7 +31857,7 @@
               "recoveryPlanDefinitionFingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
               "sourceStepState": "NO_DURABLE_INTENT_YET",
               "firstIncompleteOrdinal": 1,
-              "firstIncompleteKind": "stage",
+              "firstIncompleteKind": "maintenance_begin",
               "firstIncompleteStepId": null,
               "declaredActionFingerprint": null,
               "observedDisposition": "REEXECUTE_FROM_BEFORE",
@@ -31508,60 +31918,85 @@
             "planId": "pl2_dddddddddddddddddddddddddddddddd",
             "planOrdinal": 1,
             "recordCarrier": "JOURNAL_MUTABLE",
-            "kind": "stage",
+            "kind": "maintenance_begin",
             "state": "INTENT_DURABLE",
-            "commandId": null,
+            "commandId": "cc2_13000000000000000000000000000000",
             "action": {
-              "actionKind": "file-mutation",
-              "method": "mkdir-stage",
-              "targetPath": "/private/codex/staged/generation-a",
-              "durability": "FSYNC_FILE_AND_PARENT"
+              "actionKind": "controller-command",
+              "method": "maintenance_begin",
+              "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "expectedControlEpoch": 2
             },
             "actionFingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
             "before": {
-              "schemaId": "absence-proof-v2",
+              "schemaId": "controller-state-v2",
               "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
               "value": {
-                "proofId": "ap2_02000000000000000000000000000000",
-                "installationId": "ins2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "entries": [
-                  {
-                    "path": "/private/codex/staged/generation-a",
-                    "basename": "generation-a",
-                    "parentDevice": 1,
-                    "parentInode": 31,
-                    "absent": true
-                  }
-                ],
-                "directorySyncCompleted": true,
-                "proofFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
+                "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
+                "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "controllerStartId": "cs2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "pid": 4000,
+                "processStartMarker": "darwin:99:1",
+                "processGroupId": 4000,
+                "controlEpoch": 2,
+                "state": "ACCEPTING",
+                "maintenanceMode": null,
+                "operationId": null,
+                "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "socket": {
+                  "path": "/private/state/controller.sock",
+                  "device": 1,
+                  "inode": 30,
+                  "ownerUid": 501,
+                  "ownerGid": 20,
+                  "mode": "0600"
+                },
+                "lockHeld": true,
+                "acceptingNewRoutes": true,
+                "quiescent": false
               },
-              "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
+              "valueFingerprint": "3333333333333333333333333333333333333333333333333333333333333333"
             },
             "expectedAfter": {
-              "schemaId": "tree-object-v2",
+              "schemaId": "controller-state-v2",
               "schemaSha256": "1111111111111111111111111111111111111111111111111111111111111111",
               "value": {
-                "path": "/private/codex/staged/generation-a",
-                "device": 1,
-                "inode": 250,
-                "ownerUid": 501,
-                "ownerGid": 20,
-                "mode": "0700",
-                "entryCount": 3,
-                "treeSha256": "2222222222222222222222222222222222222222222222222222222222222222"
+                "controllerIdentity": "7777777777777777777777777777777777777777777777777777777777777777",
+                "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "controllerStartId": "cs2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "pid": 4000,
+                "processStartMarker": "darwin:99:1",
+                "processGroupId": 4000,
+                "controlEpoch": 2,
+                "state": "DRAINING",
+                "maintenanceMode": "drain",
+                "operationId": "op2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "activationFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "socket": {
+                  "path": "/private/state/controller.sock",
+                  "device": 1,
+                  "inode": 30,
+                  "ownerUid": 501,
+                  "ownerGid": 20,
+                  "mode": "0600"
+                },
+                "lockHeld": true,
+                "acceptingNewRoutes": false,
+                "quiescent": false
               },
-              "valueFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
+              "valueFingerprint": "4444444444444444444444444444444444444444444444444444444444444444"
             },
             "observedAfter": null,
             "intentAt": "2026-07-18T00:00:00Z",
             "completedAt": null
           }
         ],
-        "changes": [
-
-        ],
+        "changes": [],
+        "terminalDefinitionSnapshot": null,
         "terminalDeleteIntent": null,
         "createdAt": "2026-07-18T00:00:00Z",
         "updatedAt": "2026-07-18T00:00:02Z",
@@ -31573,8 +32008,6 @@
           "selectionSource": "DISCOVERY_BEFORE_FIRST_EFFECT",
           "composedStepKinds": [
             "gate_close",
-            "stage",
-            "verify_staged",
             "maintenance_begin",
             "wait_runtime_quiescent",
             "maintenance_strengthen",
@@ -31607,7 +32040,7 @@
             "sourcePlanDefinitionFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
             "sourceStepState": "NO_DURABLE_INTENT_YET",
             "firstIncompleteOrdinal": 1,
-            "firstIncompleteKind": "stage",
+            "firstIncompleteKind": "maintenance_begin",
             "firstIncompleteStepId": null,
             "firstIncompleteActionFingerprint": null,
             "controllerPrerequisite": "NOT_APPLICABLE",
@@ -31626,7 +32059,7 @@
             "sourcePlanDefinitionFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
             "sourceStepState": "DURABLE_STEP_EXISTS",
             "firstIncompleteOrdinal": 1,
-            "firstIncompleteKind": "stage",
+            "firstIncompleteKind": "maintenance_begin",
             "firstIncompleteStepId": "st2_13000000000000000000000000000000",
             "firstIncompleteActionFingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
             "controllerPrerequisite": "MATCHED_LIVE",
@@ -31677,6 +32110,21 @@
       "name": "shutdown intent is tracked",
       "fixture": "shutdownIntentProjection",
       "schema": "lifecycle-projection-v2"
+    },
+    {
+      "name": "controller shutdown records expected then actual proof",
+      "fixture": "controllerShutdownStep",
+      "schema": "operation-step-v2"
+    },
+    {
+      "name": "controller acceptance records expected then actual runtime",
+      "fixture": "controllerAcceptStep",
+      "schema": "operation-step-v2"
+    },
+    {
+      "name": "manifest commit retains prepared source path",
+      "fixture": "manifestCommitStep",
+      "schema": "operation-step-v2"
     },
     {
       "name": "terminal freeze is atomic",
@@ -31824,8 +32272,8 @@
       "schema": "controller-protocol-v2"
     },
     {
-      "name": "smart start request",
-      "fixture": "smartStartRequest",
+      "name": "admit node request",
+      "fixture": "admitNodeRequest",
       "schema": "controller-protocol-v2"
     },
     {
@@ -31865,6 +32313,121 @@
     }
   ],
   "negativeCases": [
+    {
+      "name": "expected shutdown cannot claim late process proof",
+      "fixture": "controllerShutdownStep",
+      "schema": "operation-step-v2",
+      "mutation": {
+        "operation": "replace",
+        "path": "/expectedAfter/value/processExitProofFingerprint",
+        "value": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "expectedFailureContains": "not valid"
+    },
+    {
+      "name": "observed shutdown requires actual process proof",
+      "fixture": "controllerShutdownStep",
+      "schema": "operation-step-v2",
+      "mutation": {
+        "operation": "replace",
+        "path": "/observedAfter/value/processExitProofFingerprint",
+        "value": null
+      },
+      "expectedFailureContains": "not valid"
+    },
+    {
+      "name": "expected maintenance cannot invent a pid",
+      "fixture": "controllerAcceptStep",
+      "schema": "operation-step-v2",
+      "mutation": {
+        "operation": "replace",
+        "path": "/expectedAfter/value/pid",
+        "value": 4100
+      },
+      "expectedFailureContains": "not valid"
+    },
+    {
+      "name": "observed maintenance requires an actual pid",
+      "fixture": "controllerAcceptStep",
+      "schema": "operation-step-v2",
+      "mutation": {
+        "operation": "replace",
+        "path": "/observedAfter/value/pid",
+        "value": null
+      },
+      "expectedFailureContains": "not valid"
+    },
+    {
+      "name": "completed candidate cannot repeat expected registration",
+      "fixture": "controllerCandidateSpawnStep",
+      "schema": "operation-step-v2",
+      "mutation": {
+        "operation": "replace",
+        "path": "/observedAfter/value/status",
+        "value": "EXPECTED_REGISTRATION"
+      },
+      "expectedFailureContains": "not valid"
+    },
+    {
+      "name": "expected accepting cannot invent a socket",
+      "fixture": "abortTerminalJournal",
+      "schema": "operation-journal-v2",
+      "mutation": {
+        "operation": "replace",
+        "path": "/steps/2/expectedAfter/value/socket",
+        "value": {
+          "path": "/private/state/controller.sock",
+          "device": 1,
+          "inode": 30,
+          "ownerUid": 501,
+          "ownerGid": 20,
+          "mode": "0600"
+        }
+      },
+      "expectedFailureContains": "not valid"
+    },
+    {
+      "name": "observed accepting requires an actual socket",
+      "fixture": "abortTerminalJournal",
+      "schema": "operation-journal-v2",
+      "mutation": {
+        "operation": "replace",
+        "path": "/steps/2/observedAfter/value/socket",
+        "value": null
+      },
+      "expectedFailureContains": "not valid"
+    },
+    {
+      "name": "socket cleanup rejects late result fingerprints in action",
+      "fixture": "shutdownSocketCleanupStep",
+      "schema": "operation-step-v2",
+      "mutation": {
+        "operation": "add",
+        "path": "/action/proofSourceFingerprint",
+        "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "expectedFailureContains": "not valid"
+    },
+    {
+      "name": "socket cleanup requires durable parent binding",
+      "fixture": "shutdownSocketCleanupStep",
+      "schema": "operation-step-v2",
+      "mutation": {
+        "operation": "remove",
+        "path": "/action/socketParentInode"
+      },
+      "expectedFailureContains": "not valid"
+    },
+    {
+      "name": "prepared manifest commit requires source path",
+      "fixture": "manifestCommitStep",
+      "schema": "operation-step-v2",
+      "mutation": {
+        "operation": "remove",
+        "path": "/action/sourcePath"
+      },
+      "expectedFailureContains": "not valid"
+    },
     {
       "name": "automaton requires apply",
       "fixture": "automaton",
@@ -31913,6 +32476,16 @@
       "mutation": {
         "operation": "remove",
         "path": "/activationGate"
+      },
+      "expectedFailureContains": "required property"
+    },
+    {
+      "name": "fingerprint registry requires database predicates domain",
+      "fixture": "fingerprintRegistry",
+      "schema": "lifecycle-fingerprint-registry-v2",
+      "mutation": {
+        "operation": "remove",
+        "path": "/databasePredicates"
       },
       "expectedFailureContains": "required property"
     },
@@ -32281,12 +32854,23 @@
       "expectedFailureContains": "required property"
     },
     {
+      "name": "terminal journal requires frozen terminal definition",
+      "fixture": "abortTerminalJournal",
+      "schema": "operation-journal-v2",
+      "mutation": {
+        "operation": "replace",
+        "path": "/terminalDefinitionSnapshot",
+        "value": null
+      },
+      "expectedFailureContains": "not of type"
+    },
+    {
       "name": "terminal operation journal requires atomic freeze step",
       "fixture": "abortTerminalJournal",
       "schema": "operation-journal-v2",
       "mutation": {
         "operation": "remove",
-        "path": "/steps/6"
+        "path": "/steps/4"
       },
       "expectedFailureContains": "does not contain"
     },
@@ -32370,7 +32954,7 @@
       "schema": "operation-journal-v2",
       "mutation": {
         "operation": "add",
-        "path": "/steps/7",
+        "path": "/steps/5",
         "value": {
           "stepId": "st2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa4",
           "ordinal": 20,
@@ -32587,7 +33171,7 @@
     "database-sidecars-role-stable",
     "migration-desired-null-before-fenced",
     "migration-same-journal-populates-fenced-before-and-desired",
-    "smart-start-reserve-commit-gates-identical",
+    "admit-node-reserve-commit-gates-identical",
     "shutdown-increments-epoch-by-one",
     "socket-cleanup-follows-shutdown",
     "socket-cleanup-requires-exit-and-lock-proofs",
@@ -32610,6 +33194,7 @@
     "cleanup-ordinal-cap-consistent",
     "cleanup-127-boundary-and-receipt-exact",
     "activation-commit-cross-artifact-bindings-exact",
+    "activation-transition-lineage-variants-exact",
     "database-cross-artifact-bindings-exact",
     "receipt-frozen-intent-bindings-exact",
     "uninstall-emergency-artifacts-last",
@@ -32674,11 +33259,8 @@
     "uninstall_marketplace_remove": "EXTERNAL_COMMAND_ID_ARGV_BINDING",
     "uninstall_launchers_restore": "LAUNCHER_SET_BINDING",
     "uninstall_activation_link_remove": "SYMLINK_PATH_TARGET_BINDING",
-    "uninstall_database_remove": "DATABASE_PATH_ID_BINDING",
     "uninstall_activation_remove": "OBJECT_DELETE_PATH_OWNERSHIP_BINDING",
     "uninstall_manifest_remove": "OBJECT_DELETE_PATH_OWNERSHIP_BINDING",
-    "uninstall_fallback_remove": "OBJECT_DELETE_PATH_OWNERSHIP_BINDING",
-    "uninstall_admin_remove": "OBJECT_DELETE_PATH_OWNERSHIP_BINDING",
     "uninstall_receipt_publish": "RECEIPT_PATH_KIND_BINDING",
     "uninstall_tombstone_publish": "IMMUTABLE_PROJECTION_BINDING",
     "uninstall_journal_close": "JOURNAL_PATH_BINDING",
@@ -32695,7 +33277,7 @@
   "semanticMutants": [
     {
       "name": "activation gate fingerprint is not recomputed",
-      "fixture": "smartStartRequest",
+      "fixture": "admitNodeRequest",
       "kind": "CONTRACT_WIDE",
       "rule": "ACTIVATION_CROSS_ARTIFACT_BINDING",
       "mutation": "ACTIVATION_RECEIPT_BINDING",
@@ -32709,7 +33291,7 @@
     },
     {
       "name": "activation absence proof fingerprint is not recomputed",
-      "fixture": "smartStartRequest",
+      "fixture": "admitNodeRequest",
       "kind": "CONTRACT_WIDE",
       "rule": "ACTIVATION_CROSS_ARTIFACT_BINDING",
       "mutation": "ACTIVATION_RECEIPT_BINDING",
@@ -32723,7 +33305,7 @@
     },
     {
       "name": "activation absence proof projection fingerprint is not recomputed",
-      "fixture": "smartStartRequest",
+      "fixture": "admitNodeRequest",
       "kind": "CONTRACT_WIDE",
       "rule": "ACTIVATION_CROSS_ARTIFACT_BINDING",
       "mutation": "ACTIVATION_RECEIPT_BINDING",
@@ -33163,7 +33745,7 @@
       "mutation": "ACTIVATION_DATABASE_BINDING",
       "patch": {
         "operation": "replace",
-        "path": "/database/value/activationIdentity/activationId",
+        "path": "/receipt/databaseBinding/value/activationIdentity/activationId",
         "value": "act2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       },
       "expectedSchemaDisposition": "ACCEPT",
@@ -33446,6 +34028,62 @@
         "operation": "replace",
         "path": "/response/controlEpoch",
         "value": 12
+      },
+      "expectedSchemaDisposition": "ACCEPT",
+      "expectedSemanticDisposition": "REJECT"
+    },
+    {
+      "name": "observed shutdown target diverges from expected constraint",
+      "fixture": "controllerShutdownStep",
+      "kind": "controller_shutdown",
+      "rule": "CONTROLLER_OPERATION_EPOCH_BINDING",
+      "mutation": "SHUTDOWN_PROCESS_GROUP",
+      "patch": {
+        "operation": "replace",
+        "path": "/observedAfter/value/targetPid",
+        "value": 4001
+      },
+      "expectedSchemaDisposition": "ACCEPT",
+      "expectedSemanticDisposition": "REJECT"
+    },
+    {
+      "name": "observed maintenance activation diverges from expected constraint",
+      "fixture": "controllerAcceptStep",
+      "kind": "controller_accept",
+      "rule": "CONTROLLER_OPERATION_EPOCH_BINDING",
+      "mutation": "ACTIVATION_CONTROLLER_BINDING",
+      "patch": {
+        "operation": "replace",
+        "path": "/observedAfter/value/activationId",
+        "value": "act2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "expectedSchemaDisposition": "ACCEPT",
+      "expectedSemanticDisposition": "REJECT"
+    },
+    {
+      "name": "observed accepting start id diverges from expected constraint",
+      "fixture": "abortTerminalJournal",
+      "kind": "maintenance_resume",
+      "rule": "CONTROLLER_OPERATION_EPOCH_BINDING",
+      "mutation": "ACTIVATION_CONTROLLER_BINDING",
+      "patch": {
+        "operation": "replace",
+        "path": "/steps/2/observedAfter/value/controllerStartId",
+        "value": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "expectedSchemaDisposition": "ACCEPT",
+      "expectedSemanticDisposition": "REJECT"
+    },
+    {
+      "name": "prepared manifest action targets another file",
+      "fixture": "manifestCommitStep",
+      "kind": "manifest_commit",
+      "rule": "FILE_TARGET_BINDING",
+      "mutation": "FILE_TARGET_PATH",
+      "patch": {
+        "operation": "replace",
+        "path": "/action/targetPath",
+        "value": "/private/codex/install-manifests/other.json"
       },
       "expectedSchemaDisposition": "ACCEPT",
       "expectedSemanticDisposition": "REJECT"

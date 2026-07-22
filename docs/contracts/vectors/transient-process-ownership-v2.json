@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 2,
+  "fixtures": {
+    "candidateOwned": {
+      "schemaVersion": 2,
+      "recordKind": "transient-process-ownership-v2",
+      "leaseId": "transient-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "processLabel": "candidate-controller",
+      "pid": 7311,
+      "processGroupId": 7311,
+      "sessionId": 7311,
+      "processStartMarker": "boot:123",
+      "context": {
+        "schemaVersion": 2,
+        "contextKind": "candidate-dispatch-v2",
+        "operationId": "op2_11111111111111111111111111111111",
+        "candidateId": "cand2_22222222222222222222222222222222",
+        "controllerStartId": "cs2_33333333333333333333333333333333",
+        "actionFingerprint": "4444444444444444444444444444444444444444444444444444444444444444",
+        "dispatchReceiptFingerprint": "5555555555555555555555555555555555555555555555555555555555555555"
+      },
+      "state": "OWNED",
+      "cleanupObligation": null,
+      "recordFingerprint": "6c85a35d11b4421b7dd3edd283122374c256c2b013d60eec12c109a92fef7808"
+    },
+    "genericCleanupRequired": {
+      "schemaVersion": 2,
+      "recordKind": "transient-process-ownership-v2",
+      "leaseId": "transient-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "processLabel": "codex-version-probe",
+      "pid": 8122,
+      "processGroupId": 8122,
+      "sessionId": 8122,
+      "processStartMarker": "boot:456",
+      "context": {
+        "schemaVersion": 2,
+        "contextKind": "installer-transient-v2",
+        "processLabel": "codex-version-probe",
+        "operation": "apply",
+        "phase": "installer-invocation",
+        "invocationId": "inv2_66666666666666666666666666666666"
+      },
+      "state": "CLEANUP_REQUIRED",
+      "cleanupObligation": {
+        "schemaVersion": 2,
+        "obligationType": "transient-process-group-cleanup-v2",
+        "obligationId": "transient-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "status": "pending",
+        "operation": "apply",
+        "phase": "process-group-identity-check",
+        "processLabel": "codex-version-probe",
+        "pid": 8122,
+        "processGroupId": 8122,
+        "reasonCode": "VERSION_PROBE_TIMEOUT",
+        "attempt": 1,
+        "termSent": false,
+        "contSent": false,
+        "preContSent": false,
+        "postContSent": false,
+        "termErrorErrno": null,
+        "contErrorErrno": null,
+        "preContErrorErrno": null,
+        "postContErrorErrno": null,
+        "observedAlive": true,
+        "nextAction": "reconcile-identity-and-retry-term-cont",
+        "automaticSignalAuthorized": false,
+        "continuationAllowed": false,
+        "expectedProcessIdentity": {
+          "pid": 8122,
+          "processGroupId": 8122,
+          "sessionId": 8122,
+          "startMarker": "boot:456"
+        },
+        "observedProcessIdentity": null,
+        "identityFailureCode": "PROCESS_IDENTITY_UNAVAILABLE",
+        "deadlineProof": null
+      },
+      "recordFingerprint": "09b7e2e1c0a3d9bd10ff340342aeed487bb53c92caea39eed07940e28b5ef8f1"
+    }
+  },
+  "cases": [
+    {
+      "name": "candidate-owned-valid",
+      "fixture": "candidateOwned",
+      "mutation": null,
+      "expectedSchemaValid": true,
+      "expectedRuntimeValid": true
+    },
+    {
+      "name": "generic-cleanup-valid",
+      "fixture": "genericCleanupRequired",
+      "mutation": null,
+      "expectedSchemaValid": true,
+      "expectedRuntimeValid": true
+    },
+    {
+      "name": "unknown-top-level-field",
+      "fixture": "candidateOwned",
+      "mutation": {"operation": "add", "path": "/unknown", "value": true},
+      "expectedSchemaValid": false,
+      "expectedRuntimeValid": false
+    },
+    {
+      "name": "unknown-context-field",
+      "fixture": "candidateOwned",
+      "mutation": {"operation": "add", "path": "/context/unknown", "value": "x"},
+      "expectedSchemaValid": false,
+      "expectedRuntimeValid": false
+    },
+    {
+      "name": "missing-session-id",
+      "fixture": "candidateOwned",
+      "mutation": {"operation": "remove", "path": "/sessionId"},
+      "expectedSchemaValid": false,
+      "expectedRuntimeValid": false
+    },
+    {
+      "name": "tampered-record-fingerprint",
+      "fixture": "candidateOwned",
+      "mutation": {"operation": "replace", "path": "/recordFingerprint", "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"},
+      "expectedSchemaValid": true,
+      "expectedRuntimeValid": false
+    },
+    {
+      "name": "owned-with-cleanup",
+      "fixture": "candidateOwned",
+      "mutation": {"operation": "replace", "path": "/cleanupObligation", "fixtureValue": "genericCleanupRequired.cleanupObligation"},
+      "expectedSchemaValid": false,
+      "expectedRuntimeValid": false
+    },
+    {
+      "name": "cleanup-required-without-cleanup",
+      "fixture": "genericCleanupRequired",
+      "mutation": {"operation": "replace", "path": "/cleanupObligation", "value": null},
+      "expectedSchemaValid": false,
+      "expectedRuntimeValid": false
+    },
+    {
+      "name": "identity-relation-mismatch",
+      "fixture": "candidateOwned",
+      "mutation": {"operation": "replace", "path": "/processGroupId", "value": 7312},
+      "expectedSchemaValid": true,
+      "expectedRuntimeValid": false
+    }
+  ]
+}

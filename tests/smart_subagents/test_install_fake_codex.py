@@ -12,23 +12,22 @@ def main() -> int:
     state_path = home / "fake-plugin-state.json"
     state = load_state(state_path)
     args = sys.argv[1:]
+    append_command_log(home, args)
+    version = os.environ.get("FAKE_CODEX_VERSION", "0.144.4")
     if args == ["--version"]:
-        print("codex-cli 0.144.4")
+        print(f"codex-cli {version}")
         return 0
     if args[:1] == ["app-server"]:
-        return run_app_server(home)
+        return run_app_server(home, version)
     if args[:3] == ["plugin", "marketplace", "list"]:
         print(json.dumps({"marketplaces": state["marketplaces"]}))
         return 0
     if args[:3] == ["plugin", "marketplace", "add"]:
-        source = str(Path(args[3]).resolve())
+        source = str(Path(args[3]).resolve(strict=True))
         marketplace = json.loads(
-            (
-                Path(source)
-                / ".agents"
-                / "plugins"
-                / "marketplace.json"
-            ).read_text(encoding="utf-8")
+            (Path(source) / ".claude-plugin" / "marketplace.json").read_text(
+                encoding="utf-8"
+            )
         )
         state["marketplaces"] = [
             {
@@ -61,27 +60,38 @@ def main() -> int:
             print("synthetic plugin add failure", file=sys.stderr)
             return 7
         marketplace_root = Path(state["marketplaces"][0]["root"])
-        plugin_root = marketplace_root / "plugins" / "codex-smart-subagents"
+        primary_marketplace = json.loads(
+            (
+                marketplace_root / ".agents" / "plugins" / "marketplace.json"
+            ).read_text(encoding="utf-8")
+        )
+        primary_plugin = primary_marketplace["plugins"][0]
+        primary_source = primary_plugin["source"]
+        primary_policy = primary_plugin["policy"]
+        plugin_root = (marketplace_root / primary_source["path"]).resolve(strict=True)
+        plugin_manifest = json.loads(
+            (plugin_root / ".codex-plugin" / "plugin.json").read_text(
+                encoding="utf-8"
+            )
+        )
         state["installed"] = [
             {
-                "pluginId": (
-                    "codex-smart-subagents@codex-settings-adaptive"
-                ),
-                "name": "codex-smart-subagents",
+                "pluginId": ("codex-smart-subagents@codex-settings-adaptive"),
+                "name": primary_plugin["name"],
                 "marketplaceName": "codex-settings-adaptive",
-                "version": "0.1.0",
+                "version": plugin_manifest["version"],
                 "installed": True,
                 "enabled": True,
                 "source": {
-                    "source": "local",
+                    "source": primary_source["source"],
                     "path": str(plugin_root),
                 },
                 "marketplaceSource": {
                     "sourceType": "local",
                     "source": str(marketplace_root),
                 },
-                "installPolicy": "AVAILABLE",
-                "authPolicy": "ON_INSTALL",
+                "installPolicy": primary_policy["installation"],
+                "authPolicy": primary_policy["authentication"],
             }
         ]
         save_state(state_path, state)
@@ -122,7 +132,7 @@ def main() -> int:
     return 64
 
 
-def run_app_server(home: Path) -> int:
+def run_app_server(home: Path, version: str) -> int:
     raw_sqlite_home = os.environ.get("CODEX_SQLITE_HOME")
     if raw_sqlite_home is None:
         print("CODEX_SQLITE_HOME is required", file=sys.stderr)
@@ -141,7 +151,7 @@ def run_app_server(home: Path) -> int:
         {
             "id": initialize["id"],
             "result": {
-                "userAgent": "fake-codex/0.144.4",
+                "userAgent": f"fake-codex/{version}",
                 "codexHome": str(home),
                 "platformFamily": "unix",
                 "platformOs": "macos",
@@ -180,14 +190,10 @@ def run_app_server(home: Path) -> int:
     ]
     events = configuration.get("events")
     if isinstance(events, list):
-        hooks = [
-            hook for hook in hooks if hook["eventName"] in events
-        ]
+        hooks = [hook for hook in hooks if hook["eventName"] in events]
     duplicate = configuration.get("duplicateEvent")
     if isinstance(duplicate, str):
-        matching = [
-            hook for hook in hooks if hook["eventName"] == duplicate
-        ]
+        matching = [hook for hook in hooks if hook["eventName"] == duplicate]
         if matching:
             hooks.append(dict(matching[0]))
     for hook in hooks:
@@ -216,9 +222,7 @@ def run_app_server(home: Path) -> int:
 
 def fake_hook(event_name: str, trust_status: str) -> dict[str, object]:
     suffix = (
-        "user_prompt_submit:0:0"
-        if event_name == "userPromptSubmit"
-        else "stop:0:0"
+        "user_prompt_submit:0:0" if event_name == "userPromptSubmit" else "stop:0:0"
     )
     return {
         "command": "fake-hook",
@@ -229,8 +233,7 @@ def fake_hook(event_name: str, trust_status: str) -> dict[str, object]:
         "handlerType": "command",
         "isManaged": trust_status == "managed",
         "key": (
-            "codex-smart-subagents@codex-settings-adaptive:"
-            f"hooks/hooks.json:{suffix}"
+            f"codex-smart-subagents@codex-settings-adaptive:hooks/hooks.json:{suffix}"
         ),
         "matcher": None,
         "pluginId": "codex-smart-subagents@codex-settings-adaptive",
@@ -274,6 +277,12 @@ def load_state(path: Path) -> dict[str, list[object]]:
 def save_state(path: Path, state: dict[str, list[object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state), encoding="utf-8")
+
+
+def append_command_log(home: Path, arguments: list[str]) -> None:
+    path = home / "fake-command-log.jsonl"
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(arguments, separators=(",", ":")) + "\n")
 
 
 def append_config(home: Path, text: str) -> None:

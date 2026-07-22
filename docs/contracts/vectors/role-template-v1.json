@@ -1,0 +1,160 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "codex-role-template-vector-v1",
+  "templates": [
+    {
+      "schemaVersion": 1,
+      "contractVersion": "codex-role-template-v1",
+      "templateId": "researcher-v1",
+      "semanticRole": "researcher",
+      "executionProfile": "reader",
+      "objective": "Найти проверяемые факты и первичные источники, не предлагая изменение без доказательств.",
+      "requiredContextKinds": [
+        "task-request",
+        "source-excerpt"
+      ],
+      "requiredEvidenceKinds": [
+        "repository-file",
+        "official-source"
+      ],
+      "requiredOutputFields": [
+        "findings",
+        "evidenceRefIds",
+        "openQuestions"
+      ],
+      "completionConditions": [
+        "Каждый вывод связан хотя бы с одним evidenceRefId.",
+        "Неподтверждённые утверждения отмечены как unknown."
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "contractVersion": "codex-role-template-v1",
+      "templateId": "diagnostician-v1",
+      "semanticRole": "diagnostician",
+      "executionProfile": "reader",
+      "objective": "Воспроизвести наблюдаемое отклонение и отделить первопричину от следствий.",
+      "requiredContextKinds": [
+        "task-request",
+        "source-excerpt",
+        "validation-result"
+      ],
+      "requiredEvidenceKinds": [
+        "command-output",
+        "repository-file"
+      ],
+      "requiredOutputFields": [
+        "observations",
+        "rootCause",
+        "evidenceRefIds"
+      ],
+      "completionConditions": [
+        "Причина объясняет все воспроизведённые наблюдения.",
+        "Альтернативные причины явно отклонены или оставлены unknown."
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "contractVersion": "codex-role-template-v1",
+      "templateId": "validator-v1",
+      "semanticRole": "validator",
+      "executionProfile": "reader",
+      "objective": "Независимо проверить заявленные свойства и сообщить точный результат каждой проверки.",
+      "requiredContextKinds": [
+        "task-request",
+        "dependency-summary",
+        "validation-result"
+      ],
+      "requiredEvidenceKinds": [
+        "command-output",
+        "repository-file"
+      ],
+      "requiredOutputFields": [
+        "checks",
+        "failures",
+        "evidenceRefIds"
+      ],
+      "completionConditions": [
+        "Каждая обязательная проверка имеет исход passed, failed или blocked.",
+        "Ни один failed или blocked не скрыт итоговой формулировкой."
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "contractVersion": "codex-role-template-v1",
+      "templateId": "risk_auditor-v1",
+      "semanticRole": "risk_auditor",
+      "executionProfile": "reader",
+      "objective": "Искать риски безопасности, отката, конкурентности и расхождения договоров.",
+      "requiredContextKinds": [
+        "task-request",
+        "policy-excerpt",
+        "dependency-summary"
+      ],
+      "requiredEvidenceKinds": [
+        "repository-file",
+        "explicit-policy"
+      ],
+      "requiredOutputFields": [
+        "risks",
+        "counterexamples",
+        "evidenceRefIds"
+      ],
+      "completionConditions": [
+        "Для каждого риска названы последствие и проверяемое условие срабатывания.",
+        "Необратимые и недоказанные откаты выделены отдельно."
+      ]
+    },
+    {
+      "schemaVersion": 1,
+      "contractVersion": "codex-role-template-v1",
+      "templateId": "implementer-v1",
+      "semanticRole": "implementer",
+      "executionProfile": "writer",
+      "objective": "Внести ограниченное изменение по утверждённому договору и доказать результат проверками.",
+      "requiredContextKinds": [
+        "task-request",
+        "repository-instruction",
+        "dependency-summary"
+      ],
+      "requiredEvidenceKinds": [
+        "repository-file",
+        "command-output",
+        "explicit-policy"
+      ],
+      "requiredOutputFields": [
+        "changedFiles",
+        "validation",
+        "rollbackNotes"
+      ],
+      "completionConditions": [
+        "Изменены только разрешённые файлы.",
+        "Результат подтверждён указанными проверками.",
+        "Нерешённые вопросы перечислены без догадок."
+      ]
+    }
+  ],
+  "mutations": [
+    {
+      "name": "researcher-cannot-write",
+      "baseTemplateId": "researcher-v1",
+      "path": "/executionProfile",
+      "value": "writer",
+      "expectedError": "ROLE_PROFILE_MISMATCH"
+    },
+    {
+      "name": "template-id-must-match-role",
+      "baseTemplateId": "validator-v1",
+      "path": "/templateId",
+      "value": "researcher-v1",
+      "expectedError": "ROLE_TEMPLATE_ID_MISMATCH"
+    },
+    {
+      "name": "completion-contract-cannot-be-empty",
+      "baseTemplateId": "implementer-v1",
+      "path": "/completionConditions",
+      "value": [],
+      "expectedError": "ROLE_TEMPLATE_EMPTY_COMPLETION"
+    }
+  ]
+}

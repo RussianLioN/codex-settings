@@ -20,9 +20,15 @@ Codex используются только как источник наблюд
 | [`writer-result-v1`](writer-result-v1.schema.json) | Смысловой результат пишущего субагента до отдельной проверки карантина |
 | [`child-jsonl-v1`](child-jsonl-v1.schema.json) | Защитная форма одной строки JSONL; порядок и завершённость проверяет отдельный автомат |
 | [`otel-logs-v1`](otel-logs-v1.schema.json) | Ограниченная структура OTLP/HTTP JSON и формы `AnyValue` |
-| [`lifecycle-projection-v2`](lifecycle-projection-v2.schema.json) | Закрытые типизированные снимки двадцати видов состояния жизненного цикла |
+| [`lifecycle-projection-v2`](lifecycle-projection-v2.schema.json) | Закрытые типизированные снимки двадцати двух видов состояния жизненного цикла, включая будущую привязку подготовленного inode базы |
+| [`activation-transition-proof-snapshot-v2`](activation-transition-proof-snapshot-v2.schema.json) | Самодостаточный долговечный снимок доказательства прежней активации для продолжения перехода без пересчёта после сбоя |
+| [`activation-preparation-journal-v2`](activation-preparation-journal-v2.schema.json) | Долговечный журнал подготовки неактивной активации и пустого inode базы до основного журнала |
+| [`activation-preparation-receipt-v2`](activation-preparation-receipt-v2.schema.json) | Неизменяемая квитанция завершённой подготовки и полного желаемого состояния |
 | [`operation-step-v2`](operation-step-v2.schema.json) | Семьдесят два точных вида шага, их носители, действия и состояния до/после |
 | [`operation-journal-v2`](operation-journal-v2.schema.json) | Основной журнал установки, перехода, восстановления и удаления |
+| [`lifecycle-command-result-v2`](lifecycle-command-result-v2.schema.json) | Закрытый пользовательский результат чтения, установки, отката, восстановления, уборки и удаления |
+| [`installer-receipt-v2`](installer-receipt-v2.schema.json) | Закрытая квитанция установщика с раздельными лексическим входом рынка и канонической регистрацией неизменяемой активации |
+| [`manifest-document-v2`](manifest-document-v2.schema.json) | Полный канонический манифест, замороженный в commit-квитанции для точного восстановления предыдущей версии |
 | [`activation-commit-receipt-v2`](activation-commit-receipt-v2.schema.json) | Положительное доказательство открытия умного шлюза |
 | [`operation-abort-receipt-v2`](operation-abort-receipt-v2.schema.json) | Доказательство полного возврата незавершённой операции |
 | [`cleanup-journal-v2`](cleanup-journal-v2.schema.json) | Отдельная уборка только неиспользуемых принадлежащих объектов |
@@ -32,6 +38,7 @@ Codex используются только как источник наблюд
 | [`lifecycle-automaton-v2`](lifecycle-automaton-v2.schema.json) | Закрытые порядки шагов, аварийные окна, терминальная матрица и ветви восстановления |
 | [`lifecycle-fingerprint-registry-v2`](lifecycle-fingerprint-registry-v2.schema.json) | Попарно различные области и нерекурсивные проекции нормативных отпечатков |
 | [`controller-protocol-v2`](controller-protocol-v2.schema.json) | Закрытый конверт и параметры методов контроллера |
+| [`transient-process-ownership-v2`](transient-process-ownership-v2.schema.json) | Долговечное владение полной личностью непринятой временной группы и обязанность только мягкой очистки |
 
 Две закрытые оболочки ниже принадлежат только отслеживаемому набору
 испытаний. Они не входят в `InterfaceEvidence.semantic.machineSchemas` и не
@@ -67,6 +74,17 @@ Codex используются только как источник наблюд
 Нормативные автоматы, проекции, квитанции, запросы и ответы контроллера,
 отрицательные мутации и перечень межобъектных проверок жизненного цикла
 находятся в [`lifecycle-v2.json`](../vectors/lifecycle-v2.json).
+Строгие результаты пользовательских команд, их закрытые статусы, порядок
+изменений и проблем, а также нерекурсивный смысловой отпечаток проверяются по
+[`lifecycle-command-result-v2.json`](../vectors/lifecycle-command-result-v2.json)
+программой
+[`validate_lifecycle_command_result_vectors.py`](../../../scripts/validate_lifecycle_command_result_vectors.py).
+
+Две формы контекста временного процесса, полная личность лидера нового сеанса,
+состояния `OWNED`/`CLEANUP_REQUIRED` и отрицательные мутации проверяются по
+[`transient-process-ownership-v2.json`](../vectors/transient-process-ownership-v2.json)
+программой
+[`validate_transient_process_ownership_vectors.py`](../../../scripts/validate_transient_process_ownership_vectors.py).
 
 Все векторы задачи 1 исполняет отслеживаемый
 [`validate_task1_contract_vectors.py`](../../../scripts/validate_task1_contract_vectors.py),

@@ -17,6 +17,25 @@ VALIDATOR = REPO / "scripts" / "validate_docs_navigation.py"
 AUTONOMOUS_VALIDATOR = (
     REPO / "scripts" / "validate_autonomous_workflow.py"
 )
+ROOT_STATE_MUTATION_MARKER = "Реализовано для Codex 0.144.4"
+
+
+def root_catalog_fixture() -> str:
+    """Return a valid root catalog with a stable cell for mutation tests."""
+
+    root = (REPO / "README.md").read_text(encoding="utf-8")
+    lines = root.splitlines()
+    try:
+        header = lines.index("| Задача | Состояние | Куда перейти |")
+        data_index = header + 2
+        cells = lines[data_index].split("|")
+    except (ValueError, IndexError) as exc:
+        raise AssertionError("root quick-route table fixture is missing") from exc
+    if len(cells) != 5 or cells[0] or cells[-1]:
+        raise AssertionError("root quick-route data row is malformed")
+    cells[2] = f" {ROOT_STATE_MUTATION_MARKER} "
+    lines[data_index] = "|".join(cells)
+    return "\n".join(lines) + ("\n" if root.endswith("\n") else "")
 
 
 def load_validator() -> ModuleType:
@@ -65,6 +84,244 @@ class DocsNavigationValidatorTests(unittest.TestCase):
             (),
             self.validator.validate_repository(REPO),
         )
+
+    def test_root_exposes_all_five_v2_flow_diagrams(self) -> None:
+        root = (REPO / "README.md").read_text(encoding="utf-8")
+        flow_path = REPO / "docs/analysis/adaptive-subagents-v2-flow.md"
+        flow = self.validator.parse_markdown(
+            flow_path.read_text(encoding="utf-8")
+        )
+        anchors = (
+            "полный-поток-запроса",
+            "поток-пишущего-результата",
+            "обновление-откат-и-удаление-установки",
+            "восстановление-временного-процесса-установщика",
+            "восстановление-маршрута-после-прерывания",
+        )
+
+        for anchor in anchors:
+            with self.subTest(anchor=anchor):
+                self.assertIn(anchor, flow.anchors)
+                self.assertIn(
+                    "(docs/analysis/adaptive-subagents-v2-flow.md"
+                    f"#{anchor})",
+                    root,
+                )
+
+        mermaid = tuple(
+            fence for fence in flow.fences if fence.language == "mermaid"
+        )
+        self.assertEqual(5, len(mermaid))
+        self.assertEqual(
+            ["flowchart TD"] * 5,
+            [
+                self.validator._first_content_line(fence.content)
+                for fence in mermaid
+            ],
+        )
+        self.assertIn(
+            "(plugins/codex-smart-subagents/README.md"
+            "#корневая-модель-и-роль-agentsmd)",
+            root,
+        )
+
+    def test_current_guides_use_exact_hook_event_names(self) -> None:
+        for path in (
+            REPO / "plugins/codex-smart-subagents/README.md",
+            REPO / "docs/runbooks/adaptive-subagents-v2-operations.md",
+            REPO / "docs/migrations/adaptive-subagents-v2.md",
+        ):
+            document = path.read_text(encoding="utf-8")
+            with self.subTest(path=path.relative_to(REPO)):
+                self.assertIn("`UserPromptSubmit` и `Stop`", document)
+                self.assertNotIn("`userPromptSubmit` и `stop`", document)
+
+    def test_current_guides_explain_all_four_smart_turn_tools(self) -> None:
+        for path in (
+            REPO / "plugins/codex-smart-subagents/README.md",
+            REPO / "docs/runbooks/adaptive-subagents-v2-operations.md",
+            REPO / "docs/analysis/adaptive-subagents-v2-flow.md",
+        ):
+            document = path.read_text(encoding="utf-8")
+            with self.subTest(path=path.relative_to(REPO)):
+                self.assertIn("`smart_cancel`", document)
+                self.assertIn("`USER_REQUESTED`", document)
+                self.assertIn("`TURN_ENDED`", document)
+                self.assertIn("`ROUTE_SUPERSEDED`", document)
+
+    def test_installer_recovery_commands_are_not_conflated(self) -> None:
+        root = (REPO / "README.md").read_text(encoding="utf-8")
+        migration = (
+            REPO / "docs/migrations/adaptive-subagents-v2.md"
+        ).read_text(encoding="utf-8")
+        runbook = (
+            REPO / "docs/runbooks/adaptive-subagents-v2-operations.md"
+        ).read_text(encoding="utf-8")
+        plugin = (
+            REPO / "plugins/codex-smart-subagents/README.md"
+        ).read_text(encoding="utf-8")
+        flow_path = REPO / "docs/analysis/adaptive-subagents-v2-flow.md"
+        flow_source = flow_path.read_text(encoding="utf-8")
+        flow = self.validator.parse_markdown(flow_source)
+        route_anchor = "восстановление-маршрута-после-прерывания"
+
+        self.assertIn(route_anchor, flow.anchors)
+        self.assertNotIn("что-происходит-после-прерывания", flow.anchors)
+        self.assertIn(f"adaptive-subagents-v2-flow.md#{route_anchor}", root)
+        self.assertIn(
+            "Продолжить прерванную установку, обновление, откат или удаление",
+            root,
+        )
+        self.assertIn("--cleanup --apply", flow_source)
+        for document_name, document in (
+            ("runbook", runbook),
+            ("plugin", plugin),
+            ("flow", flow_source),
+            ("migration", migration),
+        ):
+            with self.subTest(document=document_name):
+                self.assertIn("--uninstall --retain-data --apply --json", document)
+                self.assertIn("--recover --preview --json", document)
+                self.assertIn("--recover --apply --json", document)
+                self.assertIn(
+                    "`extensions.lifecycleAdapter.journalKind=uninstall`",
+                    document,
+                )
+                self.assertIn(
+                    "`extensions.lifecycleAdapter.internalOperationId`",
+                    document,
+                )
+                self.assertRegex(document, r"тот же\s+`operationId`")
+                self.assertIn("--cleanup --apply --json", document)
+
+        for obsolete_claim in (
+            "Общий установочный `--recover` относится только к установке, "
+            "обновлению и откату",
+            "Общий установочный `--recover` журнал удаления не продолжает",
+            "общий `--recover` их отдельные журналы не продолжает",
+            "общий `--recover` не перенаправляет один вид журнала в другой",
+            "общий `--recover` не продолжает отдельные журналы удаления и уборки",
+        ):
+            with self.subTest(obsolete_claim=obsolete_claim):
+                self.assertNotIn(
+                    obsolete_claim,
+                    "\n".join((runbook, plugin, flow_source, migration)),
+                )
+
+    def test_operator_guides_keep_inspect_projection_honest(self) -> None:
+        for path in (
+            REPO / "docs/runbooks/adaptive-subagents-v2-operations.md",
+            REPO / "docs/analysis/adaptive-subagents-v2-flow.md",
+            REPO / "docs/migrations/adaptive-subagents-v2.md",
+        ):
+            document = path.read_text(encoding="utf-8")
+            with self.subTest(path=path.relative_to(REPO)):
+                self.assertIn("`inspect` не возвращает зависимости", document)
+                self.assertIn("`terminalResult` возвращает `smart_wait`", document)
+
+    def test_runbook_covers_maintenance_and_candidate_failure_boundaries(
+        self,
+    ) -> None:
+        runbook = (
+            REPO / "docs/runbooks/adaptive-subagents-v2-operations.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("старые commit-квитанции не удаляются", runbook)
+        for code in (
+            "ROLLBACK_VERIFY_CANDIDATE_FAILED",
+            "ROLLBACK_VERIFY_CANDIDATE_ACCEPTANCE_INVALID",
+            "ROLLBACK_CANDIDATE_SUCCESSOR_INVALID",
+            "CANDIDATE_SPAWN_COMPLETED_UNOBSERVABLE",
+            "CANDIDATE_SPAWN_RECOVERY_EXPIRED",
+            "SHUTDOWN_COMPLETION_TIMEOUT",
+            "SHUTDOWN_PROCESS_*",
+            "SHUTDOWN_LOCK_*",
+            "SHUTDOWN_SOCKET_*",
+            "SHUTDOWN_ORPHAN_PROOF_*",
+        ):
+            with self.subTest(code=code):
+                self.assertIn(f"`{code}`", runbook)
+        for state in ("`CANDIDATE_READY`", "`SUCCEEDED`", "`VERIFIED`"):
+            with self.subTest(state=state):
+                self.assertIn(state, runbook)
+        self.assertIn(
+            "`CANDIDATE_READY` сохраняется в полном договоре состояний",
+            runbook,
+        )
+        self.assertIn(
+            "успешная попытка пишущего узла завершается как `SUCCEEDED`",
+            runbook,
+        )
+        self.assertIn(
+            "публикация кандидата отдельно получает `VERIFIED`",
+            runbook,
+        )
+
+    def test_v2_migration_guide_uses_only_current_operator_entrypoints(self) -> None:
+        guide = (REPO / "docs/migrations/adaptive-subagents-v2.md").read_text(
+            encoding="utf-8"
+        )
+        for obsolete in (
+            "CODEX_SMART_ENABLED",
+            "AWAITING_HOOK_TRUST",
+            "codex-smart-subagents-admin rollback",
+            "scripts/rollback_adaptive_subagents.py",
+            "`explain`",
+            "`report`",
+            "`metrics`",
+        ):
+            with self.subTest(obsolete=obsolete):
+                self.assertNotIn(obsolete, guide)
+        for current in (
+            "~/.local/bin/codex-smart",
+            "~/.local/bin/codex-smart-subagents-admin status",
+            "~/.local/bin/codex-smart-subagents-admin stop",
+            "~/.local/bin/codex-smart-subagents-admin recover --dry-run",
+        ):
+            with self.subTest(current=current):
+                self.assertIn(current, guide)
+
+    def test_lifecycle_commands_are_discoverable_from_current_guides(self) -> None:
+        root = (REPO / "README.md").read_text(encoding="utf-8")
+        migration = (
+            REPO / "docs/migrations/adaptive-subagents-v2.md"
+        ).read_text(encoding="utf-8")
+        runbook = (
+            REPO / "docs/runbooks/adaptive-subagents-v2-operations.md"
+        ).read_text(encoding="utf-8")
+        plugin = (
+            REPO / "plugins/codex-smart-subagents/README.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("обновление, откат, восстановление или удаление", root)
+        commands = (
+            "--rollback --preview --json",
+            "--rollback --apply --json",
+            "--uninstall --retain-data --preview --json",
+            "--uninstall --retain-data --apply --json",
+            "--recover --preview --json",
+            "--recover --apply --json",
+            "--cleanup --preview --json",
+            "--cleanup --apply --json",
+            "--inspect --json",
+        )
+        for document_name, document in (
+            ("migration", migration),
+            ("runbook", runbook),
+            ("plugin", plugin),
+        ):
+            self.assertNotIn("readiness=FULL_READY", document)
+            self.assertNotIn("status=FULL_READY", document)
+            for command in commands:
+                with self.subTest(document=document_name, command=command):
+                    self.assertIn(command, document)
+
+        for obsolete in (
+            "не предоставляет команду автоматического отката",
+            "подготовить отдельную управляемую процедуру обновления",
+            "Административный интерфейс версии 2 намеренно ограничен командами",
+        ):
+            with self.subTest(obsolete=obsolete):
+                self.assertNotIn(obsolete, runbook)
 
     def test_autonomous_validator_includes_docs_navigation_check(
         self,
@@ -1746,7 +2003,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
     def test_structured_root_rejects_non_navigation_table_row(
         self,
     ) -> None:
-        root = (REPO / "README.md").read_text(encoding="utf-8")
+        root = root_catalog_fixture()
         mutated = root.replace(
             "|---|---|---|\n",
             (
@@ -1762,7 +2019,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
         )
 
     def test_structured_root_enforces_exact_table_schema(self) -> None:
-        root = (REPO / "README.md").read_text(encoding="utf-8")
+        root = root_catalog_fixture()
         lines = root.splitlines()
         first_header = lines.index(
             "| Задача | Состояние | Куда перейти |"
@@ -1960,7 +2217,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
     def test_structured_root_uses_rendered_link_and_table_semantics(
         self,
     ) -> None:
-        root = (REPO / "README.md").read_text(encoding="utf-8")
+        root = root_catalog_fixture()
         link = (
             "[Как проходит умный ход]"
             "(plugins/codex-smart-subagents/"
@@ -2075,7 +2332,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
         self,
     ) -> None:
         contracts = sys.modules["docs_navigation_contracts"]
-        root = (REPO / "README.md").read_text(encoding="utf-8")
+        root = root_catalog_fixture()
         preamble, sections = root.split("## Быстрые маршруты\n", 1)
         compatibility_prefix = root.split(
             "## Совместимость\n\n",
@@ -2290,7 +2547,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
                 )
 
     def test_root_catalog_detects_only_rendered_tables(self) -> None:
-        root = (REPO / "README.md").read_text(encoding="utf-8")
+        root = root_catalog_fixture()
         prefix = root.split("## Совместимость\n\n", 1)[0]
         table_error = (
             "раздел «Совместимость» не должен содержать таблицу"
@@ -2479,7 +2736,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
     def test_visible_html_table_detector_respects_gfm_raw_blocks(
         self,
     ) -> None:
-        root = (REPO / "README.md").read_text(encoding="utf-8")
+        root = root_catalog_fixture()
         prefix = root.split("## Совместимость\n\n", 1)[0]
 
         def with_compatibility(body: str) -> str:

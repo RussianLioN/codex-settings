@@ -18,9 +18,9 @@ from .child_runner import (
     MAX_PROMPT_BYTES,
     MAX_SCHEMA_BYTES,
     MODEL_EFFORTS,
-    SUPPORTED_CODEX_VERSION,
     ChildResourceLimits,
 )
+from .compatibility import codex_version_supported
 from .execution import (
     NodeExecutionError,
     NodeExecutionOutcome,
@@ -134,7 +134,7 @@ class WriterExecutorConfig:
             executable=True,
         )
         schema = _assert_writer_schema(self.output_schema)
-        if self.codex_version != SUPPORTED_CODEX_VERSION:
+        if not codex_version_supported(self.codex_version):
             raise ValueError("unsupported Codex CLI version")
         if _OPAQUE_ID.fullmatch(self.writer_permission_profile_id) is None:
             raise ValueError("writer_permission_profile_id is invalid")

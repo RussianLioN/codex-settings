@@ -11,7 +11,7 @@
     {"$ref": "#/$defs/controllerAcceptRequest"},
     {"$ref": "#/$defs/controllerRecoverRequest"},
     {"$ref": "#/$defs/maintenanceResumeRequest"},
-    {"$ref": "#/$defs/smartStartRequest"},
+    {"$ref": "#/$defs/admitNodeRequest"},
     {"$ref": "#/$defs/smartStatusRequest"},
     {"$ref": "#/$defs/reserveLaunchPermitRequest"},
     {"$ref": "#/$defs/commitLaunchPermitRequest"},
@@ -23,7 +23,7 @@
     {"$ref": "#/$defs/controllerAcceptResponse"},
     {"$ref": "#/$defs/controllerRecoverResponse"},
     {"$ref": "#/$defs/maintenanceResumeResponse"},
-    {"$ref": "#/$defs/smartStartResponse"},
+    {"$ref": "#/$defs/admitNodeResponse"},
     {"$ref": "#/$defs/smartStatusResponse"},
     {"$ref": "#/$defs/reserveLaunchPermitResponse"},
     {"$ref": "#/$defs/commitLaunchPermitResponse"},
@@ -32,7 +32,7 @@
   ],
   "$defs": {
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "method": {"enum": ["health", "maintenance_begin", "maintenance_strengthen", "maintenance_status", "shutdown", "controller_accept", "controller_recover", "maintenance_resume", "smart_start", "smart_status", "reserve_launch_permit", "commit_launch_permit"]},
+    "method": {"enum": ["health", "maintenance_begin", "maintenance_strengthen", "maintenance_status", "shutdown", "controller_accept", "controller_recover", "maintenance_resume", "admit_node", "smart_status", "reserve_launch_permit", "commit_launch_permit"]},
     "nullableSha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
     "nullableInstanceId": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^ci2_[0-9a-f]{32}$"}]},
     "nullableControllerStartId": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^cs2_[0-9a-f]{32}$"}]},
@@ -73,6 +73,11 @@
       "required": ["activationId", "databaseId", "pid", "processStartMarker", "processGroupId"],
       "properties": {"activationId": {"type": "string", "pattern": "^act2_[0-9a-f]{64}$"}, "databaseId": {"type": "string", "pattern": "^db2_[0-9a-f]{32}$"}, "pid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "processStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "processGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647}}
     },
+    "controllerAcceptParams": {
+      "type": "object", "additionalProperties": false,
+      "required": ["activationId", "databaseId", "pid", "processStartMarker", "processGroupId", "expectedOrphanOperationId"],
+      "properties": {"activationId": {"type": "string", "pattern": "^act2_[0-9a-f]{64}$"}, "databaseId": {"type": "string", "pattern": "^db2_[0-9a-f]{32}$"}, "pid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "processStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "processGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "expectedOrphanOperationId": {"$ref": "#/$defs/nullableOperationId"}}
+    },
     "activationGate": {
       "description": "Closed activation gate. gateFingerprint is SHA256(UTF8('codex-smart/activation-gate/v2') || 0x00 || canonical-json-v1({manifestSemanticFingerprint, activationReceiptFingerprint, journalAbsenceProof})); journalAbsenceProof is included as the complete projection, not by proofFingerprint alone.",
       "type": "object", "additionalProperties": false,
@@ -84,12 +89,12 @@
         "gateFingerprint": {"$ref": "#/$defs/sha256", "description": "Computed over the exact three-field projection; this field is excluded from its own hash input."}
       }
     },
-    "smartStartParams": {
+    "admitNodeParams": {
       "type": "object", "additionalProperties": false,
-      "required": ["routeId", "nodeId", "activationGate"],
-      "properties": {"routeId": {"type": "string", "minLength": 1, "maxLength": 256}, "nodeId": {"type": "string", "minLength": 1, "maxLength": 256}, "activationGate": {"$ref": "#/$defs/activationGate"}}
+      "required": ["startRequestId", "routeId", "nodeId", "evidenceJobId", "activationGate"],
+      "properties": {"startRequestId": {"type": "string", "pattern": "^sr2_[0-9a-f]{32}$"}, "routeId": {"type": "string", "pattern": "^route2_[0-9a-f]{32}$"}, "nodeId": {"type": "string", "pattern": "^node2_[0-9a-f]{32}$"}, "evidenceJobId": {"type": "string", "pattern": "^aej2_[0-9a-f]{32}$"}, "activationGate": {"$ref": "#/$defs/activationGate"}}
     },
-    "smartStatusParams": {"type": "object", "additionalProperties": false, "required": ["admissionId"], "properties": {"admissionId": {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"}}},
+    "smartStatusParams": {"type": "object", "additionalProperties": false, "required": ["startRequestId"], "properties": {"startRequestId": {"type": "string", "pattern": "^sr2_[0-9a-f]{32}$"}}},
     "reserveLaunchPermitParams": {
       "type": "object", "additionalProperties": false,
       "required": ["admissionId", "activationGate"],
@@ -105,10 +110,10 @@
     "maintenanceStrengthenRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/controlFence"}], "properties": {"method": {"const": "maintenance_strengthen"}, "params": {"$ref": "#/$defs/maintenanceStrengthenParams"}}},
     "maintenanceStatusRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/liveFence"}], "properties": {"method": {"const": "maintenance_status"}, "commandId": {"type": "null"}, "operationId": {"type": "null"}, "params": {"$ref": "#/$defs/emptyParams"}}},
     "shutdownRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/controlFence"}], "properties": {"method": {"const": "shutdown"}, "params": {"$ref": "#/$defs/emptyParams"}}},
-    "controllerAcceptRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/candidateFence"}], "properties": {"method": {"const": "controller_accept"}, "params": {"$ref": "#/$defs/controllerStartParams"}}},
+    "controllerAcceptRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/candidateFence"}], "properties": {"method": {"const": "controller_accept"}, "params": {"$ref": "#/$defs/controllerAcceptParams"}}},
     "controllerRecoverRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/candidateFence"}], "properties": {"method": {"const": "controller_recover"}, "params": {"$ref": "#/$defs/controllerStartParams"}}},
     "maintenanceResumeRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/controlFence"}], "properties": {"method": {"const": "maintenance_resume"}, "params": {"$ref": "#/$defs/emptyParams"}}},
-    "smartStartRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/liveFence"}], "properties": {"method": {"const": "smart_start"}, "commandId": {"type": "null"}, "operationId": {"type": "null"}, "params": {"$ref": "#/$defs/smartStartParams"}}},
+    "admitNodeRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/liveFence"}], "properties": {"method": {"const": "admit_node"}, "commandId": {"type": "null"}, "operationId": {"type": "null"}, "params": {"$ref": "#/$defs/admitNodeParams"}}},
     "smartStatusRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/liveFence"}], "properties": {"method": {"const": "smart_status"}, "commandId": {"type": "null"}, "operationId": {"type": "null"}, "params": {"$ref": "#/$defs/smartStatusParams"}}},
     "reserveLaunchPermitRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/liveFence"}], "properties": {"method": {"const": "reserve_launch_permit"}, "commandId": {"type": "null"}, "operationId": {"type": "null"}, "params": {"$ref": "#/$defs/reserveLaunchPermitParams"}}},
     "commitLaunchPermitRequest": {"$ref": "#/$defs/requestBase", "allOf": [{"$ref": "#/$defs/liveFence"}], "properties": {"method": {"const": "commit_launch_permit"}, "commandId": {"type": "null"}, "operationId": {"type": "null"}, "params": {"$ref": "#/$defs/commitLaunchPermitParams"}}},
@@ -121,11 +126,11 @@
     },
     "workCounts": {
       "type": "object", "additionalProperties": false,
-      "required": ["nonterminalRoutes", "nonterminalNodes", "activeAttempts", "activeLeases", "openIntents", "inflightLaunchPermits", "activeRuntimeArtifacts", "pendingCandidatePublications"],
-      "properties": {"nonterminalRoutes": {"type": "integer", "minimum": 0}, "nonterminalNodes": {"type": "integer", "minimum": 0}, "activeAttempts": {"type": "integer", "minimum": 0}, "activeLeases": {"type": "integer", "minimum": 0}, "openIntents": {"type": "integer", "minimum": 0}, "inflightLaunchPermits": {"type": "integer", "minimum": 0}, "activeRuntimeArtifacts": {"type": "integer", "minimum": 0}, "pendingCandidatePublications": {"type": "integer", "minimum": 0}}
+      "required": ["nonterminalRoutes", "nonterminalNodes", "activeAttempts", "activeLeases", "openIntents", "inflightLaunchPermits", "activeRuntimeArtifacts", "pendingCandidatePublications", "activeEvidenceJobs", "queuedEvidenceJobs"],
+      "properties": {"nonterminalRoutes": {"type": "integer", "minimum": 0}, "nonterminalNodes": {"type": "integer", "minimum": 0}, "activeAttempts": {"type": "integer", "minimum": 0}, "activeLeases": {"type": "integer", "minimum": 0}, "openIntents": {"type": "integer", "minimum": 0}, "inflightLaunchPermits": {"type": "integer", "minimum": 0}, "activeRuntimeArtifacts": {"type": "integer", "minimum": 0}, "pendingCandidatePublications": {"type": "integer", "minimum": 0}, "activeEvidenceJobs": {"type": "integer", "minimum": 0}, "queuedEvidenceJobs": {"type": "integer", "minimum": 0}}
     },
     "zeroWorkCounts": {
-      "const": {"nonterminalRoutes": 0, "nonterminalNodes": 0, "activeAttempts": 0, "activeLeases": 0, "openIntents": 0, "inflightLaunchPermits": 0, "activeRuntimeArtifacts": 0, "pendingCandidatePublications": 0}
+      "const": {"nonterminalRoutes": 0, "nonterminalNodes": 0, "activeAttempts": 0, "activeLeases": 0, "openIntents": 0, "inflightLaunchPermits": 0, "activeRuntimeArtifacts": 0, "pendingCandidatePublications": 0, "activeEvidenceJobs": 0, "queuedEvidenceJobs": 0}
     },
     "healthPayload": {
       "type": "object", "additionalProperties": false,
@@ -177,8 +182,26 @@
         {"properties": {"state": {"const": "MAINTENANCE"}, "maintenanceMode": {"enum": ["drain", "freeze"]}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}}}
       ]
     },
-    "smartStartPayload": {"type": "object", "additionalProperties": false, "required": ["status", "admissionId", "activationGateFingerprint"], "properties": {"status": {"const": "QUEUED"}, "admissionId": {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"}, "activationGateFingerprint": {"$ref": "#/$defs/sha256"}}},
-    "smartStatusPayload": {"type": "object", "additionalProperties": false, "required": ["admissionId", "status", "terminalProblem"], "properties": {"admissionId": {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"}, "status": {"enum": ["ATTESTING", "RESERVED", "GUARDED", "COMMIT_AUTHORIZED", "STARTED", "STALE", "ABORTED"]}, "terminalProblem": {"oneOf": [{"type": "null"}, {"type": "string", "minLength": 1, "maxLength": 128}]}}},
+    "admitNodePayload": {"type": "object", "additionalProperties": false, "required": ["status", "startRequestId", "evidenceJobId", "admissionId", "activationGateFingerprint"], "properties": {"status": {"const": "ADMITTED"}, "startRequestId": {"type": "string", "pattern": "^sr2_[0-9a-f]{32}$"}, "evidenceJobId": {"type": "string", "pattern": "^aej2_[0-9a-f]{32}$"}, "admissionId": {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"}, "activationGateFingerprint": {"$ref": "#/$defs/sha256"}}},
+    "smartStatusPayload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["startRequestId", "evidenceJobId", "admissionId", "status", "terminalProblem"],
+      "properties": {
+        "startRequestId": {"type": "string", "pattern": "^sr2_[0-9a-f]{32}$"},
+        "evidenceJobId": {"type": "string", "pattern": "^aej2_[0-9a-f]{32}$"},
+        "admissionId": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"}]},
+        "status": {"enum": ["ATTESTING", "READY", "ADMITTED", "RESERVED", "GUARDED", "COMMIT_AUTHORIZED", "STARTED", "STALE", "FAILED", "CANCELLED", "ABORTED"]},
+        "terminalProblem": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/errorPayload"}]}
+      },
+      "oneOf": [
+        {"properties": {"status": {"enum": ["ATTESTING", "READY", "ADMITTED", "RESERVED", "GUARDED", "COMMIT_AUTHORIZED", "STARTED"]}, "terminalProblem": {"type": "null"}}},
+        {"properties": {"status": {"enum": ["STALE", "FAILED", "CANCELLED", "ABORTED"]}, "terminalProblem": {"$ref": "#/$defs/errorPayload"}}}
+      ],
+      "allOf": [
+        {"if": {"properties": {"status": {"enum": ["ATTESTING", "READY"]}}, "required": ["status"]}, "then": {"properties": {"admissionId": {"type": "null"}}}},
+        {"if": {"properties": {"status": {"enum": ["ADMITTED", "RESERVED", "GUARDED", "COMMIT_AUTHORIZED", "STARTED"]}}, "required": ["status"]}, "then": {"properties": {"admissionId": {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"}}}}
+      ]
+    },
     "reservePayload": {"type": "object", "additionalProperties": false, "required": ["status", "permitId", "activationGateFingerprint"], "properties": {"status": {"const": "RESERVED"}, "permitId": {"type": "string", "pattern": "^lp2_[0-9a-f]{32}$"}, "activationGateFingerprint": {"$ref": "#/$defs/sha256"}}},
     "commitPayload": {"type": "object", "additionalProperties": false, "required": ["status", "permitId", "guardPid", "guardStartMarker", "activationGateFingerprint"], "properties": {"status": {"const": "COMMIT_AUTHORIZED"}, "permitId": {"type": "string", "pattern": "^lp2_[0-9a-f]{32}$"}, "guardPid": {"type": "integer", "minimum": 1, "maximum": 2147483647}, "guardStartMarker": {"type": "string", "minLength": 1, "maxLength": 256}, "activationGateFingerprint": {"$ref": "#/$defs/sha256"}}},
     "healthResponse": {"$ref": "#/$defs/responseBase", "properties": {"method": {"const": "health"}, "responseKind": {"const": "HEALTH"}, "commandId": {"type": "null"}, "controlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "payload": {"$ref": "#/$defs/healthPayload"}}},
@@ -190,13 +213,55 @@
     "controllerAcceptResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "controller_accept"}, "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, "payload": {"$ref": "#/$defs/controllerStartPayload", "properties": {"status": {"const": "CONTROLLER_ACCEPTED"}}}}},
     "controllerRecoverResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "controller_recover"}, "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, "payload": {"$ref": "#/$defs/controllerStartPayload", "properties": {"status": {"const": "CONTROLLER_RECOVERED"}}}}},
     "maintenanceResumeResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "maintenance_resume"}, "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, "payload": {"$ref": "#/$defs/epochTransitionPayload", "properties": {"status": {"const": "MAINTENANCE_RESUMED"}}}}},
-    "smartStartResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "smart_start"}, "commandId": {"type": "null"}, "payload": {"$ref": "#/$defs/smartStartPayload"}}},
+    "admitNodeResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "admit_node"}, "commandId": {"type": "null"}, "payload": {"$ref": "#/$defs/admitNodePayload"}}},
     "smartStatusResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "smart_status"}, "commandId": {"type": "null"}, "payload": {"$ref": "#/$defs/smartStatusPayload"}}},
     "reserveLaunchPermitResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "reserve_launch_permit"}, "commandId": {"type": "null"}, "payload": {"$ref": "#/$defs/reservePayload"}}},
     "commitLaunchPermitResponse": {"$ref": "#/$defs/successResponse", "properties": {"method": {"const": "commit_launch_permit"}, "commandId": {"type": "null"}, "payload": {"$ref": "#/$defs/commitPayload"}}},
-    "errorPayload": {"type": "object", "additionalProperties": false, "required": ["code", "message", "retryable"], "properties": {"code": {"enum": ["COMMAND_REPLAY_CONFLICT", "CONTROL_EPOCH_MISMATCH", "CONTROLLER_INSTANCE_MISMATCH", "CONTROLLER_OPERATION_CONFLICT", "INVALID_TRANSITION", "ADAPTIVE_ACTIVATION_UNCOMMITTED", "EXTERNAL_PROCESS_STILL_RUNNING", "INTERNAL_ERROR"]}, "message": {"type": "string", "minLength": 1, "maxLength": 1024}, "retryable": {"type": "boolean"}}},
+    "errorPayload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["category", "code", "message", "retryable"],
+      "properties": {
+        "category": {"enum": ["STALE", "UNAVAILABLE", "INVALID", "CONFLICT", "INTERNAL"]},
+        "code": {"enum": ["COMMAND_REPLAY_CONFLICT", "CONTROL_EPOCH_MISMATCH", "CONTROLLER_INSTANCE_MISMATCH", "CONTROLLER_OPERATION_CONFLICT", "INVALID_TRANSITION", "ADAPTIVE_ACTIVATION_UNCOMMITTED", "ACCOUNT_EVIDENCE_UNAVAILABLE", "ACCOUNT_EVIDENCE_NOT_SUCCEEDED", "ACCOUNT_CONTEXT_CHANGED", "ACTIVATION_GATE_CHANGED", "START_REQUEST_STALE", "START_REQUEST_OWNERSHIP_MISMATCH", "EXTERNAL_PROCESS_STILL_RUNNING", "INTERNAL_ERROR"]},
+        "message": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "retryable": {"type": "boolean"}
+      },
+      "oneOf": [
+        {"properties": {"category": {"const": "CONFLICT"}, "code": {"enum": ["COMMAND_REPLAY_CONFLICT", "CONTROLLER_OPERATION_CONFLICT"]}}},
+        {"properties": {"category": {"const": "STALE"}, "code": {"enum": ["CONTROL_EPOCH_MISMATCH", "CONTROLLER_INSTANCE_MISMATCH", "ACCOUNT_CONTEXT_CHANGED", "ACTIVATION_GATE_CHANGED", "START_REQUEST_STALE"]}}},
+        {"properties": {"category": {"const": "UNAVAILABLE"}, "code": {"enum": ["ADAPTIVE_ACTIVATION_UNCOMMITTED", "ACCOUNT_EVIDENCE_UNAVAILABLE", "EXTERNAL_PROCESS_STILL_RUNNING"]}}},
+        {"properties": {"category": {"const": "INVALID"}, "code": {"enum": ["INVALID_TRANSITION", "ACCOUNT_EVIDENCE_NOT_SUCCEEDED", "START_REQUEST_OWNERSHIP_MISMATCH"]}}},
+        {"properties": {"category": {"const": "INTERNAL"}, "code": {"const": "INTERNAL_ERROR"}}}
+      ]
+    },
     "errorResponse": {"$ref": "#/$defs/responseBase", "properties": {"responseKind": {"const": "ERROR"}, "controlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "payload": {"$ref": "#/$defs/errorPayload"}}},
-    "replayPayload": {"type": "object", "additionalProperties": false, "required": ["commandReceipt", "originalResponseFingerprint"], "properties": {"commandReceipt": {"$ref": "#/$defs/commandReceipt"}, "originalResponseFingerprint": {"$ref": "#/$defs/sha256"}}},
-    "replayReceiptResponse": {"$ref": "#/$defs/responseBase", "properties": {"method": {"enum": ["maintenance_begin", "maintenance_strengthen", "shutdown", "controller_accept", "controller_recover", "maintenance_resume"]}, "responseKind": {"const": "REPLAY_RECEIPT"}, "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"}, "controlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "payload": {"$ref": "#/$defs/replayPayload"}}}
+    "replayPayload": {
+      "type": "object", "additionalProperties": false,
+      "required": ["commandReceipt", "originalControlEpoch", "originalPayload", "originalResponseFingerprint"],
+      "properties": {
+        "commandReceipt": {"$ref": "#/$defs/commandReceipt"},
+        "originalControlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "originalPayload": {"oneOf": [{"$ref": "#/$defs/epochTransitionPayload"}, {"$ref": "#/$defs/shutdownPayload"}, {"$ref": "#/$defs/controllerStartPayload"}]},
+        "originalResponseFingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "replayReceiptResponse": {
+      "$ref": "#/$defs/responseBase",
+      "properties": {
+        "method": {"enum": ["maintenance_begin", "maintenance_strengthen", "shutdown", "controller_accept", "controller_recover", "maintenance_resume"]},
+        "responseKind": {"const": "REPLAY_RECEIPT"},
+        "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"},
+        "controlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "payload": {"$ref": "#/$defs/replayPayload"}
+      },
+      "oneOf": [
+        {"properties": {"method": {"const": "maintenance_begin"}, "payload": {"properties": {"originalPayload": {"$ref": "#/$defs/epochTransitionPayload", "properties": {"status": {"const": "MAINTENANCE_BEGUN"}}}}}}},
+        {"properties": {"method": {"const": "maintenance_strengthen"}, "payload": {"properties": {"originalPayload": {"$ref": "#/$defs/epochTransitionPayload", "properties": {"status": {"const": "MAINTENANCE_STRENGTHENED"}}}}}}},
+        {"properties": {"method": {"const": "shutdown"}, "payload": {"properties": {"originalPayload": {"$ref": "#/$defs/shutdownPayload"}}}}},
+        {"properties": {"method": {"const": "controller_accept"}, "payload": {"properties": {"originalPayload": {"$ref": "#/$defs/controllerStartPayload", "properties": {"status": {"const": "CONTROLLER_ACCEPTED"}}}}}}},
+        {"properties": {"method": {"const": "controller_recover"}, "payload": {"properties": {"originalPayload": {"$ref": "#/$defs/controllerStartPayload", "properties": {"status": {"const": "CONTROLLER_RECOVERED"}}}}}}},
+        {"properties": {"method": {"const": "maintenance_resume"}, "payload": {"properties": {"originalPayload": {"$ref": "#/$defs/epochTransitionPayload", "properties": {"status": {"const": "MAINTENANCE_RESUMED"}}}}}}}
+      ]
+    }
   }
 }

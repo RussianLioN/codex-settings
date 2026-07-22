@@ -17,12 +17,87 @@ from codex_smart_subagents.daemon import (  # noqa: E402
     ControllerProcessConfig,
     ensure_controller_running,
 )
+from codex_smart_subagents.activation_gateway_v2 import (  # noqa: E402
+    ActivationResolver,
+    GatewayDecision,
+    GatewayLayout,
+    GatewayState,
+    run_permanent_gateway,
+    v2_gateway_state_present,
+)
+from codex_smart_subagents.controller_supervisor_v2 import (  # noqa: E402
+    ControllerSupervisorV2,
+)
 from codex_smart_subagents.launcher import run_launcher  # noqa: E402
+
+
+class _PreparedDecisionResolver:
+    """Возвращает уже проверенное решение без нового окна состояния."""
+
+    def __init__(self, decision: GatewayDecision) -> None:
+        self._decision = decision
+
+    def resolve(self) -> GatewayDecision:
+        return self._decision
+
+
+def _prepare_v2_decision(
+    *,
+    gateway_layout: GatewayLayout,
+    codex_home: Path,
+    environment: dict[str, str],
+) -> GatewayDecision:
+    resolver = ActivationResolver(
+        layout=gateway_layout,
+        wrapper=Path(__file__),
+    )
+    try:
+        persisted = resolver.resolve_persisted_activation()
+        binding = persisted.runtime_binding
+        if binding is None or not isinstance(binding.state_home, Path):
+            raise TypeError("persisted activation has no state home")
+        prepared = ControllerSupervisorV2(
+            resolver=resolver,
+            manifest_path=gateway_layout.manifest_path,
+            state_home=binding.state_home,
+            codex_home=codex_home,
+            plugin_root=PLUGIN_ROOT,
+            source_environment=environment,
+        ).ensure()
+        decision = prepared.gateway_decision
+        if not isinstance(decision, GatewayDecision):
+            raise TypeError("supervisor returned another decision type")
+        return decision
+    except Exception:
+        # Сбой частного канала всегда закрывает умный путь, но сохраняет
+        # независимо доказанный обычный исполняемый файл.
+        decision = resolver.resolve()
+        if decision.state is GatewayState.ORDINARY:
+            return decision
+        return GatewayDecision(
+            state=GatewayState.ORDINARY,
+            reason_code="CONTROLLER_SUPERVISOR_FAILED",
+            executable=decision.executable,
+        )
 
 
 def main() -> int:
     environment = dict(os.environ)
     environment.setdefault("CODEX_HOME", str(Path.home() / ".codex"))
+    codex_home = Path(environment["CODEX_HOME"]).expanduser().absolute()
+    gateway_layout = GatewayLayout.for_codex_home(codex_home)
+    if v2_gateway_state_present(gateway_layout):
+        decision = _prepare_v2_decision(
+            gateway_layout=gateway_layout,
+            codex_home=codex_home,
+            environment=environment,
+        )
+        return run_permanent_gateway(
+            sys.argv[1:],
+            resolver=_PreparedDecisionResolver(decision),
+            wrapper=Path(__file__),
+            environment=environment,
+        )
     environment.setdefault(
         "CODEX_ADAPTIVE_CATALOG",
         str(PLUGIN_ROOT / "config" / "adaptive-subagents.toml"),
@@ -35,9 +110,7 @@ def main() -> int:
     def ensure(adaptive_environment):
         ensure_controller_running(
             config,
-            shell_session_id=adaptive_environment[
-                "CODEX_ADAPTIVE_SESSION_ID"
-            ],
+            shell_session_id=adaptive_environment["CODEX_ADAPTIVE_SESSION_ID"],
             environ=adaptive_environment,
         )
 

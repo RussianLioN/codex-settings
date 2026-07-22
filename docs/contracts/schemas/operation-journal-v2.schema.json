@@ -4,7 +4,7 @@
   "title": "operation-journal-v2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "kind", "installationId", "operationId", "operation", "phase", "recoveryPolicy", "executionPlan", "abortPlan", "recoveryPlans", "discoveryBefore", "fencedBefore", "desired", "attempts", "steps", "changes", "terminalDeleteIntent", "createdAt", "updatedAt", "journalFingerprint"],
+  "required": ["schemaVersion", "kind", "installationId", "operationId", "operation", "phase", "recoveryPolicy", "executionPlan", "abortPlan", "recoveryPlans", "discoveryBefore", "fencedBefore", "desired", "attempts", "steps", "changes", "terminalDefinitionSnapshot", "terminalDeleteIntent", "createdAt", "updatedAt", "journalFingerprint"],
   "properties": {
     "schemaVersion": {"const": 2},
     "kind": {"enum": ["activation", "legacy-migration", "rollback", "uninstall"]},
@@ -66,6 +66,7 @@
         }
       }
     },
+    "terminalDefinitionSnapshot": {"$ref": "#/$defs/nullableTerminalDefinitionSnapshot"},
     "terminalDeleteIntent": {"$ref": "#/$defs/nullableTerminalDeleteIntent"},
     "createdAt": {"type": "string", "format": "date-time"},
     "updatedAt": {"type": "string", "format": "date-time"},
@@ -127,6 +128,7 @@
       "if": {"properties": {"phase": {"const": "TERMINAL_FROZEN"}}, "required": ["phase"]},
       "then": {
         "properties": {
+          "terminalDefinitionSnapshot": {"$ref": "#/$defs/terminalDefinitionSnapshot"},
           "terminalDeleteIntent": {"$ref": "#/$defs/terminalDeleteIntent"},
           "steps": {
             "contains": {
@@ -207,6 +209,18 @@
     "typedManifest": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "manifest-v2"}}},
     "typedActivation": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "activation-v2"}}},
     "typedDatabase": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "database-object-v2"}}},
+    "typedDatabaseTarget": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "database-binding-target-v2"}}},
+    "typedDatabaseBinding": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "database-binding-v2"}}},
+    "uninstallRetainedData": {
+      "type": "object", "additionalProperties": false,
+      "required": ["databaseBinding", "backupsRoot", "quarantineRoot", "recoveryEntrypoint"],
+      "properties": {
+        "databaseBinding": {"$ref": "#/$defs/typedDatabaseBinding"},
+        "backupsRoot": {"type": "string", "pattern": "^/"},
+        "quarantineRoot": {"type": "string", "pattern": "^/"},
+        "recoveryEntrypoint": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "file-object-v2"}}}
+      }
+    },
     "typedController": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "controller-state-v2"}}},
     "typedControllerCandidate": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "controller-candidate-v2"}}},
     "typedWatchdog": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "watchdog-state-v2"}}},
@@ -217,7 +231,7 @@
     "typedAbsence": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "absence-proof-v2"}}},
     "nullableManifest": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedManifest"}]},
     "nullableActivation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedActivation"}]},
-    "nullableDatabase": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedDatabase"}]},
+    "nullableDatabase": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedDatabase"}, {"$ref": "#/$defs/typedDatabaseTarget"}]},
     "nullableController": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedController"}]},
     "nullableRegistry": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedRegistry"}]},
     "nullableLaunchers": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedLaunchers"}]},
@@ -349,6 +363,65 @@
         {"properties": {"status": {"const": "COMPLETED"}, "overlayCursorOrdinal": {"const": 3}}}
       ]
     },
+    "terminalDefinitionSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["terminalKind", "receiptKind", "receiptPath", "freeze", "journalAbsenceTarget", "receiptPayloadStaticIntent", "tombstonePayloadIntent", "postFreezeActionKinds", "snapshotFingerprint"],
+      "properties": {
+        "terminalKind": {"enum": ["COMMIT", "ABORT", "UNINSTALL"]},
+        "receiptKind": {"enum": ["activation-commit", "operation-abort", "installation-uninstall"]},
+        "receiptPath": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/"},
+        "freeze": {"$ref": "#/$defs/terminalFreezeDefinition"},
+        "journalAbsenceTarget": {"$ref": "#/$defs/typedAbsence"},
+        "receiptPayloadStaticIntent": {"$ref": "#/$defs/receiptPayloadStaticIntent"},
+        "tombstonePayloadIntent": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/tombstonePayloadIntent"}]},
+        "postFreezeActionKinds": {
+          "oneOf": [
+            {"const": ["commit_receipt_publish", "gate_open"]},
+            {"const": ["abort_receipt_publish", "abort_journal_close"]},
+            {"const": ["uninstall_receipt_publish", "uninstall_tombstone_publish", "uninstall_journal_close"]}
+          ]
+        },
+        "snapshotFingerprint": {"$ref": "#/$defs/sha256"}
+      },
+      "oneOf": [
+        {"properties": {"terminalKind": {"const": "COMMIT"}, "receiptKind": {"const": "activation-commit"}, "postFreezeActionKinds": {"const": ["commit_receipt_publish", "gate_open"]}, "receiptPayloadStaticIntent": {"properties": {"payloadKind": {"const": "activation-commit"}}}, "tombstonePayloadIntent": {"type": "null"}}},
+        {"properties": {"terminalKind": {"const": "ABORT"}, "receiptKind": {"const": "operation-abort"}, "postFreezeActionKinds": {"const": ["abort_receipt_publish", "abort_journal_close"]}, "receiptPayloadStaticIntent": {"properties": {"payloadKind": {"const": "operation-abort"}}}, "tombstonePayloadIntent": {"type": "null"}}},
+        {"properties": {"terminalKind": {"const": "UNINSTALL"}, "receiptKind": {"const": "installation-uninstall"}, "postFreezeActionKinds": {"const": ["uninstall_receipt_publish", "uninstall_tombstone_publish", "uninstall_journal_close"]}, "receiptPayloadStaticIntent": {"properties": {"payloadKind": {"const": "installation-uninstall"}}}, "tombstonePayloadIntent": {"$ref": "#/$defs/tombstonePayloadIntent"}}}
+      ]
+    },
+    "terminalFreezeDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "commandId", "action", "actionFingerprint", "before", "expectedAfter"],
+      "properties": {
+        "kind": {"const": "terminal_journal_freeze"},
+        "commandId": {"type": "null"},
+        "action": {"$ref": "operation-step-v2.schema.json#/$defs/actionJournal", "properties": {"transition": {"const": "freeze-delete-intent"}}},
+        "actionFingerprint": {"$ref": "#/$defs/sha256"},
+        "before": {"$ref": "operation-step-v2.schema.json#/$defs/journalStateMutable"},
+        "expectedAfter": {"$ref": "operation-step-v2.schema.json#/$defs/journalStateFrozen"}
+      }
+    },
+    "receiptPayloadStaticIntent": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["payloadKind", "manifest", "manifestDocument", "transitionLineage", "activation", "databaseBinding", "journalAbsenceTarget", "controllerIdentity"],
+          "properties": {"payloadKind": {"const": "activation-commit"}, "manifest": {"$ref": "#/$defs/typedManifest"}, "manifestDocument": {"$ref": "manifest-document-v2.schema.json"}, "transitionLineage": {"$ref": "activation-commit-receipt-v2.schema.json#/$defs/transitionLineage"}, "activation": {"$ref": "#/$defs/typedActivation"}, "databaseBinding": {"$ref": "#/$defs/typedDatabaseBinding"}, "journalAbsenceTarget": {"$ref": "#/$defs/typedAbsence"}, "controllerIdentity": {"$ref": "#/$defs/sha256"}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["payloadKind", "restoredState", "journalAbsenceTarget", "reasonCode"],
+          "properties": {"payloadKind": {"const": "operation-abort"}, "restoredState": {"$ref": "#/$defs/stateBundle"}, "journalAbsenceTarget": {"$ref": "#/$defs/typedAbsence"}, "reasonCode": {"type": "string", "minLength": 1, "maxLength": 128}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["payloadKind", "removedState", "restoredOriginalBackup", "absenceProof", "dataRetentionMode", "retainedData", "activationProofFingerprint"],
+          "properties": {"payloadKind": {"const": "installation-uninstall"}, "removedState": {"$ref": "#/$defs/stateBundle"}, "restoredOriginalBackup": {"oneOf": [{"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "file-object-v2"}}}, {"$ref": "#/$defs/typedAbsence"}]}, "absenceProof": {"$ref": "#/$defs/typedAbsence"}, "dataRetentionMode": {"const": "retain-data"}, "retainedData": {"$ref": "#/$defs/uninstallRetainedData"}, "activationProofFingerprint": {"$ref": "#/$defs/sha256"}}
+        }
+      ]
+    },
     "terminalDeleteIntent": {
       "type": "object",
       "additionalProperties": false,
@@ -381,8 +454,8 @@
       "oneOf": [
         {
           "type": "object", "additionalProperties": false,
-          "required": ["payloadKind", "installationId", "operationId", "manifest", "activation", "database", "controllerIdentity", "completedStepIds", "completedAt"],
-          "properties": {"payloadKind": {"const": "activation-commit"}, "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "manifest": {"$ref": "#/$defs/typedManifest"}, "activation": {"$ref": "#/$defs/typedActivation"}, "database": {"$ref": "#/$defs/typedDatabase"}, "controllerIdentity": {"$ref": "#/$defs/sha256"}, "completedStepIds": {"type": "array", "maxItems": 128, "uniqueItems": true, "items": {"type": "string", "pattern": "^st2_[0-9a-f]{32}$"}}, "completedAt": {"type": "string", "format": "date-time"}}
+          "required": ["payloadKind", "installationId", "operationId", "manifest", "manifestDocument", "transitionLineage", "activation", "databaseBinding", "journalAbsenceTarget", "controllerIdentity", "completedStepIds", "completedAt"],
+          "properties": {"payloadKind": {"const": "activation-commit"}, "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "manifest": {"$ref": "#/$defs/typedManifest"}, "manifestDocument": {"$ref": "manifest-document-v2.schema.json"}, "transitionLineage": {"$ref": "activation-commit-receipt-v2.schema.json#/$defs/transitionLineage"}, "activation": {"$ref": "#/$defs/typedActivation"}, "databaseBinding": {"$ref": "#/$defs/typedDatabaseBinding"}, "journalAbsenceTarget": {"$ref": "#/$defs/typedAbsence"}, "controllerIdentity": {"$ref": "#/$defs/sha256"}, "completedStepIds": {"type": "array", "maxItems": 128, "uniqueItems": true, "items": {"type": "string", "pattern": "^st2_[0-9a-f]{32}$"}}, "completedAt": {"type": "string", "format": "date-time"}}
         },
         {
           "type": "object", "additionalProperties": false,
@@ -391,8 +464,8 @@
         },
         {
           "type": "object", "additionalProperties": false,
-          "required": ["payloadKind", "installationId", "operationId", "removedState", "restoredOriginalBackup", "absenceProof", "completedAt"],
-          "properties": {"payloadKind": {"const": "installation-uninstall"}, "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "removedState": {"$ref": "#/$defs/stateBundle"}, "restoredOriginalBackup": {"oneOf": [{"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "file-object-v2"}}}, {"$ref": "#/$defs/typedAbsence"}]}, "absenceProof": {"$ref": "#/$defs/typedAbsence"}, "completedAt": {"type": "string", "format": "date-time"}}
+          "required": ["payloadKind", "installationId", "operationId", "removedState", "restoredOriginalBackup", "absenceProof", "dataRetentionMode", "retainedData", "activationProofFingerprint", "completedAt"],
+          "properties": {"payloadKind": {"const": "installation-uninstall"}, "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "removedState": {"$ref": "#/$defs/stateBundle"}, "restoredOriginalBackup": {"oneOf": [{"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "file-object-v2"}}}, {"$ref": "#/$defs/typedAbsence"}]}, "absenceProof": {"$ref": "#/$defs/typedAbsence"}, "dataRetentionMode": {"const": "retain-data"}, "retainedData": {"$ref": "#/$defs/uninstallRetainedData"}, "activationProofFingerprint": {"$ref": "#/$defs/sha256"}, "completedAt": {"type": "string", "format": "date-time"}}
         }
       ]
     },
@@ -413,6 +486,7 @@
         {"properties": {"before": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "file-object-v2"}}}, "replacementAuthorization": {"const": "REPLACE_VERIFIED_STALE_PRIOR_INSTALLATION"}, "priorInstallationEvidence": {"type": "object"}}}
       ]
     },
+    "nullableTerminalDefinitionSnapshot": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/terminalDefinitionSnapshot"}]},
     "nullableTerminalDeleteIntent": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/terminalDeleteIntent"}]}
   }
 }

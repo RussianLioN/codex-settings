@@ -18,10 +18,10 @@ from typing import Any
 from urllib.parse import quote
 from urllib.parse import urlsplit
 
+from .compatibility import codex_version_supported
 from .permissions import CanaryRequest, PermissionGate
 
 
-SUPPORTED_CODEX_VERSION = "0.144.4"
 FIXED_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 MAX_PROMPT_BYTES = 64 * 1024
 MAX_SCHEMA_BYTES = 1024 * 1024
@@ -284,7 +284,7 @@ class ChildRunRequest:
     telemetry: ChildTelemetryConfig | None = None
 
     def __post_init__(self) -> None:
-        if self.codex_version != SUPPORTED_CODEX_VERSION:
+        if not codex_version_supported(self.codex_version):
             raise ValueError("unsupported Codex CLI version")
         efforts = MODEL_EFFORTS.get(self.model)
         if efforts is None:
@@ -451,7 +451,7 @@ class ChildRunner:
             )
 
         staged_auth = (
-            _stage_auth_file(request.auth_file, request.runtime.codex_home)
+            stage_auth_file(request.auth_file, request.runtime.codex_home)
             if request.auth_file is not None
             else None
         )
@@ -516,7 +516,7 @@ class ChildRunner:
             )
         finally:
             if staged_auth is not None:
-                _remove_staged_auth(staged_auth)
+                remove_staged_auth(staged_auth)
 
 
 def _collect_bounded_output(
@@ -920,7 +920,8 @@ def _otel_exporter_override(telemetry: ChildTelemetryConfig) -> str:
     )
 
 
-def _stage_auth_file(source: Path, codex_home: Path) -> Path:
+def stage_auth_file(source: Path, codex_home: Path) -> Path:
+    """Копирует частный файл аутентификации в изолированный CODEX_HOME."""
     if not source.is_absolute() or source.is_symlink():
         raise ChildLaunchError(
             "UNSAFE_AUTH_FILE",
@@ -981,7 +982,8 @@ def _stage_auth_file(source: Path, codex_home: Path) -> Path:
     return destination
 
 
-def _remove_staged_auth(path: Path) -> None:
+def remove_staged_auth(path: Path) -> None:
+    """Удаляет ранее подготовленный файл, отклоняя подмену пути."""
     try:
         metadata = os.lstat(path)
     except FileNotFoundError:

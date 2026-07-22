@@ -16,6 +16,7 @@ from threading import Event
 from typing import Any, Callable, ContextManager, Protocol
 
 from . import child_runner as _child
+from .compatibility import codex_version_supported
 from .permissions import CanaryRequest, PermissionGate
 from .routing import (
     TERRA,
@@ -131,7 +132,7 @@ class BoundaryReclassifierConfig:
         permission_snapshot_root = _read_only_directory(
             Path(self.permission_snapshot_root)
         )
-        if self.codex_version != _child.SUPPORTED_CODEX_VERSION:
+        if not codex_version_supported(self.codex_version):
             raise ValueError("unsupported Codex CLI version")
         if _SHA256.fullmatch(self.managed_config_sha256) is None:
             raise ValueError(
@@ -328,7 +329,7 @@ class BoundaryProcessRunner:
             allow_populated=False,
         )
         staged_auth = (
-            _child._stage_auth_file(  # noqa: SLF001
+            _child.stage_auth_file(
                 request.auth_file,
                 request.runtime.codex_home,
             )
@@ -429,7 +430,7 @@ class BoundaryProcessRunner:
         finally:
             _remove_generated_model_cache(request.runtime.codex_home)
             if staged_auth is not None:
-                _child._remove_staged_auth(staged_auth)  # noqa: SLF001
+                _child.remove_staged_auth(staged_auth)
 
 
 class BoundaryReclassifier:

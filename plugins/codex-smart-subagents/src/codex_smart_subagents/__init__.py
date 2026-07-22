@@ -11,11 +11,13 @@ from .routing import (
     select_model,
     select_reasoning_effort,
 )
+from .state_store_v2 import attempt_id_for_evidence_job
 
 __all__ = [
     "ComplexityFactors",
     "DelegationAssessment",
     "ReasoningFactors",
+    "attempt_id_for_evidence_job",
     "classify_delegation",
     "get_tool_definitions",
     "normalize_model_effort",
@@ -24,4 +26,3 @@ __all__ = [
     "select_reasoning_effort",
     "validate_tool_input",
 ]
-

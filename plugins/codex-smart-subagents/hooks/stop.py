@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import sys
+import time
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -22,17 +24,120 @@ from integration_runtime import (  # noqa: E402
     read_hook_input,
     write_hook_output,
 )
+from integration_runtime_v2 import (  # noqa: E402
+    HOOK_TOTAL_BUDGET_SECONDS as HOOK_TOTAL_BUDGET_SECONDS_V2,
+    HookTurnContextV2,
+    IntegrationConfigV2,
+    TurnContextStoreV2,
+    durable_smart_turn_state_v2,
+    require_live_mcp_runtime_v2,
+)
+
+
+class V2PlanStateProvider(Protocol):
+    def __call__(
+        self,
+        config: IntegrationConfigV2,
+        record: HookTurnContextV2,
+        *,
+        deadline: float,
+    ) -> str: ...
 
 
 def handle(
     payload: dict[str, Any],
     environ: Mapping[str, str],
+    *,
+    v2_plan_state_provider: V2PlanStateProvider = durable_smart_turn_state_v2,
 ) -> dict[str, Any] | None:
     if not environment_is_active(environ):
         return None
     try:
         if payload.get("hook_event_name") != "Stop":
             return None
+        if environ.get("CODEX_SMART_STATE_HOME") and environ.get(
+            "CODEX_SMART_GATEWAY_PATH"
+        ):
+            config_v2 = IntegrationConfigV2.from_environ(environ)
+            try:
+                require_live_mcp_runtime_v2(config_v2, environ)
+            except Exception:
+                return None
+            deadline = time.monotonic() + HOOK_TOTAL_BUDGET_SECONDS_V2
+            store_v2 = TurnContextStoreV2(config_v2)
+            outcome = "unknown"
+
+            def inspect_and_increment(
+                current: HookTurnContextV2,
+            ) -> HookTurnContextV2:
+                nonlocal outcome
+                if (
+                    current.session_id != payload.get("session_id")
+                    or current.turn_id != payload.get("turn_id")
+                ):
+                    outcome = "different-turn"
+                    return current
+                route_state = v2_plan_state_provider(
+                    config_v2,
+                    current,
+                    deadline=deadline,
+                )
+                if route_state in {"DIRECT", "CLARIFY", "DELEGATE_TERMINAL"}:
+                    outcome = "complete"
+                    return current
+                if route_state not in {"MISSING", "DELEGATE_PENDING"}:
+                    raise RuntimeError("состояние умного хода неизвестно")
+                if current.continuation_count >= 2:
+                    outcome = (
+                        "bounded-plan"
+                        if route_state == "MISSING"
+                        else "bounded-route"
+                    )
+                    return current
+                outcome = (
+                    "block-plan" if route_state == "MISSING" else "block-route"
+                )
+                return replace(
+                    current,
+                    continuation_count=current.continuation_count + 1,
+                )
+
+            store_v2.update(
+                inspect_and_increment,
+                deadline=deadline,
+            )
+            if outcome in {"different-turn", "complete"}:
+                return None
+            if outcome in {"bounded-plan", "bounded-route"}:
+                message = (
+                    "После двух попыток завершение разрешено, хотя "
+                    "долговечная запись smart_plan не найдена."
+                    if outcome == "bounded-plan"
+                    else "После двух попыток завершение разрешено, хотя "
+                    "делегированный маршрут не достиг конечного состояния."
+                )
+                return {
+                    "continue": True,
+                    "systemMessage": message,
+                }
+            if outcome == "block-plan":
+                reason = (
+                    "Перед завершением хода вызови smart_plan. "
+                    "Если решение предписывает обычное выполнение, "
+                    "заверши задачу в корневом диалоге."
+                )
+            elif outcome == "block-route":
+                reason = (
+                    "Делегированный маршрут ещё не завершён. Вызови "
+                    "route_start для готовых узлов и продолжи smart_wait. "
+                    "Если маршрут больше не нужен, вызови smart_cancel."
+                )
+            else:
+                raise RuntimeError("состояние Stop не определено")
+            return {
+                "decision": "block",
+                "reason": reason,
+            }
         config = IntegrationConfig.from_environ(
             environ,
             require_catalog=False,
@@ -92,13 +197,8 @@ def handle(
             )
             reason = "Маршрут делегирования ещё не завершён."
         return {
-            "continue": False,
-            "stopReason": reason,
-            "systemMessage": reason,
-            "hookSpecificOutput": {
-                "hookEventName": "Stop",
-                "additionalContext": instruction,
-            },
+            "decision": "block",
+            "reason": f"{reason} {instruction}",
         }
     except Exception:
         return {

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import os
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -231,6 +232,37 @@ class SnapshotBuilderTests(unittest.TestCase):
                 base_sha=self.base_sha,
                 destination=symlink,
             )
+
+    def test_deadline_closes_snapshot_before_any_destination_is_created(self) -> None:
+        destination = self.base / "expired"
+
+        with self.assertRaisesRegex(SnapshotError, "SNAPSHOT_DEADLINE_EXCEEDED"):
+            self.builder.build(
+                repository=self.repository,
+                base_sha=self.base_sha,
+                destination=destination,
+                deadline_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+            )
+
+        self.assertFalse(destination.exists())
+
+    def test_deadline_bounds_git_process_and_normalizes_timeout(self) -> None:
+        with mock.patch(
+            "codex_smart_subagents.snapshot.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="git", timeout=1),
+        ) as run:
+            with self.assertRaisesRegex(
+                SnapshotError,
+                "SNAPSHOT_DEADLINE_EXCEEDED",
+            ):
+                self.builder.build(
+                    repository=self.repository,
+                    base_sha=self.base_sha,
+                    destination=self.base / "timed-out",
+                    deadline_at=datetime.now(timezone.utc) + timedelta(seconds=30),
+                )
+
+        self.assertIn("timeout", run.call_args.kwargs)
 
 
 if __name__ == "__main__":

@@ -213,7 +213,7 @@ def build_production_runtime(
     catalog = Catalog.load(config.catalog_path)
     _verify_platform(catalog)
     version = probe_codex_version(config.real_codex)
-    if version not in catalog.supported_codex_versions:
+    if not catalog.supports_codex_version(version):
         raise ControllerStartError(
             "CODEX_VERSION_UNSUPPORTED",
             f"Codex {version} is not allowed by the active catalog",

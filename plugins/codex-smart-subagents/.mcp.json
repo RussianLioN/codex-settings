@@ -10,18 +10,26 @@
         "CODEX_ADAPTIVE_SESSION_ID",
         "CODEX_ADAPTIVE_CATALOG",
         "CODEX_HOME",
-        "XDG_STATE_HOME"
+        "CODEX_SMART_LAUNCHER_ACTIVE",
+        "CODEX_SMART_STATE_HOME",
+        "CODEX_SMART_GATEWAY_PATH",
+        "CODEX_SMART_ACTIVATION_ID",
+        "CODEX_SMART_GATE_FINGERPRINT",
+        "CODEX_SMART_MCP_SESSION_NONCE",
+        "CODEX_SMART_USER_MCP_POLICY_PROOF",
+        "HOME",
+        "TMPDIR"
       ],
       "startup_timeout_sec": 5,
       "tool_timeout_sec": 430,
-      "required": false,
+      "required": true,
       "enabled_tools": [
         "smart_plan",
-        "smart_start",
+        "route_start",
         "smart_wait",
         "smart_cancel"
       ],
-      "default_tools_approval_mode": "auto"
+      "default_tools_approval_mode": "approve"
     }
   }
 }

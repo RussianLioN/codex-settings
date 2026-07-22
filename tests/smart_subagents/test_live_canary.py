@@ -13,6 +13,7 @@ import unittest
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -21,6 +22,7 @@ PLUGIN_ROOT = REPO / "plugins" / "codex-smart-subagents"
 sys.path.insert(0, str(PLUGIN_ROOT / "src"))
 
 from codex_smart_subagents.live_canary import (  # noqa: E402
+    AppServerError,
     AppServerManagedConfigInspector,
     CanaryCommand,
     CanaryProbeTargets,
@@ -32,6 +34,14 @@ from codex_smart_subagents.live_canary import (  # noqa: E402
     ManagedConfigState,
     StrictAppServerClient,
     SubprocessExecutor,
+    _StrictJsonLineReader,
+    _read_app_server_response,
+    _validate_initialize_result,
+    _write_app_server_message,
+)
+from codex_smart_subagents.operation_deadline_v2 import (  # noqa: E402
+    OperationDeadlineExceededV2,
+    OperationDeadlineV2,
 )
 from codex_smart_subagents.permissions import (  # noqa: E402
     REQUIRED_CANARY_CHECKS,
@@ -254,6 +264,236 @@ class RecordingExecutor:
 
 
 class StrictAppServerClientTests(unittest.TestCase):
+    def test_reader_keeps_operation_deadline_object_and_root_timeout_code(
+        self,
+    ) -> None:
+        stdout_read, stdout_write = os.pipe()
+        stderr_read, stderr_write = os.pipe()
+        process = SimpleNamespace(
+            stdout=os.fdopen(stdout_read, "rb", buffering=0),
+            stderr=os.fdopen(stderr_read, "rb", buffering=0),
+            poll=lambda: None,
+        )
+        reader = _StrictJsonLineReader(process, maximum=4096)
+        deadline = OperationDeadlineV2.start(
+            operation="apply",
+            timeout_seconds=0.02,
+            timeout_code="ROOT_OPERATION_EXPIRED",
+        )
+        try:
+            with self.assertRaises(OperationDeadlineExceededV2) as caught:
+                reader.read(deadline=deadline)
+            self.assertEqual("ROOT_OPERATION_EXPIRED", caught.exception.code)
+        finally:
+            reader.close()
+            process.stdout.close()
+            process.stderr.close()
+            os.close(stdout_write)
+            os.close(stderr_write)
+
+    def test_writer_uses_nonblocking_partial_os_writes_under_same_deadline(
+        self,
+    ) -> None:
+        class NonblockingOnlyStdin:
+            closed = False
+
+            def fileno(self) -> int:
+                return 91
+
+            def write(self, _payload: bytes) -> None:
+                raise AssertionError("buffered blocking write must not be used")
+
+            def flush(self) -> None:
+                raise AssertionError("buffered blocking flush must not be used")
+
+        class ReadySelector:
+            def register(self, descriptor: int, event: int) -> None:
+                self.descriptor = descriptor
+                self.event = event
+
+            def select(self, timeout: float):
+                self.timeout = timeout
+                return [(SimpleNamespace(fd=self.descriptor), self.event)]
+
+            def close(self) -> None:
+                return None
+
+        writes: list[bytes] = []
+
+        def partial_write(_descriptor: int, payload) -> int:
+            block = bytes(payload)
+            writes.append(block)
+            return min(2, len(block))
+
+        deadline = OperationDeadlineV2.start(
+            operation="apply",
+            timeout_seconds=1.0,
+            timeout_code="ROOT_OPERATION_EXPIRED",
+        )
+        process = SimpleNamespace(stdin=NonblockingOnlyStdin())
+        with (
+            patch("codex_smart_subagents.live_canary.os.set_blocking"),
+            patch(
+                "codex_smart_subagents.live_canary.os.write",
+                side_effect=partial_write,
+            ),
+            patch(
+                "codex_smart_subagents.live_canary.selectors.DefaultSelector",
+                return_value=ReadySelector(),
+            ),
+        ):
+            _write_app_server_message(
+                process,
+                b"abcde",
+                deadline=deadline,
+            )
+
+        self.assertEqual([b"abcde", b"cde", b"e"], writes)
+
+    def test_initialize_allows_descriptive_fields_and_notifications_are_bounded(self) -> None:
+        _validate_initialize_result(
+            {
+                "userAgent": "fake-codex",
+                "codexHome": "/tmp/codex-home",
+                "platformFamily": "unix",
+                "platformOs": "test",
+                "futureDescription": {"ignored": True},
+            },
+            expected_codex_home=Path("/tmp/codex-home"),
+        )
+
+        class Reader:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def read(self, *, deadline: OperationDeadlineV2) -> object:
+                del deadline
+                self.calls += 1
+                return {"method": "future/notice", "params": {}}
+
+        with self.assertRaisesRegex(AppServerError, "APP_SERVER_NOTIFICATION_LIMIT"):
+            _read_app_server_response(
+                Reader(),
+                expected_id=2,
+                deadline=OperationDeadlineV2.start(
+                    operation="test-app-server",
+                    timeout_seconds=1.0,
+                    timeout_code="TEST_APP_SERVER_TIMEOUT",
+                ),
+                notification_count=[0],
+            )
+
+    def test_rejects_trailing_response_after_final_response(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            executable = root / "codex"
+            executable.write_text(
+                """#!/usr/bin/env python3
+import json
+import os
+import sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if request.get("method") == "initialize":
+        result = {"userAgent":"fake","codexHome":os.environ["CODEX_HOME"],"platformFamily":"unix","platformOs":"test","future":true}
+        print(json.dumps({"id":request["id"],"result":result}), flush=True)
+    elif request.get("method") == "initialized":
+        continue
+    else:
+        response = {"id":request["id"],"result":{"ok":True}}
+        print(json.dumps(response), flush=True)
+        print(json.dumps(response), flush=True)
+""".replace("true", "True"),
+                encoding="utf-8",
+            )
+            executable.chmod(0o700)
+            directories = [root / name for name in ("codex-home", "home", "tmp", "cwd")]
+            for path in directories:
+                path.mkdir(mode=0o700)
+            client = StrictAppServerClient(
+                codex_executable=executable,
+                codex_home=directories[0],
+                home=directories[1],
+                tmpdir=directories[2],
+                cwd=directories[3],
+            )
+
+            with self.assertRaisesRegex(AppServerError, "APP_SERVER_TRAILING_MESSAGE"):
+                client.call("model/list", {"limit": 100})
+
+    def test_run_session_reuses_one_process_and_increments_request_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            executable = root / "codex"
+            marker = root / "processes"
+            executable.write_text(
+                """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+marker = Path(os.environ["HOME"]).parent / "processes"
+with marker.open("a", encoding="utf-8") as stream:
+    stream.write("started\\n")
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if method == "initialize":
+        result = {
+            "userAgent": "fake-codex",
+            "codexHome": os.environ["CODEX_HOME"],
+            "platformFamily": "unix",
+            "platformOs": "test",
+        }
+        print(json.dumps({"id": request["id"], "result": result}), flush=True)
+    elif method == "initialized":
+        continue
+    else:
+        print(
+            json.dumps(
+                {
+                    "id": request["id"],
+                    "result": {"method": method, "requestId": request["id"]},
+                }
+            ),
+            flush=True,
+        )
+""",
+                encoding="utf-8",
+            )
+            executable.chmod(0o700)
+            codex_home = root / "codex-home"
+            home = root / "home"
+            tmpdir = root / "tmp"
+            cwd = root / "cwd"
+            for path in (codex_home, home, tmpdir, cwd):
+                path.mkdir(mode=0o700)
+
+            client = StrictAppServerClient(
+                codex_executable=executable,
+                codex_home=codex_home,
+                home=home,
+                tmpdir=tmpdir,
+                cwd=cwd,
+            )
+
+            results = client.run_session(
+                lambda call: (
+                    call("model/list", {"limit": 100}),
+                    call("model/list", {"limit": 100, "cursor": "next"}),
+                )
+            )
+
+            self.assertEqual(
+                (
+                    {"method": "model/list", "requestId": 2},
+                    {"method": "model/list", "requestId": 3},
+                ),
+                results,
+            )
+            self.assertEqual("started\n", marker.read_text(encoding="utf-8"))
+
     def test_sqlite_runtime_is_private_temporary_and_outside_codex_home(
         self,
     ) -> None:
@@ -336,6 +576,27 @@ for line in sys.stdin:
 
 
 class LivePermissionCanaryTests(unittest.TestCase):
+    def test_managed_config_inspection_preserves_root_deadline_error(self) -> None:
+        deadline_error = OperationDeadlineExceededV2(
+            code="ROOT_OPERATION_EXPIRED",
+            operation="apply",
+            phase="managed-config",
+            deadline_kind="operation",
+            configured_timeout_nanoseconds=1_000_000_000,
+            elapsed_monotonic_nanoseconds=1_000_000_000,
+        )
+
+        class ExpiredInspector:
+            def inspect(self):
+                raise deadline_error
+
+        canary = object.__new__(LivePermissionCanary)
+        canary._managed_config_inspector = ExpiredInspector()
+        with self.assertRaises(OperationDeadlineExceededV2) as caught:
+            canary._inspect_managed_config()
+
+        self.assertIs(caught.exception, deadline_error)
+
     def setUp(self) -> None:
         self.directory = tempfile.TemporaryDirectory()
         self.base = Path(self.directory.name)
@@ -742,8 +1003,18 @@ class LivePermissionCanaryTests(unittest.TestCase):
         self.assertIs(kwargs["shell"], False)
         self.assertIs(kwargs["close_fds"], True)
         self.assertIs(kwargs["start_new_session"], True)
-        self.assertEqual(command.argv, popen.call_args.args[0])
+        spawned_argv = tuple(popen.call_args.args[0])
+        self.assertEqual(command.argv, spawned_argv[-len(command.argv) :])
         self.assertFalse((self.base / "should-not-run").exists())
+
+    def test_production_canary_contains_no_hard_kill_escalation(self) -> None:
+        source = (
+            PLUGIN_ROOT
+            / "src"
+            / "codex_smart_subagents"
+            / "live_canary.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("SIGKILL", source)
 
     def test_file_inspector_detects_legacy_keys_and_configuration_drift(
         self,
@@ -981,6 +1252,71 @@ emit({
                         timeout_seconds=timeout,
                         max_output_bytes=output_limit,
                     ).inspect()
+
+    def test_external_root_timeout_code_is_not_reclassified_as_local(self) -> None:
+        executable, _ = self.fake_app_server()
+
+        class DeadlineClock:
+            def __init__(self) -> None:
+                self.value = 0
+
+            def __call__(self) -> int:
+                return self.value
+
+            def advance(self, seconds: float) -> None:
+                self.value += int(seconds * 1_000_000_000)
+
+        class ExpiringReader:
+            def __init__(self, *_args, **_kwargs) -> None:
+                return None
+
+            def read(self, *, deadline: OperationDeadlineV2):
+                clock.advance(0.04)
+                deadline.checkpoint()
+
+            def close(self) -> None:
+                return None
+
+        class FakeSupervisor:
+            def spawn_transient(self, **_kwargs):
+                return SimpleNamespace(process=SimpleNamespace())
+
+        clock = DeadlineClock()
+        deadline = OperationDeadlineV2.start(
+            operation="apply",
+            timeout_seconds=0.03,
+            timeout_code="APP_SERVER_TIMEOUT",
+            monotonic_ns=clock,
+        )
+        with (
+            patch(
+                "codex_smart_subagents.live_canary._process_runtime_v2",
+                return_value=(deadline, FakeSupervisor()),
+            ),
+            patch(
+                "codex_smart_subagents.live_canary._StrictJsonLineReader",
+                ExpiringReader,
+            ),
+            patch("codex_smart_subagents.live_canary._write_app_server_message"),
+            patch(
+                "codex_smart_subagents.live_canary._close_app_server_process",
+                side_effect=AppServerError(
+                    "APP_SERVER_PROCESS_CLEANUP_REQUIRED",
+                    "synthetic cleanup obligation",
+                ),
+            ),
+            self.assertRaises(OperationDeadlineExceededV2) as caught,
+        ):
+            StrictAppServerClient(
+                codex_executable=executable,
+                codex_home=self.codex_home,
+                home=self.runtime_parent,
+                tmpdir=self.runtime_parent,
+                cwd=self.runtime_parent,
+                timeout_seconds=1.0,
+            ).call("configRequirements/read", {})
+
+        self.assertEqual("APP_SERVER_TIMEOUT", caught.exception.code)
 
     def test_app_server_client_spawns_with_minimal_environment_and_no_shell(
         self,

@@ -1,0 +1,199 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/lifecycle-command-result-v2.schema.json",
+  "title": "lifecycle-command-result-v2",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/base",
+      "properties": {
+        "command": {"const": "apply"},
+        "status": {"enum": ["planned", "installed", "upgraded", "reconciled", "repaired", "unchanged", "failed"]}
+      },
+      "allOf": [{"$ref": "#/$defs/mutatingCommandState"}]
+    },
+    {
+      "$ref": "#/$defs/base",
+      "properties": {
+        "command": {"const": "doctor"},
+        "status": {"enum": ["READY", "AWAITING_HOOK_TRUST", "DEGRADED", "BROKEN"]},
+        "operationId": {"type": "null"},
+        "attemptId": {"type": "null"},
+        "smokeInvocationId": {"type": "null"},
+        "changes": {"maxItems": 0}
+      },
+      "allOf": [
+        {"$ref": "#/$defs/doctorState"}
+      ]
+    },
+    {
+      "$ref": "#/$defs/base",
+      "properties": {
+        "command": {"const": "smoke"},
+        "status": {"enum": ["READY", "NOT_READY", "failed"]},
+        "operationId": {"type": "null"},
+        "attemptId": {"type": "null"},
+        "smokeInvocationId": {"$ref": "#/$defs/smokeInvocationId"},
+        "changes": {"maxItems": 0}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "READY"}}, "required": ["status"]},
+          "then": {"properties": {"readiness": {"const": "READY"}}},
+          "else": {"properties": {"readiness": {"enum": ["AWAITING_HOOK_TRUST", "DISABLED", "DEGRADED", "BROKEN"]}}}
+        }
+      ]
+    },
+    {
+      "$ref": "#/$defs/base",
+      "properties": {
+        "command": {"const": "inspect"},
+        "status": {"enum": ["inspected", "failed"]},
+        "operationId": {"type": "null"},
+        "attemptId": {"type": "null"},
+        "smokeInvocationId": {"type": "null"},
+        "changes": {"maxItems": 0}
+      }
+    },
+    {
+      "$ref": "#/$defs/base",
+      "properties": {
+        "command": {"const": "rollback"},
+        "status": {"enum": ["planned", "rolled_back", "unchanged", "failed"]}
+      },
+      "allOf": [{"$ref": "#/$defs/mutatingCommandState"}]
+    },
+    {
+      "$ref": "#/$defs/base",
+      "properties": {
+        "command": {"const": "cleanup"},
+        "status": {"enum": ["planned", "cleaned", "unchanged", "failed"]}
+      },
+      "allOf": [{"$ref": "#/$defs/mutatingCommandState"}]
+    },
+    {
+      "$ref": "#/$defs/base",
+      "properties": {
+        "command": {"const": "uninstall"},
+        "status": {"enum": ["planned", "uninstalled", "unchanged", "failed"]}
+      },
+      "allOf": [{"$ref": "#/$defs/mutatingCommandState"}]
+    },
+    {
+      "$ref": "#/$defs/base",
+      "properties": {
+        "command": {"const": "recover"},
+        "status": {"enum": ["planned", "recovered", "unchanged", "failed"]}
+      },
+      "allOf": [{"$ref": "#/$defs/mutatingCommandState"}]
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"},
+    "attemptId": {"type": "string", "pattern": "^opa2_[0-9a-f]{32}$"},
+    "smokeInvocationId": {"type": "string", "pattern": "^sm2_[0-9a-f]{32}$"},
+    "nullableOperationId": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/operationId"}]},
+    "nullableAttemptId": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/attemptId"}]},
+    "nullableSmokeInvocationId": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/smokeInvocationId"}]},
+    "nullableSha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+    "changeKind": {
+      "enum": [
+        "migrated_manifest",
+        "attested_codex",
+        "staged_generation",
+        "gate_closed",
+        "installed_bootstrap_fence",
+        "drained_controller",
+        "migrated_database",
+        "published_activation",
+        "registered_marketplace",
+        "enabled_plugin",
+        "repaired_launchers",
+        "accepted_controller",
+        "committed_manifest",
+        "gate_opened",
+        "retired_generation",
+        "removed_installation"
+      ]
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "beforeFingerprint", "afterFingerprint"],
+      "properties": {
+        "kind": {"$ref": "#/$defs/changeKind"},
+        "beforeFingerprint": {"$ref": "#/$defs/nullableSha256"},
+        "afterFingerprint": {"$ref": "#/$defs/nullableSha256"}
+      }
+    },
+    "problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "component", "message", "remediation"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,127}$"},
+        "severity": {"enum": ["error", "warning", "info"]},
+        "component": {"type": "string", "minLength": 1, "maxLength": 256},
+        "message": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "remediation": {"type": "string", "minLength": 1, "maxLength": 4096}
+      }
+    },
+    "base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "command", "status", "readiness", "operationId", "attemptId", "smokeInvocationId", "resultFingerprint", "changes", "problems", "extensions"],
+      "properties": {
+        "schemaVersion": {"const": 2},
+        "command": {"enum": ["apply", "doctor", "smoke", "inspect", "rollback", "cleanup", "uninstall", "recover"]},
+        "status": {"type": "string", "minLength": 1, "maxLength": 64},
+        "readiness": {"enum": ["READY", "AWAITING_HOOK_TRUST", "DISABLED", "DEGRADED", "BROKEN"]},
+        "operationId": {"$ref": "#/$defs/nullableOperationId"},
+        "attemptId": {"$ref": "#/$defs/nullableAttemptId"},
+        "smokeInvocationId": {"$ref": "#/$defs/nullableSmokeInvocationId"},
+        "resultFingerprint": {"$ref": "#/$defs/sha256"},
+        "changes": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/change"}},
+        "problems": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/problem"}},
+        "extensions": {"type": "object", "maxProperties": 128}
+      }
+    },
+    "mutatingCommandState": {
+      "oneOf": [
+        {
+          "properties": {
+            "status": {"enum": ["planned", "unchanged"]},
+            "operationId": {"type": "null"},
+            "attemptId": {"type": "null"},
+            "smokeInvocationId": {"type": "null"},
+            "changes": {"maxItems": 0}
+          }
+        },
+        {
+          "properties": {
+            "status": {"enum": ["installed", "upgraded", "reconciled", "repaired", "rolled_back", "cleaned", "uninstalled", "recovered"]},
+            "operationId": {"$ref": "#/$defs/operationId"},
+            "attemptId": {"$ref": "#/$defs/attemptId"},
+            "smokeInvocationId": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "status": {"const": "failed"},
+            "smokeInvocationId": {"type": "null"}
+          },
+          "oneOf": [
+            {"properties": {"operationId": {"type": "null"}, "attemptId": {"type": "null"}}},
+            {"properties": {"operationId": {"$ref": "#/$defs/operationId"}, "attemptId": {"$ref": "#/$defs/attemptId"}}}
+          ]
+        }
+      ]
+    },
+    "doctorState": {
+      "oneOf": [
+        {"properties": {"status": {"const": "READY"}, "readiness": {"const": "READY"}}},
+        {"properties": {"status": {"const": "AWAITING_HOOK_TRUST"}, "readiness": {"const": "AWAITING_HOOK_TRUST"}}},
+        {"properties": {"status": {"const": "DEGRADED"}, "readiness": {"const": "DEGRADED"}}},
+        {"properties": {"status": {"const": "BROKEN"}, "readiness": {"const": "BROKEN"}}}
+      ]
+    }
+  }
+}

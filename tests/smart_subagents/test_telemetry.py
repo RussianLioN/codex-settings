@@ -50,6 +50,18 @@ def otlp_payload(
             "key": "user_prompt",
             "value": {"stringValue": "sensitive prompt"},
         },
+        {
+            "key": "CODEX_V2_SOURCE_ROOT",
+            "value": {"stringValue": "/private/bootstrap/source"},
+        },
+        {
+            "key": "CODEX_V2_CODEX_BIN",
+            "value": {"stringValue": "/private/bootstrap/codex"},
+        },
+        {
+            "key": "CODEX_V2_WRAPPER_PATH",
+            "value": {"stringValue": "/private/bootstrap/wrapper"},
+        },
     ]
     return {
         "resourceLogs": [
@@ -63,11 +75,7 @@ def otlp_payload(
                     ]
                 },
                 "scopeLogs": [
-                    {
-                        "logRecords": [
-                            {"body": {"kvlistValue": {"values": values}}}
-                        ]
-                    }
+                    {"logRecords": [{"body": {"kvlistValue": {"values": values}}}]}
                 ],
             }
         ]
@@ -115,6 +123,9 @@ class OTelReceiverTests(unittest.TestCase):
             self.assertIn("gpt-5.6-terra", stored)
             self.assertNotIn("secret@example.invalid", stored)
             self.assertNotIn("sensitive prompt", stored)
+            self.assertNotIn("/private/bootstrap/source", stored)
+            self.assertNotIn("/private/bootstrap/codex", stored)
+            self.assertNotIn("/private/bootstrap/wrapper", stored)
 
     def test_receiver_enforces_request_limit(self) -> None:
         with OTelReceiver(max_request_bytes=32_000, max_requests=1) as receiver:
@@ -179,7 +190,10 @@ class AttestationTests(unittest.TestCase):
             "conversation.id": "thread-123",
         }
         cases = [
-            ({key: value for key, value in base.items() if key != "model"}, "FIELD_MISSING"),
+            (
+                {key: value for key, value in base.items() if key != "model"},
+                "FIELD_MISSING",
+            ),
             ({**base, "model": "gpt-5.6-luna"}, "MODEL_MISMATCH"),
             ({**base, "reasoning_effort": "medium"}, "EFFORT_MISMATCH"),
             ({**base, "conversation.id": "other"}, "CONVERSATION_MISMATCH"),

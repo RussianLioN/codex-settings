@@ -10,6 +10,7 @@ import stat
 import subprocess
 import unicodedata
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
@@ -82,19 +83,30 @@ class SnapshotBuilder:
         repository: Path,
         base_sha: str,
         destination: Path,
+        deadline_at: datetime | None = None,
     ) -> SnapshotResult:
-        source = _canonical_repository(repository)
+        _remaining_deadline_seconds(deadline_at)
+        source = _canonical_repository(repository, deadline_at=deadline_at)
         target = _fresh_destination(destination)
-        resolved_base = _verify_clean_head(source, base_sha)
-        source_before = _source_manifest(source)
-        entries = _read_tree(source, resolved_base)
+        resolved_base = _verify_clean_head(
+            source,
+            base_sha,
+            deadline_at=deadline_at,
+        )
+        source_before = _source_manifest(source, deadline_at=deadline_at)
+        entries = _read_tree(source, resolved_base, deadline_at=deadline_at)
         validate_snapshot_paths(entry.path for entry in entries)
         _validate_entries(entries, self.limits)
 
         target.mkdir(mode=0o700)
         try:
-            total_bytes = self._materialize(source, target, entries)
-            source_after = _source_manifest(source)
+            total_bytes = self._materialize(
+                source,
+                target,
+                entries,
+                deadline_at=deadline_at,
+            )
+            source_after = _source_manifest(source, deadline_at=deadline_at)
             if source_after != source_before:
                 raise SnapshotError(
                     "SOURCE_CHANGED",
@@ -121,10 +133,19 @@ class SnapshotBuilder:
         repository: Path,
         target: Path,
         entries: list[_TreeEntry],
+        *,
+        deadline_at: datetime | None,
     ) -> int:
         total_bytes = 0
         for entry in entries:
-            blob = _git(repository, "cat-file", "blob", entry.object_id)
+            _remaining_deadline_seconds(deadline_at)
+            blob = _git(
+                repository,
+                "cat-file",
+                "blob",
+                entry.object_id,
+                deadline_at=deadline_at,
+            )
             if entry.size is None or len(blob) != entry.size:
                 raise SnapshotError(
                     "OBJECT_SIZE_MISMATCH",
@@ -179,8 +200,7 @@ def validate_snapshot_paths(paths: Iterable[str]) -> None:
                 f"path leaves the snapshot root: {raw_path}",
             )
         if any(
-            unicodedata.normalize("NFC", part).casefold() == ".git"
-            for part in parts
+            unicodedata.normalize("NFC", part).casefold() == ".git" for part in parts
         ):
             raise SnapshotError(
                 "GIT_METADATA_PATH",
@@ -197,7 +217,12 @@ def validate_snapshot_paths(paths: Iterable[str]) -> None:
         normalized[folded] = raw_path
 
 
-def _canonical_repository(repository: Path) -> Path:
+def _canonical_repository(
+    repository: Path,
+    *,
+    deadline_at: datetime | None = None,
+) -> Path:
+    _remaining_deadline_seconds(deadline_at)
     try:
         source = repository.expanduser().resolve(strict=True)
     except OSError as exc:
@@ -206,7 +231,14 @@ def _canonical_repository(repository: Path) -> Path:
         raise SnapshotError("SOURCE_UNAVAILABLE", "repository is not a directory")
     try:
         top_level = Path(
-            os.fsdecode(_git(source, "rev-parse", "--show-toplevel")).strip()
+            os.fsdecode(
+                _git(
+                    source,
+                    "rev-parse",
+                    "--show-toplevel",
+                    deadline_at=deadline_at,
+                )
+            ).strip()
         ).resolve(strict=True)
     except (OSError, subprocess.CalledProcessError) as exc:
         raise SnapshotError("NOT_A_REPOSITORY", str(source)) from exc
@@ -238,15 +270,32 @@ def _fresh_destination(destination: Path) -> Path:
     return target
 
 
-def _verify_clean_head(repository: Path, base_sha: str) -> str:
+def _verify_clean_head(
+    repository: Path,
+    base_sha: str,
+    *,
+    deadline_at: datetime | None = None,
+) -> str:
     if not isinstance(base_sha, str) or _HEX_OBJECT.fullmatch(base_sha) is None:
         raise SnapshotError("INVALID_BASE_SHA", "base SHA must be a full object id")
     try:
         head = os.fsdecode(
-            _git(repository, "rev-parse", "--verify", "HEAD^{commit}")
+            _git(
+                repository,
+                "rev-parse",
+                "--verify",
+                "HEAD^{commit}",
+                deadline_at=deadline_at,
+            )
         ).strip()
         resolved_base = os.fsdecode(
-            _git(repository, "rev-parse", "--verify", f"{base_sha}^{{commit}}")
+            _git(
+                repository,
+                "rev-parse",
+                "--verify",
+                f"{base_sha}^{{commit}}",
+                deadline_at=deadline_at,
+            )
         ).strip()
     except subprocess.CalledProcessError as exc:
         raise SnapshotError(
@@ -265,13 +314,21 @@ def _verify_clean_head(repository: Path, base_sha: str) -> str:
         "-z",
         "--untracked-files=all",
         "--ignore-submodules=none",
+        deadline_at=deadline_at,
     )
     if status_output:
         raise SnapshotError(
             "SOURCE_DIRTY",
             "the first snapshot requires a completely clean worktree",
         )
-    worktree_output = _git(repository, "worktree", "list", "--porcelain", "-z")
+    worktree_output = _git(
+        repository,
+        "worktree",
+        "list",
+        "--porcelain",
+        "-z",
+        deadline_at=deadline_at,
+    )
     worktree_paths = _parse_worktree_paths(worktree_output)
     if len(worktree_paths) != 1 or worktree_paths[0] != repository:
         raise SnapshotError(
@@ -293,7 +350,12 @@ def _parse_worktree_paths(output: bytes) -> list[Path]:
     return paths
 
 
-def _read_tree(repository: Path, base_sha: str) -> list[_TreeEntry]:
+def _read_tree(
+    repository: Path,
+    base_sha: str,
+    *,
+    deadline_at: datetime | None = None,
+) -> list[_TreeEntry]:
     output = _git(
         repository,
         "ls-tree",
@@ -302,6 +364,7 @@ def _read_tree(repository: Path, base_sha: str) -> list[_TreeEntry]:
         "-l",
         "--full-tree",
         base_sha,
+        deadline_at=deadline_at,
     )
     entries: list[_TreeEntry] = []
     for record in output.split(b"\0"):
@@ -371,9 +434,19 @@ def _validate_entries(
             )
 
 
-def _source_manifest(repository: Path) -> SourceManifest:
+def _source_manifest(
+    repository: Path,
+    *,
+    deadline_at: datetime | None = None,
+) -> SourceManifest:
     head = os.fsdecode(
-        _git(repository, "rev-parse", "--verify", "HEAD^{commit}")
+        _git(
+            repository,
+            "rev-parse",
+            "--verify",
+            "HEAD^{commit}",
+            deadline_at=deadline_at,
+        )
     ).strip()
     status = _git(
         repository,
@@ -382,34 +455,70 @@ def _source_manifest(repository: Path) -> SourceManifest:
         "-z",
         "--untracked-files=all",
         "--ignore-submodules=none",
+        deadline_at=deadline_at,
     )
-    refs = _git(repository, "show-ref", "--head", "--dereference")
-    worktrees = _git(repository, "worktree", "list", "--porcelain", "-z")
-    git_dir = _git_path(repository, "--git-dir")
-    common_dir = _git_path(repository, "--git-common-dir")
+    refs = _git(
+        repository,
+        "show-ref",
+        "--head",
+        "--dereference",
+        deadline_at=deadline_at,
+    )
+    worktrees = _git(
+        repository,
+        "worktree",
+        "list",
+        "--porcelain",
+        "-z",
+        deadline_at=deadline_at,
+    )
+    git_dir = _git_path(repository, "--git-dir", deadline_at=deadline_at)
+    common_dir = _git_path(
+        repository,
+        "--git-common-dir",
+        deadline_at=deadline_at,
+    )
     return SourceManifest(
         head_sha=head,
         status_sha256=_sha256(status),
         refs_sha256=_sha256(refs),
         worktrees_sha256=_sha256(worktrees),
-        git_control_sha256=_hash_git_control(git_dir, common_dir),
+        git_control_sha256=_hash_git_control(
+            git_dir,
+            common_dir,
+            deadline_at=deadline_at,
+        ),
     )
 
 
-def _git_path(repository: Path, flag: str) -> Path:
-    raw = os.fsdecode(_git(repository, "rev-parse", flag)).strip()
+def _git_path(
+    repository: Path,
+    flag: str,
+    *,
+    deadline_at: datetime | None = None,
+) -> Path:
+    raw = os.fsdecode(
+        _git(repository, "rev-parse", flag, deadline_at=deadline_at)
+    ).strip()
     path = Path(raw)
     if not path.is_absolute():
         path = repository / path
     return path.resolve(strict=True)
 
 
-def _hash_git_control(git_dir: Path, common_dir: Path) -> str:
+def _hash_git_control(
+    git_dir: Path,
+    common_dir: Path,
+    *,
+    deadline_at: datetime | None = None,
+) -> str:
     digest = hashlib.sha256()
     roots = sorted({git_dir, common_dir}, key=os.fspath)
     for root in roots:
+        _remaining_deadline_seconds(deadline_at)
         digest.update(os.fsencode(root))
         for entry in _control_entries(root):
+            _remaining_deadline_seconds(deadline_at)
             relative = entry.relative_to(root)
             metadata = entry.lstat()
             digest.update(os.fsencode(relative))
@@ -422,6 +531,7 @@ def _hash_git_control(git_dir: Path, common_dir: Path) -> str:
             elif stat.S_ISREG(metadata.st_mode):
                 with entry.open("rb") as handle:
                     while chunk := handle.read(_READ_CHUNK):
+                        _remaining_deadline_seconds(deadline_at)
                         digest.update(chunk)
     return digest.hexdigest()
 
@@ -432,9 +542,7 @@ def _control_entries(root: Path) -> list[Path]:
     for current, directories, filenames in os.walk(root, followlinks=False):
         current_path = Path(current)
         if current_path == root:
-            directories[:] = [
-                name for name in directories if name not in excluded
-            ]
+            directories[:] = [name for name in directories if name not in excluded]
         for name in sorted(directories):
             entries.append(current_path / name)
         for name in sorted(filenames):
@@ -539,15 +647,16 @@ def _declares_git_lfs(path: str, blob: bytes) -> bool:
         line = raw_line.decode("utf-8", errors="replace").strip()
         if not line or line.startswith("#"):
             continue
-        if any(
-            token.replace(" ", "") == "filter=lfs"
-            for token in line.split()
-        ):
+        if any(token.replace(" ", "") == "filter=lfs" for token in line.split()):
             return True
     return False
 
 
-def _git(repository: Path, *arguments: str) -> bytes:
+def _git(
+    repository: Path,
+    *arguments: str,
+    deadline_at: datetime | None = None,
+) -> bytes:
     executable = _GIT if _GIT.exists() else Path(shutil.which("git") or "")
     if not executable:
         raise SnapshotError("GIT_UNAVAILABLE", "Git executable was not found")
@@ -579,7 +688,13 @@ def _git(repository: Path, *arguments: str) -> bytes:
             env=environment,
             close_fds=True,
             check=True,
+            timeout=_remaining_deadline_seconds(deadline_at),
         )
+    except subprocess.TimeoutExpired as exc:
+        raise SnapshotError(
+            "SNAPSHOT_DEADLINE_EXCEEDED",
+            "Git did not finish before the snapshot deadline",
+        ) from exc
     except subprocess.CalledProcessError:
         raise
     except OSError as exc:
@@ -589,3 +704,22 @@ def _git(repository: Path, *arguments: str) -> bytes:
 
 def _sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def _remaining_deadline_seconds(deadline_at: datetime | None) -> float | None:
+    if deadline_at is None:
+        return None
+    if not isinstance(deadline_at, datetime) or deadline_at.tzinfo is None:
+        raise SnapshotError(
+            "SNAPSHOT_DEADLINE_INVALID",
+            "snapshot deadline must include a timezone",
+        )
+    remaining = (
+        deadline_at.astimezone(timezone.utc) - datetime.now(timezone.utc)
+    ).total_seconds()
+    if remaining <= 0:
+        raise SnapshotError(
+            "SNAPSHOT_DEADLINE_EXCEEDED",
+            "snapshot deadline expired before completion",
+        )
+    return remaining

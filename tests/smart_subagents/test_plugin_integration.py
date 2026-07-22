@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import importlib.util
 import json
 import os
@@ -90,6 +91,7 @@ class PluginMetadataTests(unittest.TestCase):
             )
         )
         self.assertEqual("codex-smart-subagents", manifest["name"])
+        self.assertEqual("0.2.0", manifest["version"])
         self.assertEqual("./skills/", manifest["skills"])
         self.assertNotIn("hooks", manifest)
         self.assertTrue((PLUGIN_ROOT / "hooks" / "hooks.json").is_file())
@@ -114,13 +116,24 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual("./bin/codex-smart-subagents-mcp", server["command"])
         self.assertEqual(["--stdio"], server["args"])
         self.assertEqual(".", server["cwd"])
-        self.assertFalse(server["required"])
+        self.assertTrue(server["required"])
         self.assertEqual(
-            ["smart_plan", "smart_start", "smart_wait", "smart_cancel"],
+            ["smart_plan", "route_start", "smart_wait", "smart_cancel"],
             server["enabled_tools"],
         )
         self.assertGreaterEqual(server["tool_timeout_sec"], 420)
+        self.assertEqual("approve", server["default_tools_approval_mode"])
         self.assertIn("CODEX_ADAPTIVE_CATALOG", server["env_vars"])
+        for name in (
+            "CODEX_SMART_LAUNCHER_ACTIVE",
+            "CODEX_SMART_STATE_HOME",
+            "CODEX_SMART_GATEWAY_PATH",
+            "CODEX_SMART_ACTIVATION_ID",
+            "CODEX_SMART_GATE_FINGERPRINT",
+            "CODEX_SMART_MCP_SESSION_NONCE",
+            "CODEX_SMART_USER_MCP_POLICY_PROOF",
+        ):
+            self.assertIn(name, server["env_vars"])
 
     def test_hook_config_has_only_supported_turn_events(self) -> None:
         hooks = json.loads(
@@ -251,7 +264,7 @@ class HookIntegrationTests(unittest.TestCase):
         self.assertEqual("turn-1", state["turnId"])
         self.assertFalse(state["planCalled"])
 
-    def test_controller_failure_stops_only_the_smart_turn(self) -> None:
+    def test_controller_failure_falls_back_to_ordinary_turn(self) -> None:
         def unavailable(_config: Any) -> Any:
             raise RuntimeError("socket unavailable")
 
@@ -260,8 +273,9 @@ class HookIntegrationTests(unittest.TestCase):
             self.env,
             client_factory=unavailable,
         )
-        self.assertFalse(response["continue"])
-        self.assertIn("контроллер", response["stopReason"].lower())
+        self.assertTrue(response["continue"])
+        self.assertNotIn("stopReason", response)
+        self.assertIn("обычном режиме", response["systemMessage"].lower())
         self.assertNotIn("socket unavailable", json.dumps(response))
 
     def test_slow_controller_still_respects_the_hook_budget(self) -> None:
@@ -295,7 +309,7 @@ class HookIntegrationTests(unittest.TestCase):
             if os.path.lexists(socket_path):
                 socket_path.unlink()
 
-        self.assertFalse(response["continue"])
+        self.assertTrue(response["continue"])
         self.assertLess(time.monotonic() - started, 2)
         self.assertFalse(thread.is_alive())
 
@@ -310,9 +324,11 @@ class HookIntegrationTests(unittest.TestCase):
         second = self.stop_hook.handle(hook_payload("Stop"), self.env)
         third = self.stop_hook.handle(hook_payload("Stop"), self.env)
 
-        self.assertFalse(first["continue"])
-        self.assertFalse(second["continue"])
-        self.assertIn("smart_plan", json.dumps(first))
+        for response in (first, second):
+            self.assertEqual("block", response["decision"])
+            self.assertIn("smart_plan", response["reason"])
+            self.assertNotIn("continue", response)
+            self.assertNotIn("hookSpecificOutput", response)
         self.assertTrue(third["continue"])
         self.assertIn("двух", third["systemMessage"].lower())
 
@@ -389,7 +405,7 @@ class HookIntegrationTests(unittest.TestCase):
             client_factory=lambda _config: self.client,
         )
 
-        self.assertFalse(response["continue"])
+        self.assertTrue(response["continue"])
         self.assertEqual([], self.client.calls)
 
 
@@ -475,15 +491,155 @@ class MCPEntrypointTests(unittest.TestCase):
         self.assertEqual("PLANNED", state["routeState"])
         self.assertNotIn("secret-request-key", json.dumps(state))
 
-    def test_entrypoint_requires_explicit_session_and_codex_home(self) -> None:
-        for missing in ("CODEX_ADAPTIVE_SESSION_ID", "CODEX_HOME"):
-            invalid = dict(self.env)
-            invalid.pop(missing)
-            with self.assertRaises(RuntimeError):
-                self.server_entry.build_server(
-                    invalid,
-                    client_factory=lambda _config: self.client,
+    def test_coordination_update_stops_at_one_monotonic_lock_deadline(self) -> None:
+        clock = [10.0]
+        sleeps: list[float] = []
+        operations: list[int] = []
+
+        def monotonic() -> float:
+            return clock[0]
+
+        def sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            clock[0] += seconds
+
+        def always_busy(_descriptor: int, operation: int) -> None:
+            operations.append(operation)
+            if operation == self.runtime.fcntl.LOCK_UN:
+                return
+            raise BlockingIOError(errno.EAGAIN, "busy")
+
+        with (
+            mock.patch.object(
+                self.runtime,
+                "COORDINATION_LOCK_TIMEOUT_SECONDS",
+                0.12,
+                create=True,
+            ),
+            mock.patch.object(
+                self.runtime,
+                "COORDINATION_LOCK_POLL_INTERVAL_SECONDS",
+                0.05,
+                create=True,
+            ),
+            mock.patch.object(self.runtime.time, "monotonic", side_effect=monotonic),
+            mock.patch.object(self.runtime.time, "sleep", side_effect=sleep),
+            mock.patch.object(self.runtime.fcntl, "flock", side_effect=always_busy),
+        ):
+            with self.assertRaises(BaseException) as captured:
+                self.store.update(lambda state: state)
+
+        self.assertIsInstance(captured.exception, self.runtime.IntegrationError)
+        self.assertAlmostEqual(0.12, sum(sleeps))
+        self.assertGreaterEqual(len(operations), 2)
+        self.assertTrue(
+            all(operation & self.runtime.fcntl.LOCK_NB for operation in operations)
+        )
+        self.assertNotIn(self.runtime.fcntl.LOCK_UN, operations)
+
+    def test_coordination_update_retries_nonblocking_lock_before_deadline(self) -> None:
+        clock = [20.0]
+        attempts = 0
+        operations: list[int] = []
+
+        def sleep(seconds: float) -> None:
+            clock[0] += seconds
+
+        def eventually_available(_descriptor: int, operation: int) -> None:
+            nonlocal attempts
+            operations.append(operation)
+            if operation == self.runtime.fcntl.LOCK_UN:
+                return
+            attempts += 1
+            if attempts < 3:
+                raise BlockingIOError(errno.EWOULDBLOCK, "busy")
+
+        try:
+            with (
+                mock.patch.object(
+                    self.runtime,
+                    "COORDINATION_LOCK_TIMEOUT_SECONDS",
+                    0.2,
+                    create=True,
+                ),
+                mock.patch.object(
+                    self.runtime,
+                    "COORDINATION_LOCK_POLL_INTERVAL_SECONDS",
+                    0.05,
+                    create=True,
+                ),
+                mock.patch.object(
+                    self.runtime.time, "monotonic", side_effect=lambda: clock[0]
+                ),
+                mock.patch.object(self.runtime.time, "sleep", side_effect=sleep),
+                mock.patch.object(
+                    self.runtime.fcntl,
+                    "flock",
+                    side_effect=eventually_available,
+                ),
+            ):
+                updated = self.store.update(
+                    lambda state: {
+                        **state,
+                        "continuationCount": state["continuationCount"] + 1,
+                    }
                 )
+        except BaseException as error:
+            self.fail(f"coordination lock did not retry: {error!r}")
+
+        self.assertEqual(3, attempts)
+        self.assertEqual(1, updated["continuationCount"])
+        self.assertTrue(
+            all(
+                operation == self.runtime.fcntl.LOCK_UN
+                or operation & self.runtime.fcntl.LOCK_NB
+                for operation in operations
+            )
+        )
+
+    def test_coordination_update_closes_descriptor_when_unlock_fails(self) -> None:
+        lock_descriptor: list[int] = []
+        closed_descriptors: list[int] = []
+        real_close = self.runtime.os.close
+
+        def flock(descriptor: int, operation: int) -> None:
+            if operation == self.runtime.fcntl.LOCK_UN:
+                raise OSError(errno.EIO, "unlock failed")
+            lock_descriptor.append(descriptor)
+
+        def close(descriptor: int) -> None:
+            closed_descriptors.append(descriptor)
+            real_close(descriptor)
+
+        with (
+            mock.patch.object(self.runtime.fcntl, "flock", side_effect=flock),
+            mock.patch.object(self.runtime.os, "close", side_effect=close),
+        ):
+            with self.assertRaises(OSError):
+                self.store.update(lambda state: state)
+
+        self.assertEqual(1, len(lock_descriptor))
+        self.assertIn(lock_descriptor[0], closed_descriptors)
+
+    def test_entrypoint_without_adaptive_session_is_inactive(self) -> None:
+        ordinary = dict(self.env)
+        ordinary.pop("CODEX_ADAPTIVE_SESSION_ID")
+
+        server = self.server_entry.build_server(
+            ordinary,
+            client_factory=lambda _config: self.fail("выбран путь v1"),
+        )
+
+        self.assertIsInstance(server, self.server_entry.InactiveMCPServer)
+
+    def test_entrypoint_requires_codex_home_for_adaptive_session(self) -> None:
+        invalid = dict(self.env)
+        invalid.pop("CODEX_HOME")
+        with self.assertRaises(RuntimeError):
+            self.server_entry.build_server(
+                invalid,
+                client_factory=lambda _config: self.client,
+            )
 
     def test_tools_list_explains_assessment_scale_and_graph_invariants(
         self,
@@ -651,10 +807,10 @@ class SkillContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("name: using-smart-subagents", text)
         self.assertIn("Use when", text)
-        for tool in ("smart_plan", "smart_start", "smart_wait", "smart_cancel"):
+        for tool in ("smart_plan", "route_start", "smart_wait", "smart_cancel"):
             self.assertIn(tool, text)
         self.assertIn("direct", text)
-        self.assertIn("не гарантируют", text.lower())
+        self.assertIn("не применяют", text.lower())
         self.assertNotIn("smart_integrate", text)
 
 

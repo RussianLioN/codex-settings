@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import re
 import secrets
@@ -13,8 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
+from .compatibility import codex_version_supported, parse_stable_codex_version
 
-SUPPORTED_CODEX_VERSION = "0.144.4"
 _VERSION_PATTERN = re.compile(r"^codex-cli ([0-9]+\.[0-9]+\.[0-9]+)\n?$")
 _SUBCOMMANDS = frozenset(
     {
@@ -168,7 +169,15 @@ def parse_codex_version(output: str) -> str:
             "VERSION_OUTPUT_INVALID",
             "Codex version output has an unexpected format",
         )
-    return match.group(1)
+    version = match.group(1)
+    try:
+        parse_stable_codex_version(version)
+    except ValueError as exc:
+        raise LauncherError(
+            "VERSION_OUTPUT_INVALID",
+            "Codex version output is not canonical stable SemVer",
+        ) from exc
+    return version
 
 
 def probe_codex_version(binary: Path) -> str:
@@ -197,6 +206,41 @@ def build_adaptive_environment(
     environment["CODEX_ADAPTIVE_SESSION_ID"] = f"cas1_{token}"
     environment["CODEX_SMART_LAUNCHER_ACTIVE"] = "1"
     return environment
+
+
+def apply_coordinator_defaults(
+    arguments: Sequence[str],
+    coordinator: Mapping[str, str],
+) -> list[str]:
+    """Append one validated coordinator pair to an invocation without explicit controls."""
+
+    if set(coordinator) != {"model", "reasoning_effort"}:
+        raise LauncherError(
+            "COORDINATOR_PAIR_INVALID",
+            "coordinator pair must contain exactly model and reasoning_effort",
+        )
+    model = coordinator["model"]
+    effort = coordinator["reasoning_effort"]
+    for name, value in (("model", model), ("reasoning_effort", effort)):
+        if (
+            not isinstance(value, str)
+            or not value
+            or len(value.encode("utf-8")) > 128
+            or "\0" in value
+            or "\n" in value
+            or "\r" in value
+        ):
+            raise LauncherError(
+                "COORDINATOR_PAIR_INVALID",
+                f"coordinator {name} is invalid",
+            )
+    return [
+        *arguments,
+        "--model",
+        model,
+        "-c",
+        f"model_reasoning_effort={json.dumps(effort)}",
+    ]
 
 
 def validate_real_binary(binary: Path, wrapper: Path) -> Path:
@@ -236,6 +280,7 @@ def run_launcher(
     real_binary: Path,
     wrapper: Path,
     environment: Mapping[str, str] | None = None,
+    coordinator: Mapping[str, str] | None = None,
     ensure_controller: Callable[[Mapping[str, str]], None] | None = None,
     execve: Callable[[str, Sequence[str], Mapping[str, str]], object] = os.execve,
 ) -> int:
@@ -256,7 +301,7 @@ def run_launcher(
         raise AssertionError("execve unexpectedly returned")
 
     decision = classify_invocation(arguments)
-    if version != SUPPORTED_CODEX_VERSION:
+    if not codex_version_supported(version):
         print(
             "codex-smart: умный режим отключён для неподдерживаемой "
             f"версии Codex {version}",
@@ -270,6 +315,19 @@ def run_launcher(
 
     adaptive_environment = build_adaptive_environment(source_environment)
     if ensure_controller is not None:
-        ensure_controller(adaptive_environment)
+        try:
+            ensure_controller(adaptive_environment)
+        except Exception:
+            print(
+                "codex-smart: контроллер недоступен, запускается обычный Codex",
+                file=sys.stderr,
+            )
+            execve(str(real), command, source_environment)
+            raise AssertionError("execve unexpectedly returned")
+    if coordinator is not None:
+        command = [
+            str(real),
+            *apply_coordinator_defaults(arguments, coordinator),
+        ]
     execve(str(real), command, adaptive_environment)
     raise AssertionError("execve unexpectedly returned")

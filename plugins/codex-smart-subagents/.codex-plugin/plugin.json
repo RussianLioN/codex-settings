@@ -1,6 +1,6 @@
 {
   "name": "codex-smart-subagents",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Локальная адаптивная маршрутизация проверяемых подзадач во внешние процессы Codex.",
   "author": {
     "name": "Codex Settings"

@@ -2549,6 +2549,48 @@ def _child_profiles(root: Path) -> dict[str, dict[str, Any]]:
     return {case["name"]: case["profile"] for case in vectors["cases"]}
 
 
+_PERMISSION_ARGUMENT_SLOTS = (
+    "permissionDescriptionConfig",
+    "permissionFilesystemConfig",
+    "permissionNetworkConfig",
+)
+_PERMISSION_DESCRIPTIONS = {
+    "classifier": "Adaptive child classifier",
+    "reader": "Adaptive child reader",
+    "writer": "Adaptive child writer",
+}
+
+
+def _permission_arguments(
+    profile: dict[str, Any],
+    environment_slots: dict[str, str],
+) -> dict[str, str]:
+    name = profile["permissionProfileId"]
+    entries = [
+        '":root"="deny"',
+        '":minimal"="read"',
+        '":tmpdir"="write"',
+        '":workspace_roots"={"."="write"}',
+        canonical_json_v1(environment_slots["snapshotRoot"]) + '="read"',
+    ]
+    if profile["role"] == "writer":
+        entries.append(
+            canonical_json_v1(environment_slots["workspaceRoot"]) + '="write"'
+        )
+    prefix = f"permissions.{name}"
+    return {
+        "permissionDescriptionConfig": (
+            prefix
+            + ".description="
+            + canonical_json_v1(_PERMISSION_DESCRIPTIONS[profile["role"]])
+        ),
+        "permissionFilesystemConfig": (
+            prefix + ".filesystem={" + ",".join(entries) + "}"
+        ),
+        "permissionNetworkConfig": prefix + ".network.enabled=false",
+    }
+
+
 def _materialize_environment(
     profile: dict[str, Any],
     slot_values: dict[str, str],
@@ -2616,6 +2658,18 @@ def materialize_launch_binding(
         "workDir": trusted_context["workDir"],
         "resultSchemaPath": trusted_context["resultSchemaPath"],
         "reasoningEffort": trusted_context["selectedPair"]["reasoningEffort"],
+        **_permission_arguments(
+            profile,
+            trusted_context["environmentSlotValues"],
+        ),
+        "otelExporterConfig": (
+            "otel.exporter={ otlp-http = { endpoint="
+            + canonical_json_v1(
+                trusted_context["environmentSlotValues"]["otelEndpoint"].rstrip("/")
+                + "/v1/logs"
+            )
+            + ', protocol="json", headers={} } }'
+        ),
     }
     environment, secret_sha256 = _materialize_environment(
         profile,
@@ -2764,6 +2818,8 @@ def _binding_shape_valid(binding: Any) -> bool:
         "workDir",
         "resultSchemaPath",
         "reasoningEffort",
+        *_PERMISSION_ARGUMENT_SLOTS,
+        "otelExporterConfig",
     }:
         return False
     if (
@@ -2772,6 +2828,11 @@ def _binding_shape_valid(binding: Any) -> bool:
         or not _bounded_string(arguments["workDir"], 4_096, absolute=True)
         or not _bounded_string(arguments["resultSchemaPath"], 4_096, absolute=True)
         or arguments["reasoningEffort"] not in {"low", "medium", "high", "xhigh", "max"}
+        or any(
+            not _bounded_string(arguments[slot], 16_384)
+            for slot in _PERMISSION_ARGUMENT_SLOTS
+        )
+        or not _bounded_string(arguments["otelExporterConfig"], 4_096)
     ):
         return False
     concrete_argv = binding["concreteArgv"]
@@ -3160,6 +3221,16 @@ def validate_child_negative_cases(root: Path = ROOT) -> CheckSummary:
                 del target[operation["index"]]
             elif operation["kind"] == "append-array-item":
                 target.append(copy.deepcopy(operation["value"]))
+            elif operation["kind"] == "remove-permission-table":
+                slots = set(operation["slots"])
+                without_table: list[dict[str, Any]] = []
+                for item in target:
+                    if item.get("slot") in slots:
+                        if without_table and without_table[-1] == {"literal": "-c"}:
+                            without_table.pop()
+                        continue
+                    without_table.append(item)
+                changed["argvTemplate"] = without_table
             else:
                 raise AssertionError(f"unknown profile mutation: {operation['kind']}")
             actual = (
@@ -3251,9 +3322,9 @@ def validate_child_negative_cases(root: Path = ROOT) -> CheckSummary:
         if actual != case["expected"]:
             raise AssertionError((case["name"], actual, case["expected"]))
         passed += 1
-    if len(vectors["negativeCases"]) != 15:
-        raise AssertionError("expected exactly 15 child negative cases")
-    return CheckSummary(passed=passed, total=15)
+    if len(vectors["negativeCases"]) != 16:
+        raise AssertionError("expected exactly 16 child negative cases")
+    return CheckSummary(passed=passed, total=16)
 
 
 def normalize_routing_policy_source(
@@ -4427,6 +4498,8 @@ def oracle_mutant_results(root: Path = ROOT) -> dict[str, bool]:
         arguments = materialize_launch_binding(
             regular_environment["role"], changed, root=root
         )["arguments"]
+        for slot in _PERMISSION_ARGUMENT_SLOTS:
+            arguments[slot] = fixture["binding"]["arguments"][slot]
         mutant_argv = _materialize_argv(profile, arguments, original_environment)
         argv_fp = domain_fingerprint(child_vectors["argvDomain"], mutant_argv)
         environment_fp = domain_fingerprint(

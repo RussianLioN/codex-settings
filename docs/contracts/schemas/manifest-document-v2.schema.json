@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/manifest-document-v2.schema.json",
+  "title": "manifest-document-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "installationId", "release", "pluginId", "marketplaceName", "stateHome", "sourceLocator", "codexSnapshot", "activeActivation", "previousActivation", "interfaceEvidence", "routingPolicyFingerprint", "bundledCatalogFingerprint", "artifacts", "originalBackup", "lastCommittedOperation", "databaseSchemaVersion", "extensions"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "installationId": {"$ref": "#/$defs/installationId"},
+    "release": {"const": "0.2.0"},
+    "pluginId": {"const": "codex-smart-subagents"},
+    "marketplaceName": {"const": "codex-settings-adaptive"},
+    "stateHome": {"$ref": "#/$defs/absolutePath"},
+    "sourceLocator": {"$ref": "#/$defs/sourceLocator"},
+    "codexSnapshot": {"$ref": "#/$defs/snapshotLocator"},
+    "activeActivation": {"$ref": "#/$defs/activationPointer"},
+    "previousActivation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/activationPointer"}]},
+    "interfaceEvidence": {"$ref": "interface-evidence-v1.schema.json"},
+    "routingPolicyFingerprint": {"$ref": "#/$defs/sha256"},
+    "bundledCatalogFingerprint": {"$ref": "#/$defs/sha256"},
+    "artifacts": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/artifact"}},
+    "originalBackup": {"$ref": "#/$defs/originalBackup"},
+    "lastCommittedOperation": {"$ref": "#/$defs/operationId"},
+    "databaseSchemaVersion": {"const": 2},
+    "extensions": {"type": "object", "additionalProperties": false, "properties": {"installerSourceDigest": {"$ref": "#/$defs/sha256"}}}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"},
+    "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"},
+    "activationId": {"type": "string", "pattern": "^act2_[0-9a-f]{64}$"},
+    "databaseId": {"type": "string", "pattern": "^db2_[0-9a-f]{32}$"},
+    "absolutePath": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/"},
+    "relativePath": {"type": "string", "minLength": 1, "maxLength": 4096, "not": {"pattern": "^/"}},
+    "mode": {"type": "string", "pattern": "^0[0-7]{3}$"},
+    "safeInteger": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "sourceLocator": {
+      "type": "object", "additionalProperties": false,
+      "required": ["lexicalPath", "resolvedPathAtCapture", "argv0Policy", "sourceObservedSha256"],
+      "properties": {"lexicalPath": {"$ref": "#/$defs/absolutePath"}, "resolvedPathAtCapture": {"$ref": "#/$defs/absolutePath"}, "argv0Policy": {"const": "lexical"}, "sourceObservedSha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "snapshotLocator": {
+      "type": "object", "additionalProperties": false,
+      "required": ["absolutePath", "sha256"],
+      "properties": {"absolutePath": {"$ref": "#/$defs/absolutePath"}, "sha256": {"$ref": "#/$defs/sha256"}}
+    },
+    "activationPointer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["activationId", "activationFingerprint", "symlinkTarget", "generationId", "databaseId"],
+      "properties": {"activationId": {"$ref": "#/$defs/activationId"}, "activationFingerprint": {"$ref": "#/$defs/sha256"}, "symlinkTarget": {"type": "string", "minLength": 1, "maxLength": 4096}, "generationId": {"type": "string", "pattern": "^gen2_[0-9a-f]{64}$"}, "databaseId": {"$ref": "#/$defs/databaseId"}}
+    },
+    "artifact": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["type", "relativePath", "mode", "treeSha256"], "properties": {"type": {"const": "directory"}, "relativePath": {"$ref": "#/$defs/relativePath"}, "mode": {"$ref": "#/$defs/mode"}, "treeSha256": {"$ref": "#/$defs/sha256"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "relativePath", "mode", "size", "sha256"], "properties": {"type": {"const": "regular"}, "relativePath": {"$ref": "#/$defs/relativePath"}, "mode": {"$ref": "#/$defs/mode"}, "size": {"$ref": "#/$defs/safeInteger"}, "sha256": {"$ref": "#/$defs/sha256"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "relativePath", "target"], "properties": {"type": {"const": "symlink"}, "relativePath": {"$ref": "#/$defs/relativePath"}, "target": {"type": "string", "minLength": 1, "maxLength": 4096}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "relativePath"], "properties": {"type": {"const": "absent"}, "relativePath": {"$ref": "#/$defs/relativePath"}}}
+      ]
+    },
+    "originalBackup": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["type", "path", "parentPath", "name"], "properties": {"type": {"const": "absent"}, "path": {"$ref": "#/$defs/absolutePath"}, "parentPath": {"$ref": "#/$defs/absolutePath"}, "name": {"type": "string", "minLength": 1, "maxLength": 255}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "path", "device", "inode", "ownerUid", "ownerGid", "mode", "linkCount", "size", "sha256"], "properties": {"type": {"const": "regular"}, "path": {"$ref": "#/$defs/absolutePath"}, "device": {"$ref": "#/$defs/safeInteger"}, "inode": {"$ref": "#/$defs/safeInteger"}, "ownerUid": {"$ref": "#/$defs/safeInteger"}, "ownerGid": {"$ref": "#/$defs/safeInteger"}, "mode": {"$ref": "#/$defs/mode"}, "linkCount": {"type": "integer", "minimum": 1}, "size": {"$ref": "#/$defs/safeInteger"}, "sha256": {"$ref": "#/$defs/sha256"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "path", "device", "inode", "ownerUid", "ownerGid", "mode", "entryCount", "treeSha256"], "properties": {"type": {"const": "directory"}, "path": {"$ref": "#/$defs/absolutePath"}, "device": {"$ref": "#/$defs/safeInteger"}, "inode": {"$ref": "#/$defs/safeInteger"}, "ownerUid": {"$ref": "#/$defs/safeInteger"}, "ownerGid": {"$ref": "#/$defs/safeInteger"}, "mode": {"$ref": "#/$defs/mode"}, "entryCount": {"$ref": "#/$defs/safeInteger"}, "treeSha256": {"$ref": "#/$defs/sha256"}}},
+        {"type": "object", "additionalProperties": false, "required": ["type", "path", "parentDevice", "parentInode", "ownerUid", "ownerGid", "mode", "target", "targetFingerprint"], "properties": {"type": {"const": "symlink"}, "path": {"$ref": "#/$defs/absolutePath"}, "parentDevice": {"$ref": "#/$defs/safeInteger"}, "parentInode": {"$ref": "#/$defs/safeInteger"}, "ownerUid": {"$ref": "#/$defs/safeInteger"}, "ownerGid": {"$ref": "#/$defs/safeInteger"}, "mode": {"$ref": "#/$defs/mode"}, "target": {"type": "string", "minLength": 1, "maxLength": 4096}, "targetFingerprint": {"$ref": "#/$defs/sha256"}}}
+      ]
+    }
+  }
+}

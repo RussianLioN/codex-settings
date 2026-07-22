@@ -128,7 +128,7 @@ class ChildRunnerTests(unittest.TestCase):
             "-c",
             'default_permissions="adaptive_reader"',
             "-c",
-            'project_root_markers=[]',
+            "project_root_markers=[]",
             "-c",
             "project_doc_max_bytes=0",
             "-c",
@@ -136,8 +136,8 @@ class ChildRunnerTests(unittest.TestCase):
             "-c",
             (
                 "shell_environment_policy.set="
-                f'{{HOME={json.dumps(str(self.layout.home))},'
-                f'TMPDIR={json.dumps(str(self.layout.tmpdir))},'
+                f"{{HOME={json.dumps(str(self.layout.home))},"
+                f"TMPDIR={json.dumps(str(self.layout.tmpdir))},"
                 'PATH="/usr/bin:/bin:/usr/sbin:/sbin",'
                 "CODEX_SQLITE_HOME="
                 f"{json.dumps(str(self.layout.sqlite_home))},"
@@ -210,6 +210,9 @@ class ChildRunnerTests(unittest.TestCase):
                 "HTTPS_PROXY": "http://user:password@example.invalid",
                 "SSH_AUTH_SOCK": "/tmp/private-agent.sock",
                 "BASH_FUNC_attack%%": "() { :; }",
+                "CODEX_V2_SOURCE_ROOT": "/private/bootstrap/source",
+                "CODEX_V2_CODEX_BIN": "/private/bootstrap/codex",
+                "CODEX_V2_WRAPPER_PATH": "/private/bootstrap/wrapper",
             },
             clear=False,
         ):
@@ -247,6 +250,9 @@ class ChildRunnerTests(unittest.TestCase):
             "HTTPS_PROXY",
             "SSH_AUTH_SOCK",
             "BASH_FUNC_attack%%",
+            "CODEX_V2_SOURCE_ROOT",
+            "CODEX_V2_CODEX_BIN",
+            "CODEX_V2_WRAPPER_PATH",
         ):
             self.assertNotIn(forbidden, invocation["environment"])
         self.assertEqual(0o600, invocation["umaskProbeMode"])
@@ -274,7 +280,7 @@ class ChildRunnerTests(unittest.TestCase):
         self.assertNotIn(telemetry.token, "\0".join(argv))
         self.assertIn(
             (
-                'otel.exporter={ otlp-http = { endpoint='
+                "otel.exporter={ otlp-http = { endpoint="
                 '"http://127.0.0.1:4318/random/v1/logs", protocol="json", '
                 "headers={} } }"
             ),
@@ -295,10 +301,7 @@ class ChildRunnerTests(unittest.TestCase):
             )
         )
         self.assertEqual(
-            (
-                "X-Codex-Attestation-Token="
-                "test%2Cotel%3Dtoken%25value"
-            ),
+            ("X-Codex-Attestation-Token=test%2Cotel%3Dtoken%25value"),
             invocation["environment"]["OTEL_EXPORTER_OTLP_LOGS_HEADERS"],
         )
         self.assertNotIn(
@@ -361,9 +364,7 @@ class ChildRunnerTests(unittest.TestCase):
         executable_link.symlink_to(FAKE_CODEX)
         self.assertEqual(
             str(FAKE_CODEX.resolve()),
-            build_codex_exec_argv(
-                self.request(codex_executable=executable_link)
-            )[0],
+            build_codex_exec_argv(self.request(codex_executable=executable_link))[0],
         )
 
         writable_snapshot = self.base / "writable-snapshot"
@@ -413,9 +414,7 @@ class ChildRunnerTests(unittest.TestCase):
             )
         self.assertLess(time.monotonic() - started, 3.0)
         grandchild = int(
-            (self.layout.work_dir / "fake-grandchild.pid").read_text(
-                encoding="ascii"
-            )
+            (self.layout.work_dir / "fake-grandchild.pid").read_text(encoding="ascii")
         )
         try:
             for _ in range(50):
@@ -453,9 +452,7 @@ class ChildRunnerTests(unittest.TestCase):
     def test_timeout_applies_even_when_executable_never_reads_stdin(self) -> None:
         executable = self.base / "codex-no-stdin"
         executable.write_text(
-            f"#!{sys.executable}\n"
-            "import time\n"
-            "time.sleep(2)\n",
+            f"#!{sys.executable}\nimport time\ntime.sleep(2)\n",
             encoding="utf-8",
         )
         executable.chmod(0o755)
@@ -519,9 +516,7 @@ class ChildRunnerTests(unittest.TestCase):
                     )
 
     def test_allows_only_the_pinned_codex_arg0_alias_contract(self) -> None:
-        allowed_layout = ChildRuntimeLayout.create(
-            self.base / "runtime-arg0-allowed"
-        )
+        allowed_layout = ChildRuntimeLayout.create(self.base / "runtime-arg0-allowed")
 
         result = self.runner.run(
             self.request(

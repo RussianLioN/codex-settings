@@ -99,6 +99,30 @@
                 "literal": "-c"
               },
               {
+                "slot": "permissionDescriptionConfig",
+                "prefix": "",
+                "encoding": "raw"
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "slot": "permissionFilesystemConfig",
+                "prefix": "",
+                "encoding": "raw"
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "slot": "permissionNetworkConfig",
+                "prefix": "",
+                "encoding": "raw"
+              },
+              {
+                "literal": "-c"
+              },
+              {
                 "literal": "project_root_markers=[]"
               },
               {
@@ -144,6 +168,38 @@
               },
               {
                 "literal": "web_search=\"disabled\""
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "literal": "otel.environment=\"adaptive-child\""
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "literal": "otel.log_user_prompt=false"
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "literal": "otel.metrics_exporter=\"none\""
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "literal": "otel.trace_exporter=\"none\""
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "slot": "otelExporterConfig",
+                "prefix": "",
+                "encoding": "raw"
               }
             ],
             "environmentTemplate": {
@@ -306,6 +362,30 @@
                 "literal": "-c"
               },
               {
+                "slot": "permissionDescriptionConfig",
+                "prefix": "",
+                "encoding": "raw"
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "slot": "permissionFilesystemConfig",
+                "prefix": "",
+                "encoding": "raw"
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "slot": "permissionNetworkConfig",
+                "prefix": "",
+                "encoding": "raw"
+              },
+              {
+                "literal": "-c"
+              },
+              {
                 "literal": "project_root_markers=[]"
               },
               {
@@ -351,6 +431,38 @@
               },
               {
                 "literal": "web_search=\"disabled\""
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "literal": "otel.environment=\"adaptive-child\""
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "literal": "otel.log_user_prompt=false"
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "literal": "otel.metrics_exporter=\"none\""
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "literal": "otel.trace_exporter=\"none\""
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "slot": "otelExporterConfig",
+                "prefix": "",
+                "encoding": "raw"
               }
             ],
             "environmentTemplate": {
@@ -504,6 +616,30 @@
                 "literal": "-c"
               },
               {
+                "slot": "permissionDescriptionConfig",
+                "prefix": "",
+                "encoding": "raw"
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "slot": "permissionFilesystemConfig",
+                "prefix": "",
+                "encoding": "raw"
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "slot": "permissionNetworkConfig",
+                "prefix": "",
+                "encoding": "raw"
+              },
+              {
+                "literal": "-c"
+              },
+              {
                 "literal": "project_root_markers=[]"
               },
               {
@@ -549,6 +685,38 @@
               },
               {
                 "literal": "web_search=\"disabled\""
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "literal": "otel.environment=\"adaptive-child\""
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "literal": "otel.log_user_prompt=false"
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "literal": "otel.metrics_exporter=\"none\""
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "literal": "otel.trace_exporter=\"none\""
+              },
+              {
+                "literal": "-c"
+              },
+              {
+                "slot": "otelExporterConfig",
+                "prefix": "",
+                "encoding": "raw"
               }
             ],
             "environmentTemplate": {
@@ -632,7 +800,11 @@
         "model",
         "workDir",
         "resultSchemaPath",
-        "reasoningEffort"
+        "reasoningEffort",
+        "otelExporterConfig",
+        "permissionDescriptionConfig",
+        "permissionFilesystemConfig",
+        "permissionNetworkConfig"
       ],
       "properties": {
         "snapshotPath": {
@@ -657,6 +829,26 @@
             "xhigh",
             "max"
           ]
+        },
+        "otelExporterConfig": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "permissionDescriptionConfig": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "permissionFilesystemConfig": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "permissionNetworkConfig": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
         }
       }
     },
@@ -833,12 +1025,26 @@
         "otelEndpoint"
       ],
       "properties": {
-        "snapshotRoot": {"$ref": "#/$defs/path"},
-        "codexHome": {"$ref": "#/$defs/path"},
-        "codexSqliteHome": {"$ref": "#/$defs/path"},
-        "home": {"$ref": "#/$defs/path"},
-        "tmpDir": {"$ref": "#/$defs/path"},
-        "otelEndpoint": {"type": "string", "minLength": 1, "maxLength": 4096}
+        "snapshotRoot": {
+          "$ref": "#/$defs/path"
+        },
+        "codexHome": {
+          "$ref": "#/$defs/path"
+        },
+        "codexSqliteHome": {
+          "$ref": "#/$defs/path"
+        },
+        "home": {
+          "$ref": "#/$defs/path"
+        },
+        "tmpDir": {
+          "$ref": "#/$defs/path"
+        },
+        "otelEndpoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
       }
     },
     "environmentSlotValuesWriter": {
@@ -854,21 +1060,41 @@
         "workspaceRoot"
       ],
       "properties": {
-        "snapshotRoot": {"$ref": "#/$defs/path"},
-        "codexHome": {"$ref": "#/$defs/path"},
-        "codexSqliteHome": {"$ref": "#/$defs/path"},
-        "home": {"$ref": "#/$defs/path"},
-        "tmpDir": {"$ref": "#/$defs/path"},
-        "otelEndpoint": {"type": "string", "minLength": 1, "maxLength": 4096},
-        "workspaceRoot": {"$ref": "#/$defs/path"}
+        "snapshotRoot": {
+          "$ref": "#/$defs/path"
+        },
+        "codexHome": {
+          "$ref": "#/$defs/path"
+        },
+        "codexSqliteHome": {
+          "$ref": "#/$defs/path"
+        },
+        "home": {
+          "$ref": "#/$defs/path"
+        },
+        "tmpDir": {
+          "$ref": "#/$defs/path"
+        },
+        "otelEndpoint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "workspaceRoot": {
+          "$ref": "#/$defs/path"
+        }
       }
     },
     "secretSlotFingerprints": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["otelHeaders"],
+      "required": [
+        "otelHeaders"
+      ],
       "properties": {
-        "otelHeaders": {"$ref": "#/$defs/sha256"}
+        "otelHeaders": {
+          "$ref": "#/$defs/sha256"
+        }
       }
     },
     "trustedLaunchContext": {
@@ -934,8 +1160,12 @@
         },
         "environmentSlotValues": {
           "oneOf": [
-            {"$ref": "#/$defs/environmentSlotValuesBase"},
-            {"$ref": "#/$defs/environmentSlotValuesWriter"}
+            {
+              "$ref": "#/$defs/environmentSlotValuesBase"
+            },
+            {
+              "$ref": "#/$defs/environmentSlotValuesWriter"
+            }
           ]
         },
         "secretSlotFingerprints": {
@@ -944,12 +1174,39 @@
       },
       "allOf": [
         {
-          "if": {"properties": {"role": {"const": "writer"}}},
-          "then": {"properties": {"environmentSlotValues": {"$ref": "#/$defs/environmentSlotValuesWriter"}}}
+          "if": {
+            "properties": {
+              "role": {
+                "const": "writer"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "environmentSlotValues": {
+                "$ref": "#/$defs/environmentSlotValuesWriter"
+              }
+            }
+          }
         },
         {
-          "if": {"properties": {"role": {"enum": ["classifier", "reader"]}}},
-          "then": {"properties": {"environmentSlotValues": {"$ref": "#/$defs/environmentSlotValuesBase"}}}
+          "if": {
+            "properties": {
+              "role": {
+                "enum": [
+                  "classifier",
+                  "reader"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "environmentSlotValues": {
+                "$ref": "#/$defs/environmentSlotValuesBase"
+              }
+            }
+          }
         }
       ]
     }

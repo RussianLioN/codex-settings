@@ -68,7 +68,8 @@ class OTelReceiver:
         self.max_request_bytes = max_request_bytes
         self.max_requests = max_requests
         self.token = secrets.token_urlsafe(32)
-        self.path = f"/{secrets.token_urlsafe(24)}/v1/logs"
+        self.base_path = f"/{secrets.token_urlsafe(24)}"
+        self.path = self.base_path + "/v1/logs"
         self.events: list[dict[str, str]] = []
         self._request_count = 0
         self._lock = threading.Lock()
@@ -88,6 +89,12 @@ class OTelReceiver:
     @property
     def endpoint(self) -> str:
         return f"http://{self.host}:{self.port}{self.path}"
+
+    @property
+    def otlp_endpoint(self) -> str:
+        """Базовый OTLP endpoint для ``OTEL_EXPORTER_OTLP_ENDPOINT``."""
+
+        return f"http://{self.host}:{self.port}{self.base_path}"
 
     def __enter__(self) -> "OTelReceiver":
         receiver = self
@@ -128,6 +135,12 @@ class OTelReceiver:
             thread.join(timeout=2)
         self._server = None
         self._thread = None
+
+    def snapshot_events(self) -> list[dict[str, str]]:
+        """Возвращает согласованный снимок уже принятых безопасных полей."""
+
+        with self._lock:
+            return [dict(event) for event in self.events]
 
     def _handle(self, handler: BaseHTTPRequestHandler) -> None:
         if handler.path != self.path:

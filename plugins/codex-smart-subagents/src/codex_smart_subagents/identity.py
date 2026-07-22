@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import json
 import secrets
 from dataclasses import dataclass
 from typing import Any
+
+from .canonical_json import canonical_json_v1
 
 
 @dataclass(frozen=True)
@@ -79,12 +80,7 @@ def new_opaque_id(prefix: str) -> str:
 
 
 def canonical_json(value: Any) -> str:
-    return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    return canonical_json_v1(value)
 
 
 def canonical_sha256(value: Any) -> str:

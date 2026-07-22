@@ -9,8 +9,8 @@
   "properties": {
     "schemaId": {
       "enum": [
-        "file-object-v2", "journal-state-v2", "tree-object-v2", "swap-pair-v2", "symlink-object-v2",
-        "manifest-v2", "activation-v2", "database-object-v2",
+        "file-object-v2", "directory-binding-v2", "journal-state-v2", "tree-object-v2", "swap-pair-v2", "symlink-object-v2",
+        "manifest-v2", "activation-v2", "database-binding-target-v2", "database-binding-v2", "database-object-v2",
         "controller-state-v2", "controller-candidate-v2", "shutdown-intent-v2", "watchdog-state-v2", "registry-state-v2", "launcher-set-v2",
         "legacy-process-set-v2", "quiescence-proof-v2",
         "external-command-v2", "receipt-object-v2", "absence-observation-v2", "absence-proof-v2"
@@ -22,12 +22,15 @@
   },
   "oneOf": [
     {"properties": {"schemaId": {"const": "file-object-v2"}, "value": {"$ref": "#/$defs/fileObject"}}},
+    {"properties": {"schemaId": {"const": "directory-binding-v2"}, "value": {"$ref": "#/$defs/directoryBinding"}}},
     {"properties": {"schemaId": {"const": "journal-state-v2"}, "value": {"$ref": "#/$defs/journalState"}}},
     {"properties": {"schemaId": {"const": "tree-object-v2"}, "value": {"$ref": "#/$defs/treeObject"}}},
     {"properties": {"schemaId": {"const": "swap-pair-v2"}, "value": {"$ref": "#/$defs/swapPair"}}},
     {"properties": {"schemaId": {"const": "symlink-object-v2"}, "value": {"$ref": "#/$defs/symlinkObject"}}},
     {"properties": {"schemaId": {"const": "manifest-v2"}, "value": {"$ref": "#/$defs/manifest"}}},
     {"properties": {"schemaId": {"const": "activation-v2"}, "value": {"$ref": "#/$defs/activation"}}},
+    {"properties": {"schemaId": {"const": "database-binding-target-v2"}, "value": {"$ref": "#/$defs/databaseBindingTarget"}}},
+    {"properties": {"schemaId": {"const": "database-binding-v2"}, "value": {"$ref": "#/$defs/databaseBinding"}}},
     {"properties": {"schemaId": {"const": "database-object-v2"}, "value": {"$ref": "#/$defs/databaseObject"}}},
     {"properties": {"schemaId": {"const": "controller-state-v2"}, "value": {"$ref": "#/$defs/controllerState"}}},
     {"properties": {"schemaId": {"const": "controller-candidate-v2"}, "value": {"$ref": "#/$defs/controllerCandidate"}}},
@@ -61,6 +64,19 @@
         "linkCount": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "size": {"$ref": "#/$defs/safeInteger"},
         "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "directoryBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "device", "inode", "ownerUid", "ownerGid", "mode"],
+      "properties": {
+        "path": {"$ref": "#/$defs/absolutePath"},
+        "device": {"$ref": "#/$defs/safeInteger"},
+        "inode": {"$ref": "#/$defs/safeInteger"},
+        "ownerUid": {"$ref": "#/$defs/safeInteger"},
+        "ownerGid": {"$ref": "#/$defs/safeInteger"},
+        "mode": {"$ref": "#/$defs/mode"}
       }
     },
     "journalState": {
@@ -181,6 +197,57 @@
         "activationFingerprint": {"$ref": "#/$defs/sha256"}
       }
     },
+    "databaseBindingTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "device", "inode", "ownerUid", "ownerGid", "mode", "linkCount", "databaseId", "activationBindingNonce", "activationId", "activationFingerprint", "schemaFingerprint", "schemaArtifactSha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/absolutePath"},
+        "device": {"$ref": "#/$defs/safeInteger"},
+        "inode": {"$ref": "#/$defs/safeInteger"},
+        "ownerUid": {"$ref": "#/$defs/safeInteger"},
+        "ownerGid": {"$ref": "#/$defs/safeInteger"},
+        "mode": {"$ref": "#/$defs/mode"},
+        "linkCount": {"const": 1},
+        "databaseId": {"type": "string", "pattern": "^db2_[0-9a-f]{32}$"},
+        "activationBindingNonce": {"$ref": "#/$defs/sha256"},
+        "activationId": {"type": "string", "pattern": "^act2_[0-9a-f]{64}$"},
+        "activationFingerprint": {"$ref": "#/$defs/sha256"},
+        "schemaFingerprint": {"$ref": "#/$defs/sha256"},
+        "schemaArtifactSha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "databaseBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "device", "inode", "ownerUid", "ownerGid", "mode", "linkCount", "databaseId", "databaseIdentity", "databaseIdentityFingerprint", "activationIdentity", "databaseVersion", "schemaVersion", "userVersion", "schemaFingerprint", "schemaArtifactSha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/absolutePath"},
+        "device": {"$ref": "#/$defs/safeInteger"},
+        "inode": {"$ref": "#/$defs/safeInteger"},
+        "ownerUid": {"$ref": "#/$defs/safeInteger"},
+        "ownerGid": {"$ref": "#/$defs/safeInteger"},
+        "mode": {"$ref": "#/$defs/mode"},
+        "linkCount": {"const": 1},
+        "databaseId": {"type": "string", "pattern": "^db2_[0-9a-f]{32}$"},
+        "databaseIdentity": {"$ref": "#/$defs/databaseIdentity"},
+        "databaseIdentityFingerprint": {"$ref": "#/$defs/sha256"},
+        "activationIdentity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["activationId", "activationFingerprint"],
+          "properties": {
+            "activationId": {"type": "string", "pattern": "^act2_[0-9a-f]{64}$"},
+            "activationFingerprint": {"$ref": "#/$defs/sha256"}
+          }
+        },
+        "databaseVersion": {"const": "0.2.0"},
+        "schemaVersion": {"const": 2},
+        "userVersion": {"const": 2},
+        "schemaFingerprint": {"$ref": "#/$defs/sha256"},
+        "schemaArtifactSha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
     "databaseObject": {
       "type": "object",
       "additionalProperties": false,
@@ -245,11 +312,11 @@
         "controllerIdentity": {"$ref": "#/$defs/sha256"},
         "instanceId": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^ci2_[0-9a-f]{32}$"}]},
         "controllerStartId": {"type": "string", "pattern": "^cs2_[0-9a-f]{32}$"},
-        "pid": {"type": "integer", "minimum": 1, "maximum": 2147483647},
-        "processStartMarker": {"type": "string", "minLength": 1, "maxLength": 256},
-        "processGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "pid": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 1, "maximum": 2147483647}]},
+        "processStartMarker": {"oneOf": [{"type": "null"}, {"type": "string", "minLength": 1, "maxLength": 256}]},
+        "processGroupId": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 1, "maximum": 2147483647}]},
         "controlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
-        "state": {"enum": ["ACCEPTING", "DRAINING", "MAINTENANCE", "STOPPED"]},
+        "state": {"enum": ["EXPECTED_DRAIN_OR_MAINTENANCE", "EXPECTED_MAINTENANCE", "EXPECTED_ACCEPTING", "ACCEPTING", "DRAINING", "MAINTENANCE", "STOPPED"]},
         "maintenanceMode": {"enum": [null, "drain", "freeze"]},
         "operationId": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}]},
         "activationId": {"type": "string", "pattern": "^act2_[0-9a-f]{64}$"},
@@ -261,16 +328,19 @@
         "quiescent": {"type": "boolean"}
       },
       "oneOf": [
-        {"properties": {"state": {"const": "ACCEPTING"}, "maintenanceMode": {"type": "null"}, "operationId": {"type": "null"}, "socket": {"$ref": "#/$defs/socketIdentity"}, "lockHeld": {"const": true}, "acceptingNewRoutes": {"const": true}}},
-        {"properties": {"state": {"const": "DRAINING"}, "maintenanceMode": {"const": "drain"}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "socket": {"$ref": "#/$defs/socketIdentity"}, "lockHeld": {"const": true}, "acceptingNewRoutes": {"const": false}}},
-        {"properties": {"state": {"const": "MAINTENANCE"}, "maintenanceMode": {"enum": ["drain", "freeze"]}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "socket": {"$ref": "#/$defs/socketIdentity"}, "lockHeld": {"const": true}, "acceptingNewRoutes": {"const": false}}},
-        {"properties": {"state": {"const": "STOPPED"}, "maintenanceMode": {"type": "null"}, "operationId": {"type": "null"}, "socket": {"type": "null"}, "lockHeld": {"const": false}, "acceptingNewRoutes": {"const": false}, "quiescent": {"const": true}}}
+        {"properties": {"state": {"const": "EXPECTED_DRAIN_OR_MAINTENANCE"}, "instanceId": {"type": "string", "pattern": "^ci2_[0-9a-f]{32}$"}, "pid": {"type": "integer", "minimum": 1}, "processStartMarker": {"type": "string"}, "processGroupId": {"type": "integer", "minimum": 1}, "maintenanceMode": {"const": "drain"}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "socket": {"$ref": "#/$defs/socketIdentity"}, "lockHeld": {"const": true}, "acceptingNewRoutes": {"const": false}}},
+        {"properties": {"state": {"const": "EXPECTED_MAINTENANCE"}, "instanceId": {"type": "null"}, "pid": {"type": "null"}, "processStartMarker": {"type": "null"}, "processGroupId": {"type": "null"}, "maintenanceMode": {"enum": ["drain", "freeze"]}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "socket": {"type": "null"}, "lockHeld": {"const": true}, "acceptingNewRoutes": {"const": false}}},
+        {"properties": {"state": {"const": "EXPECTED_ACCEPTING"}, "instanceId": {"type": "null"}, "pid": {"type": "null"}, "processStartMarker": {"type": "null"}, "processGroupId": {"type": "null"}, "maintenanceMode": {"type": "null"}, "operationId": {"type": "null"}, "socket": {"type": "null"}, "lockHeld": {"const": true}, "acceptingNewRoutes": {"const": true}}},
+        {"properties": {"state": {"const": "ACCEPTING"}, "instanceId": {"type": "string", "pattern": "^ci2_[0-9a-f]{32}$"}, "pid": {"type": "integer", "minimum": 1}, "processStartMarker": {"type": "string"}, "processGroupId": {"type": "integer", "minimum": 1}, "maintenanceMode": {"type": "null"}, "operationId": {"type": "null"}, "socket": {"$ref": "#/$defs/socketIdentity"}, "lockHeld": {"const": true}, "acceptingNewRoutes": {"const": true}}},
+        {"properties": {"state": {"const": "DRAINING"}, "instanceId": {"type": "string", "pattern": "^ci2_[0-9a-f]{32}$"}, "pid": {"type": "integer", "minimum": 1}, "processStartMarker": {"type": "string"}, "processGroupId": {"type": "integer", "minimum": 1}, "maintenanceMode": {"const": "drain"}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "socket": {"$ref": "#/$defs/socketIdentity"}, "lockHeld": {"const": true}, "acceptingNewRoutes": {"const": false}}},
+        {"properties": {"state": {"const": "MAINTENANCE"}, "instanceId": {"type": "string", "pattern": "^ci2_[0-9a-f]{32}$"}, "pid": {"type": "integer", "minimum": 1}, "processStartMarker": {"type": "string"}, "processGroupId": {"type": "integer", "minimum": 1}, "maintenanceMode": {"enum": ["drain", "freeze"]}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "socket": {"$ref": "#/$defs/socketIdentity"}, "lockHeld": {"const": true}, "acceptingNewRoutes": {"const": false}}},
+        {"properties": {"state": {"const": "STOPPED"}, "instanceId": {"type": "string", "pattern": "^ci2_[0-9a-f]{32}$"}, "pid": {"type": "integer", "minimum": 1}, "processStartMarker": {"type": "string"}, "processGroupId": {"type": "integer", "minimum": 1}, "maintenanceMode": {"type": "null"}, "operationId": {"type": "null"}, "socket": {"type": "null"}, "lockHeld": {"const": false}, "acceptingNewRoutes": {"const": false}, "quiescent": {"const": true}}}
       ]
     },
     "controllerCandidate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["candidateId", "controllerIdentity", "controllerStartId", "operationId", "activationId", "activationFingerprint", "databaseId", "argvFingerprint", "snapshotFingerprint", "privateReadyChannelPath", "privateReadyChannel", "readinessTokenHash", "absoluteDeadlineMonotonicMs", "processGroupPolicy", "pid", "processStartMarker", "processGroupId", "registrationFingerprint", "databaseLeaseProofFingerprint", "databaseOpened", "workingSocketPublished", "acceptingNewRoutes", "status", "exitProofFingerprint"],
+      "required": ["candidateId", "controllerIdentity", "controllerStartId", "operationId", "activationId", "activationFingerprint", "databaseId", "argvFingerprint", "snapshotFingerprint", "privateReadyChannelPath", "privateReadyChannel", "readinessTokenHash", "readinessWindowMs", "processGroupPolicy", "pid", "processStartMarker", "processGroupId", "registrationFingerprint", "databaseLeaseProofFingerprint", "databaseOpened", "workingSocketPublished", "acceptingNewRoutes", "status", "exitProofFingerprint"],
       "properties": {
         "candidateId": {"type": "string", "pattern": "^cand2_[0-9a-f]{32}$"},
         "controllerIdentity": {"$ref": "#/$defs/sha256"},
@@ -284,7 +354,7 @@
         "privateReadyChannelPath": {"$ref": "#/$defs/absolutePath"},
         "privateReadyChannel": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/socketIdentity"}]},
         "readinessTokenHash": {"$ref": "#/$defs/sha256"},
-        "absoluteDeadlineMonotonicMs": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "readinessWindowMs": {"type": "integer", "minimum": 1, "maximum": 30000},
         "processGroupPolicy": {"const": "NEW_PRIVATE_GROUP"},
         "pid": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 1, "maximum": 2147483647}]},
         "processStartMarker": {"oneOf": [{"type": "null"}, {"type": "string", "minLength": 1, "maxLength": 256}]},
@@ -319,10 +389,14 @@
         "targetProcessGroupId": {"type": "integer", "minimum": 1, "maximum": 2147483647},
         "socket": {"$ref": "#/$defs/socketIdentity"},
         "lockPath": {"$ref": "#/$defs/absolutePath"},
-        "processExitProofFingerprint": {"$ref": "#/$defs/sha256"},
-        "exclusiveLockProofFingerprint": {"$ref": "#/$defs/sha256"},
-        "status": {"const": "SHUTDOWN_COMMITTED_EXIT_AND_LOCK_PROVEN"}
-      }
+        "processExitProofFingerprint": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+        "exclusiveLockProofFingerprint": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+        "status": {"enum": ["EXPECTED_SHUTDOWN_PROOF", "SHUTDOWN_COMMITTED", "SHUTDOWN_COMMITTED_EXIT_AND_LOCK_PROVEN"]}
+      },
+      "oneOf": [
+        {"properties": {"status": {"enum": ["EXPECTED_SHUTDOWN_PROOF", "SHUTDOWN_COMMITTED"]}, "processExitProofFingerprint": {"type": "null"}, "exclusiveLockProofFingerprint": {"type": "null"}}},
+        {"properties": {"status": {"const": "SHUTDOWN_COMMITTED_EXIT_AND_LOCK_PROVEN"}, "processExitProofFingerprint": {"$ref": "#/$defs/sha256"}, "exclusiveLockProofFingerprint": {"$ref": "#/$defs/sha256"}}}
+      ]
     },
     "watchdogState": {
       "type": "object",
@@ -355,19 +429,28 @@
     "registryState": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["marketplaceName", "marketplacePath", "marketplaceFingerprint", "pluginId", "pluginEnabled", "pluginFingerprint", "configFile", "configSemanticFingerprint", "marketplaceListFingerprint", "pluginListFingerprint"],
+      "required": ["status", "marketplaceName", "marketplacePath", "marketplaceFingerprint", "pluginId", "pluginEnabled", "pluginFingerprint", "configFile", "configSemanticFingerprint", "marketplaceListFingerprint", "pluginListFingerprint"],
       "properties": {
+        "status": {"enum": ["EXPECTED_MARKETPLACE_REGISTERED", "MARKETPLACE_REGISTERED", "EXPECTED_PLUGIN_ENABLED", "PLUGIN_ENABLED"]},
         "marketplaceName": {"const": "codex-settings-adaptive"},
         "marketplacePath": {"$ref": "#/$defs/absolutePath"},
         "marketplaceFingerprint": {"$ref": "#/$defs/sha256"},
         "pluginId": {"type": "string", "minLength": 1, "maxLength": 256},
         "pluginEnabled": {"type": "boolean"},
         "pluginFingerprint": {"$ref": "#/$defs/sha256"},
-        "configFile": {"$ref": "#/$defs/fileObject"},
+        "configFile": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/fileObject"}]},
         "configSemanticFingerprint": {"$ref": "#/$defs/sha256"},
-        "marketplaceListFingerprint": {"$ref": "#/$defs/sha256"},
-        "pluginListFingerprint": {"$ref": "#/$defs/sha256"}
-      }
+        "marketplaceListFingerprint": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+        "pluginListFingerprint": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]}
+      },
+      "oneOf": [
+        {"properties": {"status": {"enum": ["EXPECTED_MARKETPLACE_REGISTERED", "EXPECTED_PLUGIN_ENABLED"]}, "configFile": {"type": "null"}, "marketplaceListFingerprint": {"type": "null"}, "pluginListFingerprint": {"type": "null"}}},
+        {"properties": {"status": {"enum": ["MARKETPLACE_REGISTERED", "PLUGIN_ENABLED"]}, "configFile": {"$ref": "#/$defs/fileObject"}, "marketplaceListFingerprint": {"$ref": "#/$defs/sha256"}, "pluginListFingerprint": {"$ref": "#/$defs/sha256"}}}
+      ],
+      "allOf": [
+        {"if": {"properties": {"status": {"enum": ["EXPECTED_MARKETPLACE_REGISTERED", "MARKETPLACE_REGISTERED"]}}, "required": ["status"]}, "then": {"properties": {"pluginEnabled": {"const": false}}}},
+        {"if": {"properties": {"status": {"enum": ["EXPECTED_PLUGIN_ENABLED", "PLUGIN_ENABLED"]}}, "required": ["status"]}, "then": {"properties": {"pluginEnabled": {"const": true}}}}
+      ]
     },
     "launcherSet": {
       "type": "object",
@@ -433,7 +516,7 @@
     "workCounts": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["nonterminalRoutes", "nonterminalNodes", "activeAttempts", "activeLeases", "openIntents", "inflightLaunchPermits", "activeRuntimeArtifacts", "pendingCandidatePublications"],
+      "required": ["nonterminalRoutes", "nonterminalNodes", "activeAttempts", "activeLeases", "openIntents", "inflightLaunchPermits", "activeRuntimeArtifacts", "pendingCandidatePublications", "activeEvidenceJobs", "queuedEvidenceJobs"],
       "properties": {
         "nonterminalRoutes": {"$ref": "#/$defs/safeInteger"},
         "nonterminalNodes": {"$ref": "#/$defs/safeInteger"},
@@ -442,11 +525,13 @@
         "openIntents": {"$ref": "#/$defs/safeInteger"},
         "inflightLaunchPermits": {"$ref": "#/$defs/safeInteger"},
         "activeRuntimeArtifacts": {"$ref": "#/$defs/safeInteger"},
-        "pendingCandidatePublications": {"$ref": "#/$defs/safeInteger"}
+        "pendingCandidatePublications": {"$ref": "#/$defs/safeInteger"},
+        "activeEvidenceJobs": {"$ref": "#/$defs/safeInteger"},
+        "queuedEvidenceJobs": {"$ref": "#/$defs/safeInteger"}
       }
     },
     "zeroWorkCounts": {
-      "const": {"nonterminalRoutes": 0, "nonterminalNodes": 0, "activeAttempts": 0, "activeLeases": 0, "openIntents": 0, "inflightLaunchPermits": 0, "activeRuntimeArtifacts": 0, "pendingCandidatePublications": 0}
+      "const": {"nonterminalRoutes": 0, "nonterminalNodes": 0, "activeAttempts": 0, "activeLeases": 0, "openIntents": 0, "inflightLaunchPermits": 0, "activeRuntimeArtifacts": 0, "pendingCandidatePublications": 0, "activeEvidenceJobs": 0, "queuedEvidenceJobs": 0}
     },
     "quiescenceProof": {
       "oneOf": [

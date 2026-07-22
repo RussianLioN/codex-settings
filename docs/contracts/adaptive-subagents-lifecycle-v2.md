@@ -38,6 +38,7 @@ $CODEX_HOME/codex-smart-subagents-v2/
       activation.json
       marketplace/
         .agents/plugins/marketplace.json
+        .claude-plugin/marketplace.json
         plugins/codex-smart-subagents/...
   codex-snapshots/
     <полный sha256>/codex
@@ -64,6 +65,7 @@ STATE_HOME/
 $CODEX_HOME/install-manifests/
   codex-smart-subagents-v2.json
   codex-smart-subagents-v2.lock
+  codex-smart-subagents-v2.activation-preparation.transaction.json
   codex-smart-subagents-v2.transaction.json
   codex-smart-subagents-v2.cleanup.transaction.json
   codex-smart-subagents-v2.fallback.json
@@ -157,11 +159,11 @@ minimumGatewayVersion
 Каждое состояние в журнале и каждом долговечном шаге представлено не голым
 отпечатком и не произвольным `value`, а вариантом закрытой схемы
 `lifecycle-projection-v2`. Дискриминатор `schemaId` однозначно выбирает одну
-из двадцати форм:
+из двадцати двух форм:
 
 ```text
 file-object-v2 journal-state-v2 tree-object-v2 swap-pair-v2 symlink-object-v2
-manifest-v2 activation-v2 database-object-v2 controller-state-v2
+manifest-v2 activation-v2 database-binding-target-v2 database-binding-v2 database-object-v2 controller-state-v2
 controller-candidate-v2 shutdown-intent-v2 watchdog-state-v2 registry-state-v2
 launcher-set-v2 legacy-process-set-v2 quiescence-proof-v2 external-command-v2
 receipt-object-v2 absence-observation-v2 absence-proof-v2
@@ -186,6 +188,22 @@ receipt-object-v2 absence-observation-v2 absence-proof-v2
 состояниями требует `recovery_absence_verify`; несинхронизированное наблюдение
 никогда не считается завершением операции.
 
+`database-binding-v2` является стабильной привязкой живой базы. Она содержит
+путь, устройство, inode, uid, gid, режим, `linkCount=1`, `databaseId`,
+`databaseIdentity`, `databaseIdentityFingerprint`, `activationIdentity`,
+выпуск, `schemaVersion`, `userVersion`, `schemaFingerprint` и
+`schemaArtifactSha256`. В ней запрещены размер и SHA-256 содержимого базы,
+WAL, SHM и резервная копия: обычная транзакция SQLite не должна менять
+положительную квитанцию или закрывать шлюз.
+
+`database-binding-target-v2` является неизменяемой будущей привязкой ещё
+пустого inode базы. Она фиксирует тот же путь, устройство, inode, владельца,
+режим и идентичность активации, но не утверждает наличие таблиц, версию
+пользовательской схемы или хеш изменяемого содержимого. Основной журнал может
+ссылаться на эту проекцию только через проверенную квитанцию подготовки; шаг
+инициализации базы обязан сохранить устройство и inode и заменить будущую
+привязку полноценной `database-binding-v2`.
+
 `database-object-v2` содержит ровно путь, устройство, inode, uid, gid, режим,
 `linkCount=1`, размер, SHA-256, `databaseId`, строку `databaseIdentity`, её
 `databaseIdentityFingerprint`,
@@ -197,7 +215,10 @@ receipt-object-v2 absence-observation-v2 absence-proof-v2
 объектов не проходит проверку.
 
 Полная `database-object-v2`, включая размер и SHA-256 файла базы, является
-внешним неизменяемым объектом журналов и квитанций. Её запрещено
+исторической контрольной точкой конкретной установки, миграции, резервного
+копирования или восстановления. Она допустима во внешнем журнале и
+квитанции этой операции, но никогда не является условием живого
+`activationGate`. Её запрещено
 сериализовать внутрь строки того же файла базы: такая запись изменила бы
 собственный вход отпечатка. Внутри SQLite запрещены и любые зависящие от
 содержимого ссылки на этот внешний объект: `valueFingerprint`,
@@ -208,7 +229,9 @@ receipt-object-v2 absence-observation-v2 absence-proof-v2
 целостность закрепляет только внешний журнал или квитанция; исполнитель
 разрешает логический указатель по совпавшим `operationId` и `databaseId` и
 заново сверяет полный внешний объект. Иное внутреннее представление
-запрещено.
+запрещено. Положительная квитанция активации вместо контрольной точки
+содержит `database-binding-v2` и полную `journalAbsenceTarget`, необходимую
+для последующих свежих проверок отсутствия журнала.
 
 ## Постоянный загрузочный шлюз
 
@@ -250,8 +273,9 @@ receipt-object-v2 absence-observation-v2 absence-proof-v2
 Шлюз открывает умный режим только если установочная блокировка допускает
 совместное чтение, основной журнал отсутствует, а неизменяемая квитанция
 `receipts/INSTALLATION_ID/OPERATION_ID.commit.json` существует и её SHA-256,
-смысловой отпечаток манифеста, активация, база и контроллер совпадают с
-фактическим состоянием. Наличие одновременно журнала и квитанции означает
+смысловой отпечаток манифеста, активация, стабильная привязка базы и
+контроллер совпадают с фактическим состоянием. Содержимое живой SQLite не
+сравнивается с историческим SHA-256. Наличие одновременно журнала и квитанции означает
 незавершённую конечную фиксацию и закрывает режим до `recover`; отсутствие
 обоих или расхождение также закрывают режим. Квитанция текущей и предыдущей
 активации защищена от квоты.
@@ -261,7 +285,7 @@ receipt-object-v2 absence-observation-v2 absence-proof-v2
 - `codex-smart` запускает обычный Codex через независимую аварийную капсулу
   без переменных умного режима;
 - хуки возвращают безопасный ответ без дополнительного контекста;
-- новые `smart_plan` и `smart_start` получают
+- новые `smart_plan` и `route_start` получают
   `ADAPTIVE_ACTIVATION_UNCOMMITTED`;
 - рабочий контроллер автоматически не запускается;
 - доступны только `doctor`, чтение состояния и явный `recover`.
@@ -301,7 +325,10 @@ receipt-object-v2 absence-observation-v2 absence-proof-v2
 `BROKEN`. Статусы `doctor`: `READY`, `AWAITING_HOOK_TRUST`, `DEGRADED`,
 `BROKEN`; `smoke`: `READY`, `NOT_READY`, `failed`; `rollback`: `planned`,
 `rolled_back`, `unchanged`, `failed`; `cleanup`: `planned`, `cleaned`,
-`unchanged`, `failed`.
+`unchanged`, `failed`; `uninstall`: `planned`, `uninstalled`, `unchanged`,
+`failed`; `recover`: `planned`, `recovered`, `unchanged`, `failed`; `inspect`:
+`inspected`, `failed`. Отдельной команды `plan` нет: предварительный просмотр
+изменяющей команды возвращает её имя и `status=planned`.
 
 Элемент `changes` имеет ровно `kind`, `beforeFingerprint`,
 `afterFingerprint` и сортируется по закрытому порядку:
@@ -321,13 +348,17 @@ removed_installation
 `remediation`; тяжесть — `error`, `warning`, `info`. Массив сортируется по
 тяжести в этом порядке, затем по UTF-8 `component`, `code`, `message`.
 `resultFingerprint` вычисляется доменом `codex-smart/command-result/v2` от
-объекта без `operationId`, `attemptId`, `message`, `remediation` и
-`extensions`. Поэтому повторная диагностика одного состояния имеет одинаковую
-смысловую часть, хотя поясняющий текст может содержать безопасный путь.
+проекции `schemaVersion command status readiness smokeInvocationId changes
+problems`. В каждом элементе `problems` в проекцию входят только `code`,
+`severity`, `component`; поля `operationId`, `attemptId`, сам
+`resultFingerprint`, поясняющие `message`, `remediation` и `extensions`
+исключены. Поэтому вычисление нерекурсивно, а повторная диагностика одного
+состояния имеет одинаковую смысловую часть, хотя поясняющий текст может
+содержать безопасный путь.
 
 Первый изменяющий вызов закономерно отличается от последующего `unchanged`.
 Идемпотентность проверяется так: второй и третий `apply` имеют одинаковую
-смысловую проекцию `unchanged`; второй и третий `rollback` или полное удаление
+смысловую проекцию `unchanged`; второй и третий `rollback` или удаление установки
 также одинаковы; повтор одного аварийно прерванного `operationId` получает тот
 же конечный `resultFingerprint`, что непрерывное выполнение этого намерения.
 Новый цикл установки создаёт новый `installationId` и не обязан совпадать с
@@ -339,10 +370,13 @@ removed_installation
 которую можно повторить. JSON печатается и при кодах 2, 70 и 75, если процесс
 успел сформировать строгий результат.
 
-### Журнал намерений
+## Долговечные журналы
 
 Управляющие объекты проверяются отслеживаемыми закрытыми схемами
 `operation-journal-v2`, `operation-step-v2`,
+`activation-transition-proof-snapshot-v2`,
+`activation-preparation-journal-v2`,
+`activation-preparation-receipt-v2`,
 `activation-commit-receipt-v2`, `operation-abort-receipt-v2`,
 `cleanup-journal-v2`, `installation-tombstone-v2`,
 `installation-uninstall-receipt-v2`, `cleanup-receipt-v2`,
@@ -351,12 +385,105 @@ removed_installation
 `additionalProperties=false`; расширения не могут участвовать в переходе,
 владении, безопасности или отпечатке.
 
+### Долговечная подготовка неактивного кандидата
+
+Точные физические свойства нового дерева активации и нового файла базы —
+`device`, inode и время изменения — нельзя достоверно вычислить до создания
+этих объектов. Поэтому обычное обновление не подставляет в `desired`
+вымышленные будущие значения и не ослабляет закрытые физические проекции.
+Перед основным журналом используется отдельный подготовительный контур,
+который не меняет ни активную ссылку, ни манифест, ни реестры, ни работающий
+контроллер.
+
+Сначала материализуется и повторно проверяется частный адресуемый по полному
+SHA-256 снимок Codex. Это отдельный аттестованный кэш: публикация выполняется
+атомарно, существующий совпавший inode повторно используется, а несовпадение
+по тому же адресу считается повреждением. Снимок не достижим рабочим шлюзом
+сам по себе и входит в защищённые объекты последующей уборки. Только после
+проб этого снимка становятся известны `compatibilityFingerprint`, полный
+`activationId`, пути и смысловые хеши кандидата.
+
+Под общей установочной блокировкой проверяется матрица присутствия
+подготовительного журнала и квитанции. Пустой журнал запрещён. Его атомарное
+создание сразу содержит завершённую самонесущую границу
+`preparation_intent`, `installationId`, будущий `operationId`, полное
+`definition` и его отпечаток. Определение включает привязку исходного и
+аттестованного Codex, все идентификаторы и случайные знаки, начальное
+желаемое состояние, точные целевые пути, типы, режимы и ожидаемые смысловые
+SHA-256. Для обновления определение также содержит
+`transitionProofSnapshot`: самодостаточную статическую часть уже проверенного
+доказательства прежней активации. Она привязана к тем же `operationId`,
+`installationId`, `codexHome` и `stateHome`. Поля
+`preparedManifestLogical` и `transitionProofSnapshot` существуют только
+вместе; частичное определение структурно недопустимо. Затем выполняются ровно:
+
+```text
+preparation_intent
+→ activation_tree_prepare
+→ database_inode_prepare
+→ preparation_freeze
+→ preparation_receipt_publish
+→ preparation_journal_close
+```
+
+`activation_tree_prepare` и `database_inode_prepare` до действия проверяют
+отсутствие цели и долговечно хранят `expectedLogical`, а после действия —
+полную `observedPhysical`. При восстановлении допустимы только два состояния:
+исходное отсутствие либо объект по тому же пути, типу, режиму и смысловому
+хешу. Иное состояние даёт `RECOVERY_STATE_AMBIGUOUS` без удаления или
+подмены. Файл базы создаётся пустым и частным; последующая
+`database_prepare` заполняет именно этот inode после доказанного покоя и
+повторно проверяет сохранение пары `device/inode`.
+
+`preparation_freeze` является второй атомарной границей и после
+синхронизации запрещает дописывать журнал. Неизменяемая квитанция подготовки
+содержит точную проекцию снимка Codex, дерево активации, `activation.json`,
+физическую проекцию пустого файла базы, стабильную
+`databaseBindingTarget`, полный `desired` основной операции и отпечаток
+замороженного подготовительного журнала. При наличии подготовленного
+манифеста квитанция обязательно повторяет тот же `transitionProofSnapshot`;
+его отсутствие или подмена каталога состояния закрывают восстановление.
+После атомарной публикации квитанции
+удаляется только открытый и повторно совпавший inode точного замороженного
+журнала, затем синхронизируется его родительский каталог. Матрица четырёх
+сочетаний присутствия журнала и квитанции либо продолжает подготовку, либо
+публикует квитанцию, либо закрывает точный замороженный журнал, либо повторно
+проверяет уже закрытую квитанцию. Основной журнал разрешено создавать только
+после повторной проверки квитанции и всех её физических объектов; атомарная
+граница `gate_close` фиксирует основной журнал с уже проверенными проекциями
+кандидата и неизменяемым определением плана. Для обновления действующей
+установки первым изменяемым шагом после этой границы является
+`maintenance_begin`: отдельные
+`stage` и `verify_staged` не повторяют работу подготовительного журнала.
+Ветвь первоначальной установки сохраняет оба этих шага.
+
+Сбой до создания основного журнала поэтому оставляет только неактивные
+объекты, однозначно принадлежащие подготовительному журналу или квитанции.
+`recover` идемпотентно продолжает именно эту подготовку до проверенной
+квитанции и закрытого журнала. Отдельная уборка может удалить неактивные
+объекты только по совпавшим идентификаторам и физическим проекциям.
+Незажурналированное дерево активации или файл базы никогда не принимаются как
+кандидат и не удаляются автоматически.
+
+После появления основного журнала прежнее доказательство не вычисляется из
+изменившейся активной ссылки. Восстановитель читает основной журнал через его
+строгое хранилище, проверяет схему и отпечаток, восстанавливает неизменяемое
+определение операции, затем читает подготовительную квитанцию и повторно
+проверяет её `transitionProofSnapshot`. Шаги принимаются только в фактическом
+порядке, с `planId` исходного плана и надлежащим `recordCarrier`; допустимы
+только сохранённые состояния до или после `activation_link` и
+`manifest_commit`. Стабильные прежнее дерево, база и квитанции проверяются
+заново, но завершённые эффекты не запускаются повторно.
+
+### Основной журнал намерений
+
 Журнал содержит ровно:
 
 ```text
 schemaVersion kind installationId operationId operation phase recoveryPolicy
 executionPlan abortPlan recoveryPlans discoveryBefore fencedBefore desired
-attempts steps changes terminalDeleteIntent createdAt updatedAt journalFingerprint
+attempts steps changes terminalDefinitionSnapshot terminalDeleteIntent
+createdAt updatedAt journalFingerprint
 ```
 
 `phase` принадлежит `DISCOVERED`, `FENCING`, `LEGACY_EXIT_PENDING`, `FENCED`, `APPLYING`,
@@ -369,15 +496,26 @@ attempts steps changes terminalDeleteIntent createdAt updatedAt journalFingerpri
 доказательств отсутствия. Произвольный словарь и голый отпечаток вместо
 проекции запрещены.
 
-План выбирается один раз после обнаружения состояния и до первого эффекта.
-До создания журнала вычисляются `planId`, `machineId`, выбранная ветвь,
+План выбирается один раз после обнаружения состояния и проверки квитанции
+подготовки, но до первого изменения доступного рабочему шлюзу состояния.
+До создания основного журнала вычисляются `planId`, `machineId`, выбранная ветвь,
 источник выбора, вся составленная последовательность и отпечаток определения
 плана. Они впервые становятся долговечными атомарно в создаваемом основном
-журнале уже с первым шагом
-`gate_close` в состоянии `COMPLETED`, носителем
-`JOURNAL_ATOMIC_BOUNDARY`, глобальным и плановым номерами 0; его
-`firstIncompleteOrdinal` поэтому не может быть меньше 1. Пустой существующий
-основной журнал и курсор 0 структурно недопустимы.
+журнале вместе со всеми определениями изменяемых шагов. Первый шаг
+`gate_close` уже находится в состоянии `COMPLETED`, имеет носитель
+`JOURNAL_ATOMIC_BOUNDARY`, глобальный и плановый номера 0; каждый последующий
+изменяемый шаг уже записан как `PLANNED` с точными `action`, `before` и
+`expectedAfter`. Тот же первый документ всегда содержит поле
+`terminalDefinitionSnapshot`: `null` только для операции без терминального
+определения, иначе полную статическую форму будущей заморозки, квитанции и
+последующих действий. В `TERMINAL_FROZEN` значение обязательно ненулевое, а
+последний `terminal_journal_freeze` обязан быть `COMPLETED`. Поэтому будущий
+шаг нельзя незаметно пересчитать после
+аварии, а его изменение при возобновлении отвергается до нового внешнего
+эффекта. Старый корректный префиксный журнал разрешено только дочитать по
+сохранённому определению плана и дополнить следующим точным шагом.
+`firstIncompleteOrdinal` нового журнала не может быть меньше 1. Пустой
+существующий основной журнал и курсор 0 структурно недопустимы.
 
 `abortPlan` фиксирует точный завершённый префикс прямого плана до первого
 обратного эффекта. `recoveryPlans` только дописываются; каждый новый план
@@ -394,7 +532,7 @@ action actionFingerprint before expectedAfter observedAfter intentAt completedAt
 ```
 
 `state` принадлежит только `PLANNED`, `INTENT_DURABLE`, `COMPLETED`. Для
-каждого из 72 `kind` схема задаёт отдельный вариант и связывает его с точными
+каждого из 69 `kind` схема задаёт отдельный вариант и связывает его с точными
 `action`, `before`, `expectedAfter`, типом `commandId` и допустимой
 комбинацией `observedAfter/intentAt/completedAt`. Обратное действие никогда не
 кодируется состоянием или флагом шага: `activation_link_restore`,
@@ -429,21 +567,29 @@ action actionFingerprint before expectedAfter observedAfter intentAt completedAt
 `RENAME_SWAP` синхронизируют оба каталога. Ошибка любого шага не позволяет
 записать `COMPLETED`.
 
-Перед внешним действием журнал этим примитивом фиксирует
-`INTENT_DURABLE`, отпечаток аргументов и точные `before/expectedAfter`. После
-действия состояние читается заново. Точное `expectedAfter` позволяет записать
-`COMPLETED`; точное `before` — повторить действие; доказанная цепочка
-`controller_recover` добавляет отдельный шаг; третье состояние даёт
+Перед внешним действием уже записанный шаг атомарно переводится из `PLANNED`
+в `INTENT_DURABLE`; отпечаток аргументов и точные `before/expectedAfter` не
+меняются. Для
+детерминированного файлового действия `expectedAfter` является полной
+проекцией результата. Для эффекта, который назначает PID, сокет, экземпляр
+или позднее доказательство, `expectedAfter` является закрытым ограничением:
+`EXPECTED_REGISTRATION`, `EXPECTED_MAINTENANCE`, `EXPECTED_ACCEPTING` либо
+`EXPECTED_SHUTDOWN_PROOF`; неизвестные во время планирования поля в нём равны
+`null`, а не заполнены фиктивными значениями. После действия состояние
+читается заново и фактическая проекция целиком сохраняется в `observedAfter`.
+Исполнитель принимает её только через отдельный для вида шага предикат,
+который связывает все заранее известные поля с ограничением. При повторном
+чтении завершённого шага живая проекция должна быть побайтно равна сохранённой
+`observedAfter`. Точное `before` позволяет повторить действие; доказанная
+цепочка `controller_recover` добавляет отдельный шаг; третье состояние даёт
 `RECOVERY_STATE_AMBIGUOUS` без удаления. Для штатных команд Codex заранее
 перечисляются и после команды синхронизируются все затронутые файлы и
 каталоги реестра; неизвестная поверхность блокирует реальную установку.
 
-Полная ветвь обновления действующей установки имеет порядок:
+Полная ветвь обновления действующей установки состоит ровно из 20 шагов:
 
 ```text
 gate_close
-→ stage
-→ verify_staged
 → maintenance_begin
 → wait_runtime_quiescent
 → maintenance_strengthen
@@ -465,9 +611,13 @@ gate_close
 → gate_open
 ```
 
-`gate_close` — первый внешний шаг обычного обновления версии 2: публикация уже синхронизированного
-стабильного файла транзакции. До него выполняются только чтение и расчёт
-плана; шлюз версии 2 с этого момента не создаёт новую умную работу. Установщик
+`gate_close` — первый внешний шаг обычного обновления версии 2, который
+меняет состояние, доступное рабочему шлюзу: публикация уже синхронизированного
+стабильного файла транзакции. До него разрешены чтение, расчёт плана,
+аттестованный адресуемый кэш снимка и отдельная доказанная подготовка
+неактивного кандидата; активная ссылка, манифест, реестры, загрузчики, живая
+база и контроллер не меняются. Шлюз версии 2 с этого момента не создаёт новую
+умную работу. Установщик
 обязан фактически выполнить
 `maintenance_begin → ожидание runtimeQuiescentV2 →
 maintenance_strengthen(FREEZE) → shutdown`; одно сводное состояние не
@@ -513,7 +663,7 @@ SHA-256 и смысловой отпечаток уже готового ман�
 | `apply` | `DISCOVERED` | три префикса допуска, затем `database_prepare → activation_link → recovery_forward_only → marketplace_registry → plugin_registry → launchers → controller_candidate_spawn → controller_accept → verify_candidate → manifest_commit → maintenance_resume → terminal_journal_freeze → commit_receipt_publish → gate_open` | `REVERSIBLE_THEN_FORWARD_ONLY` | `JOURNAL_ABSENT_RECEIPT_PRESENT` |
 | `abort` | `REVERSIBLE_FAILURE` | одна из 34 точных обратных ветвей, затем `terminal_journal_freeze → abort_receipt_publish → abort_journal_close` | `REVERSIBLE_ONLY` | `JOURNAL_ABSENT_RECEIPT_PRESENT` |
 | `rollback` | `ACTIVE_CURRENT` | один из двух префиксов допуска, затем `activation_link_restore → recovery_forward_only → registry_restore → launchers_restore → controller_candidate_spawn → controller_previous_accept → verify_candidate → manifest_restore → maintenance_resume → terminal_journal_freeze → commit_receipt_publish → gate_open` | `REVERSIBLE_THEN_FORWARD_ONLY` | `JOURNAL_ABSENT_RECEIPT_PRESENT` |
-| `uninstall` | `ACTIVE_OR_DISABLED` | один из трёх префиксов допуска, затем `recovery_forward_only → uninstall_plugin_remove → uninstall_marketplace_remove → uninstall_launchers_restore → uninstall_activation_link_remove → uninstall_database_remove → uninstall_activation_remove → uninstall_manifest_remove → uninstall_fallback_remove → uninstall_admin_remove → terminal_journal_freeze → uninstall_receipt_publish → uninstall_tombstone_publish → uninstall_journal_close` | `REVERSIBLE_THEN_FORWARD_ONLY` | `JOURNAL_ABSENT_RECEIPT_TOMBSTONE_PRESENT` |
+| `uninstall` | `ACTIVE_OR_DISABLED` | один из трёх префиксов допуска, затем `recovery_forward_only → uninstall_plugin_remove → uninstall_marketplace_remove → uninstall_launchers_restore → uninstall_activation_link_remove → uninstall_activation_remove → uninstall_manifest_remove → terminal_journal_freeze → uninstall_receipt_publish → uninstall_tombstone_publish → uninstall_journal_close` | `REVERSIBLE_THEN_FORWARD_ONLY` | `JOURNAL_ABSENT_RECEIPT_TOMBSTONE_PRESENT` |
 | `cleanup` | `PLANNED` | `cleanup_object_delete → terminal_journal_freeze → cleanup_receipt_publish → cleanup_journal_close` | `FORWARD_ONLY` | `JOURNAL_ABSENT_RECEIPT_PRESENT` |
 | `recovery` | `FILESYSTEM_OBSERVED` | `recovery_inspect`, затем ровно одна ветвь из таблицы восстановления ниже | `MATCHED_STATE_ONLY` | `PRESENCE_MATRIX_DISPOSITION` |
 | `legacyMigration` | `DISCOVERED_DESIRED_NULL` | `gate_close → legacy_gateway_fence → legacy_bridge_prepare → legacy_bridge_swap → legacy_marketplace_archive → watchdog_spawn → watchdog_arm → legacy_sigstop → legacy_quiescence → migration_forward_only → legacy_sigterm → legacy_sigcont → external_process_observe → watchdog_disarm → legacy_socket_cleanup → legacy_fenced_snapshot_commit → database_prepare → activation_link → marketplace_registry → plugin_registry → launchers → controller_candidate_spawn → controller_accept → verify_candidate → manifest_commit → maintenance_resume → terminal_journal_freeze → commit_receipt_publish → gate_open` | `REVERSIBLE_THEN_FORWARD_ONLY` | `JOURNAL_ABSENT_RECEIPT_PRESENT` |
@@ -563,7 +713,7 @@ SHA-256 и смысловой отпечаток уже готового ман�
 `VERIFY_TERMINAL_THEN_DELETE` отображается в `DELETE_FROZEN_JOURNAL`;
 квитанция при нетерминальной фазе даёт `INVALID_RECEIPT_BEFORE_FREEZE`.
 Для пары «журнала нет, квитанция есть» классификатор требует проверить все
-итоговые указатели: обычные виды переходят в `COMPLETE`, а полное удаление —
+итоговые указатели: обычные виды переходят в `COMPLETE`, а удаление установки —
 в `COMPLETE_UNINSTALL` только при совпавшем надгробном указателе.
 
 Таким образом, наличие журнала без квитанции само по себе не разрешает её
@@ -660,9 +810,18 @@ SHA-256 и смысловой отпечаток уже готового ман�
 | `operationJournal` | `codex-smart/operation-journal/v2` | `schemaVersion kind installationId operationId operation phase recoveryPolicy executionPlan abortPlan recoveryPlans discoveryBefore fencedBefore desired attempts steps changes terminalDeleteIntent createdAt updatedAt` | `journalFingerprint` |
 | `cleanupJournal` | `codex-smart/cleanup-journal/v2` | `schemaVersion cleanupId installationId baseCommitReceipt phase cleanupPlan protectedObjects objects steps terminalDeleteIntent createdAt updatedAt` | `journalFingerprint` |
 | `terminalState` | `codex-smart/terminal-state/v2` | `terminalKind receiptKind receiptPath completedStepIds postFreezeActionKinds receiptPayloadIntent tombstonePayloadIntent journalAbsenceTarget frozenAt` | `terminalStateFingerprint` |
-| `activationCommitReceipt` | `codex-smart/activation-commit-receipt/v2` | `schemaVersion receiptKind installationId operationId frozenJournalFingerprint manifest activation database controllerIdentity completedStepIds completedAt` | `receiptFingerprint` |
+| `activationPreparationDefinition` | `codex-smart/activation-preparation-definition/v2` | `journalPath receiptPath lockPath activationIntent desiredSeed snapshotFile activationTreeLogical activationFileLogical databaseEmptyFileLogical` | — |
+| `activationPreparationIntent` | `codex-smart/activation-preparation-intent/v2` | `sourceRoot codexHome codexBinary stateHome socketPath controllerLockPath installationId operationId databaseId activationBindingNonce activationId activationFingerprint controllerIdentity compatibilityFingerprint routingPolicyFingerprint bundledCatalogFingerprint schemaFingerprint schemaArtifactSha256 activationDir snapshotPath databasePath bundledCatalogPath identity activationDocument sourceLocator snapshotLocator bundledCatalog interfaceEvidence completedAt` | `activationIntentFingerprint` |
+| `preparationLogicalObject` | `codex-smart/preparation-logical-object/v2` | `path objectType mode contentSha256` | `logicalFingerprint` |
+| `activationPreparationStep` | `codex-smart/activation-preparation-step/v2` | `stepId ordinal kind state expectedLogical observedPhysical observedCompanions intentAt completedAt` | `stepFingerprint` |
+| `activationPreparationJournal` | `codex-smart/activation-preparation-journal/v2` | `schemaVersion journalKind installationId operationId phase definitionFingerprint definition intentBoundary steps contentGeneration createdAt updatedAt frozenAt frozenJournalFingerprint desired` | `journalFingerprint` |
+| `activationPreparationFrozenJournal` | `codex-smart/activation-preparation-frozen-journal/v2` | те же поля подготовительного журнала, причём `frozenJournalFingerprint=null` во входе | `journalFingerprint` |
+| `databaseBindingTarget` | `codex-smart/database-binding-target/v2` | `schemaId schemaSha256 value` | `valueFingerprint` |
+| `activationPreparationReceipt` | `codex-smart/activation-preparation-receipt/v2` | `schemaVersion receiptKind installationId operationId activationIntent snapshotFile activationTree activationFile databaseEmptyFile databaseBindingTarget desired frozenJournalFingerprint completedAt` | `receiptFingerprint` |
+| `databaseBinding` | `codex-smart/database-binding/v2` | `schemaId schemaSha256 value` | `valueFingerprint` |
+| `activationCommitReceipt` | `codex-smart/activation-commit-receipt/v2` | `schemaVersion receiptKind installationId operationId frozenJournalFingerprint manifest manifestDocument transitionLineage activation databaseBinding journalAbsenceTarget controllerIdentity completedStepIds completedAt` | `receiptFingerprint` |
 | `operationAbortReceipt` | `codex-smart/operation-abort-receipt/v2` | `schemaVersion receiptKind installationId operationId frozenJournalFingerprint restoredState journalAbsenceTarget reasonCode completedAt` | `receiptFingerprint` |
-| `installationUninstallReceipt` | `codex-smart/installation-uninstall-receipt/v2` | `schemaVersion receiptKind installationId operationId frozenJournalFingerprint removedState restoredOriginalBackup absenceProof completedAt` | `receiptFingerprint` |
+| `installationUninstallReceipt` | `codex-smart/installation-uninstall-receipt/v2` | `schemaVersion receiptKind installationId operationId frozenJournalFingerprint dataRetentionMode retainedData removedState restoredOriginalBackup absenceProof completedAt` | `receiptFingerprint` |
 | `cleanupReceipt` | `codex-smart/cleanup-receipt/v2` | `schemaVersion receiptKind cleanupId installationId frozenJournalFingerprint baseCommitReceipt removedObjects absenceProof completedAt` | `receiptFingerprint` |
 | `installationTombstone` | `codex-smart/installation-tombstone/v2` | `schemaVersion installationId operationId uninstallReceipt absenceProof completedAt` | `tombstoneFingerprint` |
 | `absenceObservation` | `codex-smart/absence-observation/v2` | `observationId installationId operationId entries directorySyncCompleted` | `observationFingerprint` |
@@ -674,6 +833,7 @@ SHA-256 и смысловой отпечаток уже готового ман�
 | `swapPair` | `codex-smart/swap-pair/v2` | `schemaId schemaSha256 value` | `valueFingerprint` |
 | `watchdogState` | `codex-smart/watchdog-state/v2` | `schemaId schemaSha256 value` | `valueFingerprint` |
 | `stepAction` | `codex-smart/step-action/v2` | `action` | `actionFingerprint` |
+| `lifecycleCommandResult` | `codex-smart/command-result/v2` | `schemaVersion command status readiness smokeInvocationId changes problems` | `operationId attemptId resultFingerprint problems.message problems.remediation extensions` |
 | `controllerRequest` | `codex-smart/controller-request/v2` | `messageType protocolVersion release codexHomeHash shellSessionId controllerIdentity instanceId controllerStartId commandId expectedControlEpoch operationId method params` | `requestFingerprint extensions` |
 | `controllerCommandResult` | `codex-smart/controller-command-result/v2` | `method payload.status payload.previousControlEpoch payload.newControlEpoch payload.controllerIdentity payload.instanceId payload.controllerStartId payload.socketIntent` | `payload.commandReceipt responseFingerprint extensions` |
 | `controllerResponse` | `codex-smart/controller-response/v2` | `messageType protocolVersion release method responseKind commandId requestFingerprint controlEpoch payload` | `responseFingerprint extensions` |
@@ -683,7 +843,7 @@ SHA-256 и смысловой отпечаток уже готового ман�
 `terminalDeleteIntent`, после чего вычисляется `frozenJournalFingerprint`, и
 уже этот последний отпечаток связывается квитанцией. Поэтому цепочка не
 рекурсивна и квитанция не может быть перенесена между видами операций.
-Реестр содержит ровно 26 таких областей. Для вложенного доказательства
+Реестр содержит ровно 37 таких областей. Для вложенного доказательства
 отсутствия сначала вычисляются два независимых отпечатка:
 
 ```text
@@ -721,11 +881,58 @@ SHA256(UTF8("codex-smart/activation-gate/v2") || 0x00 ||
 `responseFingerprint` или расширения, поэтому повтор ответа не создаёт
 рекурсивный вход отпечатка.
 
+Положительная квитанция активации хранит полную `journalAbsenceTarget` с
+устойчивыми `proofId`, `installationId`, `operationId` и `entries`.
+`frozenJournalFingerprint` не используется для реконструкции цели. Каждая
+свежая проверка берёт цель только из проверенной квитанции, открывает каждый
+родительский каталог без перехода по ссылкам и под общей установочной
+блокировкой выполняет `fstatat(ENOENT) → fsync(dirfd) → fstatat(ENOENT)`.
+Устройство, inode, путь и basename обязаны совпасть с целью. Поскольку время
+наблюдения в доказательство не входит, повторная фактическая проверка создаёт
+те же канонические байты и тот же `proofId`; повторное использование старого
+JSON без файловых обращений запрещено.
+
+Та же квитанция хранит канонический `manifestDocument`, из которого обязаны
+точно пересчитываться размер и SHA-256 файла, все поля проекции `manifest` и
+смысловой отпечаток. `transitionLineage` различает `initial`, `update` и
+`rollback`: для первого перехода все ссылки на предшественника равны `null`,
+а обновление и откат фиксируют точный путь, SHA-256 и отпечаток исходной
+квитанции, отпечаток доказательства активации, три `commandId` остановки и
+идентичность остановленного контроллера с эпохой. Собственный
+`lineageFingerprint` пересчитывается без самого себя. Поэтому восстановление
+не выбирает предшественника по повторяющемуся `activationId`.
+
 ## Реестр рынка и подключаемого модуля
 
-Управляемый рынок всегда имеет имя `codex-settings-adaptive`, а источник —
-лексический путь `.../marketplace-current`. Желаемое состояние доказывается
-тремя независимыми представлениями:
+Управляемый рынок всегда имеет имя `codex-settings-adaptive`. Команда
+`plugin marketplace add` получает лексический стабильный путь
+`.../marketplace-current`, но Codex `0.144.6` канонизирует его и в ответах
+реестра возвращает разрешённый неизменяемый каталог
+`.../activations/ACTIVATION_ID/marketplace`. Квитанция установщика версии 2
+хранит обе стороны: `marketplacePath` как лексический вход и
+`registeredMarketplacePath` как наблюдённую каноническую регистрацию.
+Считать различие этих двух путей ошибкой запрещено; каждый из них обязан
+совпадать со своей стороной договора. Поле `marketplacePath` внутри
+`registry-state-v2` относится к каноническому наблюдению реестра, а не к
+одноимённому лексическому полю квитанции установщика.
+
+Будущие шаги реестра не подставляют ещё неизвестные inode, содержимое
+`config.toml` или результаты списков. `marketplace_registry.before` и
+`plugin_registry.before` являются закрытыми ограничениями со статусами
+`EXPECTED_MARKETPLACE_REGISTERED` и `EXPECTED_PLUGIN_ENABLED`; динамические
+поля в них равны `null`. После штатной команды исполнитель заново читает все
+три представления, строит фактические `MARKETPLACE_REGISTERED` либо
+`PLUGIN_ENABLED`, сохраняет их в `observedAfter` и принимает только при
+точном совпадении всех стабильных полей с соответствующим ограничением.
+
+Основным описанием состава и политики является
+`.agents/plugins/marketplace.json`; совместимый
+`.claude-plugin/marketplace.json` делает корень распознаваемым штатной
+командой Codex и обязан совпадать с основным описанием по имени, источнику и
+версии манифеста расширения. Регистрация расширения точно проверяется по
+`name`, `version`, `installPolicy`, `authPolicy`, локальному `source` и
+каноническому пути. Желаемое состояние доказывается тремя независимыми
+представлениями:
 
 1. `plugin marketplace list --json`;
 2. `plugin list --json`;
@@ -780,12 +987,28 @@ method params requestFingerprint extensions
 новый. Изменяющий управляющий вызов требует `commandId=cc2_` плюс 32 случайных
 hex и ненулевой `operationId`. Добавочное поле вне `extensions` запрещено.
 
+В `controller_accept.params` поле `expectedOrphanOperationId` присутствует
+всегда. Для обычной установки и обновления оно равно `null`. При откате оно
+равно точной операции остановленного контроллера предыдущей базы; принять
+кандидата разрешено только при совпадении этого значения с долговечным
+состоянием базы. `controller_recover` это исключение не наследует и никогда
+не перепривязывает остановленный orphan другой операции.
+
 Ответы имеют строгие `messageType=response`, `method`, `responseKind`,
 `commandId`, `requestFingerprint`, ненулевую известную `controlEpoch`, точный
 `payload`, `responseFingerprint` и `extensions`. `responseKind` равен ровно
 `HEALTH`, `SUCCESS`, `ERROR` или `REPLAY_RECEIPT`. Ошибка имеет закрытые код,
-сообщение и признак повторимости; повтор связывает прежний
-`originalResponseFingerprint` и долговечную квитанцию команды. Ответ `health`
+сообщение и признак повторимости. `REPLAY_RECEIPT.payload` содержит ровно
+`commandReceipt`, `originalControlEpoch`, `originalPayload` и
+`originalResponseFingerprint`. `originalPayload` является точной закрытой
+копией исходного успешного результата соответствующего метода, включая ту же
+квитанцию и `socketIntent` для `shutdown`; исходная эпоха совпадает с эпохой
+квитанции и внешней эпохой ответа повтора. Клиент реконструирует исходный
+конверт `SUCCESS` с пустыми `extensions`, заново вычисляет его
+`responseFingerprint` и сравнивает с `originalResponseFingerprint`, после
+чего прогоняет обычную проверку успешного ответа. Отсутствие или расхождение
+любого поля даёт `REPLAY_PROOF_UNAVAILABLE`, а не новый изменяющий вызов.
+Ответ `health`
 содержит:
 
 - `protocolVersion=2`, `release=0.2.0`, `namespace`;
@@ -804,8 +1027,9 @@ hex и ненулевой `operationId`. Добавочное поле вне `e
 `workCounts` содержит неотрицательные целые `nonterminalRoutes`,
 `nonterminalNodes`, `activeAttempts`, `activeLeases`, `openIntents`,
 `inflightLaunchPermits`, `activeRuntimeArtifacts`,
-`pendingCandidatePublications`. `quiescent=true` только при нуле каждого
-счётчика и успешной проверке соответствующих запросов базы.
+`pendingCandidatePublications`, `activeEvidenceJobs` и
+`queuedEvidenceJobs`. `quiescent=true` только при нуле каждого из десяти
+счётчиков и успешной проверке соответствующих запросов базы.
 
 Проекция базы в ответ однозначна: `NONE → null`, `DRAIN → drain`,
 `FREEZE → freeze`. Иное сочетание `state` и режима является повреждением и не
@@ -850,7 +1074,7 @@ databaseId,databaseSchemaVersion}`. Процесс другой идентичн
 
 Квитанция проверяется до старой эпохи, поэтому потерянный ответ можно
 повторить. Новый законный переход получает новый `commandId`.
-`maintenance_status`, `smart_start`, `smart_status`,
+`maintenance_status`, `admit_node`, `smart_status`,
 `reserve_launch_permit`, `commit_launch_permit` используют живое ограждение и
 ненулевую ожидаемую эпоху, но имеют `commandId=null`, `operationId=null`, не
 повышают `controlEpoch` и не участвуют в повторе по квитанции управляющей
@@ -875,25 +1099,39 @@ databaseId,databaseSchemaVersion}`. Процесс другой идентичн
 
 ### Допуск узла и граница `Popen`
 
-Пятисекундный предел локального вызова не включает сетевые чтения. За это
-время `smart_start` проверяет конверт и общий закрытый `activationGate`,
-который содержит смысловой отпечаток фактического манифеста, отпечаток
-неизменяемой квитанции активации и полную свежую проекцию синхронизированного
-отсутствия основного журнала. Только при совпадении всех трёх доказательств он
-создаёт долговечный
-`admissionId=adm2_...`, переводит узел в `ATTESTING` и возвращает `QUEUED`.
-Отдельный `smart_status` читает результат. Фоновый исполнитель получает
-полный свежий `AccountEvidence` с общим пределом 180 секунд и без кэша; сбор
-не удерживает барьер запуска. Не позднее пяти секунд после последнего ответа
-он получает общую сторону барьера и одной `BEGIN IMMEDIATE` повторно сверяет
-`ACCEPTING`, эпоху, маршрут, учётный контекст и точно ту же тройку: совпавший
-манифест, ту же неизменяемую квитанцию активации и заново доказанное отсутствие
-основного журнала. Только после этого точный запрос
-`reserve_launch_permit` создаёт `node_launch_permit`. Внутреннее состояние
-`ACCEPTING` без этой тройки никогда не означает фактический допуск. Если
-свидетельство недоступно или уже началось
-обслуживание, узел и маршрут становятся `STALE`, создаётся терминальный
-допуск без попытки и скрытого повтора.
+Пятисекундный предел локального вызова не включает процессы сбора
+свидетельства. Публичный `route_start` проверяет конверт, владельца маршрута
+и общий закрытый `activationGate`, создаёт долговечный
+`startRequestId=sr2_...` и ставит первый готовый узел в ограниченную очередь
+`AccountEvidence`. До успешного свидетельства `admissionId` не существует,
+разрешение запуска не резервируется и фактического допуска нет.
+
+Для каждой фактической попытки запуска узла создаётся ровно одно отдельное
+`evidenceJobId=aej2_...`: пять независимых процессов, один общий предел
+180 секунд, без кэша и автоматического повтора. `smart_plan`, `direct`,
+`clarify` и сам `route_start` дополнительных полных сборов не выполняют.
+Маршрут из `N` запускаемых узлов выполняет ровно `N` полных сборов. Повторная
+попытка является новым явным запуском с новым заданием, а не скрытым
+повтором.
+
+Очередь содержит не более 32 заданий, не более двух заданий одновременно
+имеют состояние `RUNNING` и не более одного задания одного маршрута может
+быть активным. Ожидающее задание отменяется без запуска процесса. Активная
+отмена за пять секунд завершает текущую группу, доказывает отсутствие пяти
+процессов и единожды фиксирует `CANCELLED`. `activeEvidenceJobs` и
+`queuedEvidenceJobs` входят в `workCounts` и критерий покоя.
+
+После успешного задания внутренний `admit_node` под общей стороной барьера и
+одной `BEGIN IMMEDIATE` сверяет `ACCEPTING`, эпоху, маршрут, связанный
+учётный контекст, стабильную привязку базы и тройку `activationGate`. Только
+он создаёт `admissionId=adm2_...`. Последующие
+`reserve_launch_permit` и `commit_launch_permit` не запускают новые полные
+сборы, а проверяют тот же неизменяемый результат `evidenceJobId`, текущую
+эпоху, фактический шлюз и идентичность снимка. Непосредственно перед передачей
+миссии дочернему Codex контроллер требует `child-attestation-v2`; смена
+учётной среды или фактической пары завершает попытку `STALE` до выполнения
+задачи. Внутреннее `ACCEPTING` без этих доказательств никогда не означает
+фактический допуск.
 
 Один контроллер является единственным процессом, запускающим детей. Прямой
 `Popen(Codex)` запрещён. Он запускает неизменяемый
@@ -913,7 +1151,8 @@ CREATED → HELLO_SENT → GUARDED → COMMIT_AUTHORIZED → EXEC_CONFIRMED
 перед фиксацией повторяет дескрипторную проверку снимка, затем точный
 `commit_launch_permit` одной транзакцией в третий раз сверяет эпоху,
 совпавший фактический манифест, ту же неизменяемую квитанцию активации и свежую
-проекцию отсутствия основного журнала. `activationGate` трёх запросов обязан
+проекцию отсутствия основного журнала. `activationGate` запросов
+`admit_node`, `reserve_launch_permit` и `commit_launch_permit` обязан
 быть побитно одинаков после канонизации; несовпадение закрывает допуск. Только
 затем контроллер создаёт связанную попытку и
 переводит допуск в `COMMIT_AUTHORIZED`. Только после фиксации он посылает
@@ -928,13 +1167,16 @@ CREATED → HELLO_SENT → GUARDED → COMMIT_AUTHORIZED → EXEC_CONFIRMED
 оставляет известные разрешение, попытку, PID и маркер, которые
 `controller_recover` согласует без догадочного повтора.
 
-`drain` запрещает новые `admissionId`, но уже начатый сбор свидетельства может
-закончиться только до проверки состояния. `freeze` получает исключительную
+`drain` запрещает новые `startRequestId`, задания доказательства и
+`admissionId`. Ожидающие задания сразу отменяются, активные получают
+`CANCEL_REQUESTED` и обязаны доказанно завершить свои группы процессов за
+пять секунд; лишь затем контроллер ждёт остальные категории покоя.
+`freeze` получает исключительную
 сторону барьера, ждёт не более десяти секунд, повышает эпоху и помечает
 `RESERVED`/`GUARDED` как `ABORTED_FREEZE`; критический
 `COMMIT_AUTHORIZED → EXEC_CONFIRMED` либо полностью завершён до `freeze`, либо
-не запускается после него. Долгое получение `AccountEvidence` находится вне
-барьера и после смены эпохи не может зарезервировать допуск.
+не запускается после него. Отменённое или закончившееся после смены эпохи
+`AccountEvidence` не может создать допуск.
 
 ### Осушение, остановка и принятие
 
@@ -946,6 +1188,13 @@ CREATED → HELLO_SENT → GUARDED → COMMIT_AUTHORIZED → EXEC_CONFIRMED
 ошибку. Следующий `apply` создаёт новый `operationId`. Если возврат не
 завершён либо исходная активация уже изменилась, журнал остаётся только для
 `recover`, а шлюз закрыт.
+
+`maintenance_resume` проверяет свежий критерий покоя как предварительное
+условие принятия кандидата, но при переходе в `ACCEPTING` всегда сохраняет
+`quiescent=false`: открытие приёма новых маршрутов прекращает действие
+положительного утверждения о покое. Ожидаемая проекция этого шага также
+содержит `acceptingNewRoutes=true` и `quiescent=false`. Иначе первая новая
+работа оставила бы в строке контроллера устаревшее `quiescent=true`.
 
 `shutdown` допустим только при `quiescent=true` и полной проекции
 `runtime-v2` покоя. Одна транзакция переводит `controller_state` из
@@ -963,23 +1212,34 @@ CREATED → HELLO_SENT → GUARDED → COMMIT_AUTHORIZED → EXEC_CONFIRMED
 отсутствие прежнего PID с тем же маркером и получает исключительную
 блокировку. Только после этого он строит неизменяемую конечную
 `shutdown-intent-v2` со статусом
-`SHUTDOWN_COMMITTED_EXIT_AND_LOCK_PROVEN` и записывает её как
-`expectedAfter` завершённого шага. В конечном объекте
+`SHUTDOWN_COMMITTED_EXIT_AND_LOCK_PROVEN` и записывает её как фактическую
+`observedAfter` завершённого шага. Неизменяемая `expectedAfter` этого шага
+имеет статус `EXPECTED_SHUTDOWN_PROOF`, те же заранее известные поля и `null`
+в двух поздних отпечатках доказательств. В конечном объекте
 `commandReceiptFingerprint` обязан быть побайтно равен
 `commandReceipt.resultFingerprint` точной квитанции `shutdown`; отдельные
 `commandId`, `requestFingerprint` и `newControlEpoch` обязаны совпадать с той
 же квитанцией. `controllerAfter.controllerIdentity`, `instanceId` и
 `controllerStartId` обязаны совпадать с точным запросом `shutdown`, а PID,
 маркер и группа — с его `socketIntent`. Любое несовпадение закрывает
-восстановление. Отдельный файловый шаг
-`shutdown_socket_cleanup` принимает этот конечный объект как `before`,
-повторно связывает все поля, сверяет тот же inode, выполняет `unlinkat`,
-синхронизирует родителя и получает `absence-proof-v2` как `expectedAfter`;
+восстановление. Отдельный файловый шаг `shutdown_socket_cleanup` планируется
+с тем же `EXPECTED_SHUTDOWN_PROOF` как неизменяемым `before`, а при исполнении
+получает конечный объект из сохранённого либо только что доказанного
+`controller_shutdown.observedAfter`. Его неизменяемое `action` содержит
+только заранее известные ограничения:
+`commandId` источника, точную пару PID/маркер/группа, сокет, путь блокировки и
+устройство/inode родителя сокета. Поздние отпечатки выхода процесса,
+исключительной блокировки и всей конечной проекции в `action` не копируются.
+Исполнитель повторно связывает доказательства из фактического наблюдения,
+сверяет тот же inode, выполняет `unlinkat`, синхронизирует именно сохранённого
+родителя и получает `absence-proof-v2` как `expectedAfter`;
 база на этом шаге не меняется. `SIGKILL` не используется.
 
-После потери ответа повтор того же `commandId` возвращает квитанцию без нового
-повышения эпохи. Внешний исполнитель восстанавливает конечное намерение только
-из точной квитанции, её `socketIntent` и свежих доказательств отсутствия
+После потери ответа повтор того же `commandId` возвращает исходные эпоху,
+полезную нагрузку и квитанцию без нового повышения эпохи. Внешний исполнитель
+сначала доказывает отпечаток реконструированного исходного ответа, а затем
+восстанавливает конечное намерение только из точной квитанции, её
+`socketIntent` и свежих доказательств отсутствия
 процесса с прежним маркером и получения исключительной блокировки. Наличие
 точного осиротевшего сокета означает, что требуется
 `shutdown_socket_cleanup`; иной сокет блокирует удаление. Одного исчезновения
@@ -992,6 +1252,25 @@ CREATED → HELLO_SENT → GUARDED → COMMIT_AUTHORIZED → EXEC_CONFIRMED
 проверяет журнал, активацию и базу и публикует сокет только в
 `MAINTENANCE`.
 
+Действие запуска заранее хранит ровно три аргумента: канонический абсолютный
+путь интерпретатора Python, канонический абсолютный путь
+`ACTIVATION_ID/marketplace/plugins/codex-smart-subagents/controller/server.py`
+и `--serve-candidate-v2`. `argvFingerprint` вычисляется только из этого
+массива в области `codex-smart/controller-candidate-argv/v2`; дочерний
+процесс повторно проверяет его до открытия базы или публикации канала.
+
+До запуска `controller_candidate_spawn.expectedAfter` содержит
+`EXPECTED_REGISTRATION` с `null` вместо PID, маркера, группы и канала;
+завершённый шаг сохраняет `REGISTERED_READY` с фактическими значениями в
+`observedAfter`. `controller_accept.before` остаётся тем же неизменяемым
+`EXPECTED_REGISTRATION`, а исполнитель связывает его с сохранённым
+`REGISTERED_READY`; после закрытия одноразового канала позднее возобновление
+использует точное сохранённое `observedAfter`, а не повторный запуск или
+повторное ожидание канала. Аналогично `controller_accept` и `controller_recover`
+планируются как `EXPECTED_MAINTENANCE`, а `maintenance_resume` — как
+`EXPECTED_ACCEPTING`; назначенный `instanceId`, PID и сокет появляются только
+в фактических `MAINTENANCE` и `ACCEPTING`.
+
 `controller_accept` одной транзакцией сравнивает активацию, базу, операцию,
 запуск и отпечатки, назначает новый `instanceId`, повышает эпоху и пишет
 квитанцию. Если этот процесс умер после принятия, новый процесс не повторяет
@@ -1000,6 +1279,9 @@ CREATED → HELLO_SENT → GUARDED → COMMIT_AUTHORIZED → EXEC_CONFIRMED
 После `manifest_commit` метод `maintenance_resume` с той же операцией
 переводит этот новый экземпляр в `ACCEPTING`; он не требует совпадения старых
 отпечатков, а требует точного совпадения уже зафиксированной новой активации.
+Действие `manifest_commit` до намерения хранит и `sourcePath` подготовленного
+манифеста, и конечный `targetPath`; атомарная замена после сбоя поэтому не
+восстанавливается из незафиксированного временного имени.
 
 ### Конечные сроки
 
@@ -1189,43 +1471,65 @@ CREATED → READY → ARMED → MONITORING → RESUME_SENT → RESUMED → EXITE
 восстанавливает обычный `codex-highfd`. Будущая схема требует новой явной
 матрицы.
 
-Полное удаление является отдельной журналируемой операцией после осушения.
-Оно восстанавливает `originalBackup` прежнего `codex-highfd`, если квитанция
-доказывает, что текущий файл принадлежит установке; отсутствие исходного
-файла восстанавливается как отсутствие. Затем штатно удаляются только
-собственные регистрационные записи и загрузчики.
+Каждый успешный откат публикует новую commit-квитанцию, а не возвращает
+старую. Текущая квитанция выбирается только по
+`manifest.lastCommittedOperation`; операция предшественника извлекается из
+проверенной исходной квитанции её `transitionLineage`. Точная квитанция
+предшественника затем открывается по каноническому имени операции. Поиск по
+`activationId` запрещён, поскольку цепочка `A → B → A → B` содержит несколько
+неизменяемых квитанций одной активации. Отсутствующая, подменённая или вторая
+квитанция той же операции делает восстановление неоднозначным и закрывает
+шлюз.
 
-Порядок полного удаления закрыт. Сначала удаляются запись подключаемого
-модуля и рынка, восстанавливаются загрузчики, затем удаляются ссылка
-активации, база, каталог активации и манифест. Только после доказанного
-удаления этих принадлежащих установке объектов разрешены
-`uninstall_fallback_remove` и последующий `uninstall_admin_remove`.
-Аварийная капсула и административная точка входа поэтому остаются последними
-средствами диагностики при любом более раннем сбое. После них следуют только
-`terminal_journal_freeze → uninstall_receipt_publish →
-uninstall_tombstone_publish → uninstall_journal_close`; перестановка
-аварийных объектов раньше собственных ресурсов запрещена.
+В выпуске 0.2 удаление является отдельной журналируемой операцией
+`uninstall --retain-data` после осушения. Оно восстанавливает
+`originalBackup` прежнего `codex-highfd`, если квитанция доказывает, что
+текущий файл принадлежит установке; отсутствие исходного файла
+восстанавливается как отсутствие. Затем штатно удаляются только собственные
+регистрационные записи, загрузчики, ссылка активации, каталог активации и
+закрытая пара файлов установки: манифест и прежняя квитанция установщика.
+Оба абсолютных пути и обе исходные проекции входят в действие и его отпечаток
+владения шага `uninstall_manifest_remove`; скрытого пакетного удаления за этим
+шагом нет. Если процесс прерван между двумя `unlink`, каждое из двух частичных
+состояний пары имеет отдельную проекцию и принимается только при уже долговечно
+записанном намерении этого же шага. Пока шаг имеет состояние `PLANNED`, такое
+же частичное состояние считается внешним вмешательством и закрывает
+восстановление.
 
-До удаления каждого объекта журнал пишет намерение и доказательство владения.
-После удаления, но до исчезновения стабильного журнала, через `O_EXCL`
-создаётся неизменяемая квитанция
-`receipts/INSTALLATION_ID/OPERATION_ID.uninstall.json`. Она
-содержит отпечатки удалённого манифеста, активации, базы, реестра, загрузчиков,
-восстановленного `originalBackup` и доказательство отсутствия. После её
-синхронизации публикуется стабильный `tombstone.json` с `installationId`,
-`operationId` и отпечатком квитанции; последним шагом удаляется и
-синхронизируется журнал.
+База, архивы и карантин не удаляются. Квитанция фиксирует
+`dataRetentionMode=retain-data`, стабильную `databaseBinding` и абсолютные
+пути `backupsRoot` и `quarantineRoot`. Команда печатает эти пути и путь к
+сохранённой точке восстановления. Отдельная разрушающая команда очистки в
+выпуске 0.2 не поддерживается и не подразумевается повторным `uninstall`.
+
+Постоянная точка восстановления размещается вне заменяемой активации и
+остаётся доступной после удаления установки. Её проекция
+`recoveryEntrypoint` входит в `retainedData`; операция удаления не содержит
+шагов удаления базы, аварийной капсулы или административной точки входа.
+Эта постоянная точка восстановления позволяет проверить сохранённые данные,
+повторить восстановление или подготовить осознанную ручную очистку отдельным
+будущим протоколом.
+
+До удаления каждого принадлежащего установке объекта журнал пишет намерение
+и доказательство владения. После удаления, но до исчезновения стабильного
+журнала, через `O_EXCL` создаётся неизменяемая квитанция
+`receipts/INSTALLATION_ID/OPERATION_ID.uninstall.json`. Она содержит
+отпечатки удалённого манифеста, активации, реестра и загрузчиков,
+восстановленного `originalBackup`, доказательство отсутствия и описание всех
+сохранённых данных. После её синхронизации публикуется стабильный
+`tombstone.json` с `installationId`, `operationId` и отпечатком квитанции;
+последним шагом удаляется и синхронизируется журнал.
 
 Поле `uninstallReceipt` надгробного указателя принимает только проекцию
 `receipt-object-v2` с вложенным `receiptKind=installation-uninstall`.
-Квитанция активации, отмены или уборки не может завершить полное удаление даже
+Квитанция активации, отмены или уборки не может завершить удаление установки даже
 при совпадении имени файла или внешнего отпечатка.
 
-Повторный откат возвращает `unchanged` только при совпадении квитанции и
-одновременном отсутствии манифеста, ссылки, поколений, собственных
-загрузчиков, рынка, подключаемого модуля и записей настройки. Новый объект с
-тем же именем не удаляется. Отсутствие без журнала или квитанции является
-`ROLLBACK_RESIDUE`.
+Повторное удаление установки возвращает `unchanged` только при совпадении
+квитанции и одновременном отсутствии манифеста, ссылки, поколений,
+собственных загрузчиков, рынка, подключаемого модуля и записей настройки.
+Новый объект с тем же именем не удаляется. Отсутствие без журнала или
+квитанции является `UNINSTALL_RESIDUE`.
 
 Каждый новый цикл установки получает новый `installationId`, новую
 квитанцию и собственный `originalBackup`; старый надгробный указатель при
@@ -1259,7 +1563,9 @@ Codex и базу 1, объект любого незавершённого ос
 
 `baseCommitReceipt` и в журнале, и в квитанции уборки является только
 проекцией `receipt-object-v2` с вложенным
-`receiptKind=activation-commit`. Квитанция самой уборки, отмены или полного
+`receiptKind=activation-commit`. Квитанция подготовки не может стать
+основанием пакета уборки вместо квитанции принятой активации. Квитанция самой
+уборки, отмены или полного
 удаления не может стать основанием нового пакета.
 
 Один журнал уборки содержит не более 127 объектов: места 0–126 занимают
@@ -1293,12 +1599,17 @@ cleanup_journal_close`, доказывает синхронизированно�
 
 | Окно | Результат |
 |---|---|
-| До основного журнала | Постоянное состояние не изменено; план только вычислен в памяти |
+| До подготовительного журнала | Допустима только атомарная публикация повторно проверяемого адресуемого снимка Codex; активное состояние не изменено |
+| После `preparation_intent`, до первого объектного намерения | Полный логический план подготовки долговечен; активное состояние не изменено; пустого подготовительного журнала нет |
+| После намерения подготовительного объекта, до действия | Наблюдается доказанное отсутствие; действие повторимо по точному пути и смысловому хешу |
+| После действия подготовки, до `COMPLETED` | Наблюдается только точный логический кандидат; дописывается полная физическая проекция |
+| После `preparation_freeze`, до квитанции или закрытия подготовительного журнала | Журнал неизменяем; матрица присутствия однозначно публикует связанную квитанцию и доказывает синхронизированное отсутствие журнала |
+| После квитанции подготовки, до основного журнала | Существуют только недоступные рабочему шлюзу объекты; их точные физические проекции повторно проверяются перед `gate_close` |
 | После атомарного создания основного журнала, до первого изменяемого намерения | План долговечен, `gate_close` уже `COMPLETED`, шлюз закрыт; пустого журнального состояния нет |
 | До журнала уборки | Ни один объект уборки не изменён |
 | После атомарного создания журнала уборки, до первого объектного намерения | План уборки долговечен, курсор равен 0, удалений ещё нет |
 | После `INTENT_DURABLE`, до действия | Наблюдается `before`, шаг повторим |
-| После действия, до `COMPLETED` | Наблюдается `expectedAfter`, дописывается подтверждение |
+| После действия, до `COMPLETED` | Наблюдается полная фактическая проекция; для детерминированного шага она равна `expectedAfter`, для эффекта с назначаемыми полями она проходит связующий предикат ограничения и сохраняется как `observedAfter` |
 | После `terminal_journal_freeze`, до публикации квитанции | Журнал присутствует и неизменяем; восстановитель проверяет `TERMINAL_FROZEN` и публикует только связанную квитанцию |
 | После публикации квитанции, до обязательного итогового указателя | Для `UNINSTALL` журнал сохраняется, пока не опубликован и не проверен совпавший надгробный указатель; у остальных видов такого окна нет |
 | После проверки квитанции и всех итоговых указателей, до удаления замороженного журнала | Восстановитель проверяет `frozenJournalFingerprint` и удаляет только этот журнал |
@@ -1313,8 +1624,8 @@ cleanup_journal_close`, доказывает синхронизированно�
 | После `resume`, до терминального замораживания | Контроллер готов, но новые клиенты ещё закрыты журналом; журнал можно только довести до `TERMINAL_FROZEN` |
 | После удаления целевого объекта отката, до терминального замораживания и квитанции | Журнал остаётся на месте и позволяет только завершить доказанный откат; замороженный журнал до публикации квитанции не удаляется |
 
-Машинная проверка перечисляет 220 мест шагов во всех общих
-последовательностях и условных ветвях: 172 места `JOURNAL_MUTABLE` дают ровно
-344 проверки двух общих аварийных окон, а 48 самонесущих атомарных или
+Машинная проверка перечисляет 215 мест шагов во всех общих
+последовательностях и условных ветвях: 167 мест `JOURNAL_MUTABLE` дают ровно
+334 проверки двух общих аварийных окон, а 48 самонесущих атомарных или
 послезамороженных мест проверяются своими фиксированными границами. Отдельно
 проверяются все четыре пары физического присутствия журнала и квитанции.

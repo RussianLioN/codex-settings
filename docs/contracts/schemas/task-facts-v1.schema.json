@@ -1,0 +1,379 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/task-facts-v1.schema.json",
+  "title": "task-facts-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "taskText",
+    "evidence",
+    "workShape",
+    "factorClaims",
+    "delegation",
+    "hardFloorReasons",
+    "hardBanReasons"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "contractVersion": {
+      "const": "codex-task-facts-v1"
+    },
+    "taskText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16384
+    },
+    "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
+    "workShape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scopeUnits",
+        "workUnits",
+        "boundaries",
+        "workstreams"
+      ],
+      "properties": {
+        "scopeUnits": {
+          "$ref": "#/$defs/countFact"
+        },
+        "workUnits": {
+          "$ref": "#/$defs/countFact"
+        },
+        "boundaries": {
+          "$ref": "#/$defs/countFact"
+        },
+        "workstreams": {
+          "$ref": "#/$defs/countFact"
+        }
+      }
+    },
+    "factorClaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "q",
+        "v",
+        "o"
+      ],
+      "properties": {
+        "q": {
+          "$ref": "#/$defs/qClaims"
+        },
+        "v": {
+          "$ref": "#/$defs/vClaims"
+        },
+        "o": {
+          "$ref": "#/$defs/oClaims"
+        }
+      }
+    },
+    "delegation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "permission",
+        "objectivelyVerifiable",
+        "independentWorkUnits"
+      ],
+      "properties": {
+        "permission": {
+          "$ref": "#/$defs/permissionFact"
+        },
+        "objectivelyVerifiable": {
+          "$ref": "#/$defs/booleanFact"
+        },
+        "independentWorkUnits": {
+          "$ref": "#/$defs/countFact"
+        }
+      }
+    },
+    "hardFloorReasons": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "$ref": "#/$defs/hardFloorReason"
+      }
+    },
+    "hardBanReasons": {
+      "type": "array",
+      "maxItems": 7,
+      "items": {
+        "$ref": "#/$defs/hardBanReason"
+      }
+    }
+  },
+  "$defs": {
+    "refIds": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$"
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidenceRefId",
+        "kind",
+        "statement",
+        "sha256"
+      ],
+      "properties": {
+        "evidenceRefId": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._:-]{0,127}$"
+        },
+        "kind": {
+          "enum": [
+            "user-request",
+            "repository-file",
+            "command-output",
+            "official-source",
+            "account-evidence",
+            "explicit-policy"
+          ]
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "countFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "evidenceRefIds"
+      ],
+      "properties": {
+        "value": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidenceRefIds": {
+          "$ref": "#/$defs/refIds"
+        }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "evidenceRefIds"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "false",
+            "true",
+            "unknown",
+            "conflict"
+          ]
+        },
+        "evidenceRefIds": {
+          "$ref": "#/$defs/refIds"
+        }
+      }
+    },
+    "booleanFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "evidenceRefIds"
+      ],
+      "properties": {
+        "value": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "evidenceRefIds": {
+          "$ref": "#/$defs/refIds"
+        }
+      }
+    },
+    "permissionFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "evidenceRefIds"
+      ],
+      "properties": {
+        "value": {
+          "enum": [
+            "allow",
+            "forbid",
+            "unspecified"
+          ]
+        },
+        "evidenceRefIds": {
+          "$ref": "#/$defs/refIds"
+        }
+      }
+    },
+    "qClaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "q1-dependent-chain": {
+          "$ref": "#/$defs/claim"
+        },
+        "q1-bounded-tradeoff": {
+          "$ref": "#/$defs/claim"
+        },
+        "q2-cross-boundary-invariant": {
+          "$ref": "#/$defs/claim"
+        },
+        "q2-adversarial-concurrency": {
+          "$ref": "#/$defs/claim"
+        },
+        "q2-conflict-synthesis": {
+          "$ref": "#/$defs/claim"
+        }
+      }
+    },
+    "vClaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "v1-reversible-persistent": {
+          "$ref": "#/$defs/claim"
+        },
+        "v1-user-visible-isolated": {
+          "$ref": "#/$defs/claim"
+        },
+        "v2-shared-or-production": {
+          "$ref": "#/$defs/claim"
+        },
+        "v2-destructive-or-unproven-rollback": {
+          "$ref": "#/$defs/claim"
+        },
+        "v2-trust-secret-permission": {
+          "$ref": "#/$defs/claim"
+        },
+        "v2-high-stakes": {
+          "$ref": "#/$defs/claim"
+        },
+        "v2-release-or-migration": {
+          "$ref": "#/$defs/claim"
+        }
+      }
+    },
+    "oClaims": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "o1-discoverable-missing-fact": {
+          "$ref": "#/$defs/claim"
+        },
+        "o1-mutable-current-state": {
+          "$ref": "#/$defs/claim"
+        },
+        "o1-explicit-reversible-assumption": {
+          "$ref": "#/$defs/claim"
+        },
+        "o2-authority-conflict": {
+          "$ref": "#/$defs/claim"
+        },
+        "o2-undiscoverable-required-fact": {
+          "$ref": "#/$defs/claim"
+        },
+        "o2-unreproducible-conflict": {
+          "$ref": "#/$defs/claim"
+        },
+        "o2-uncontracted-interface": {
+          "$ref": "#/$defs/claim"
+        }
+      }
+    },
+    "hardFloorReason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "evidenceRefIds"
+      ],
+      "properties": {
+        "reason": {
+          "enum": [
+            "architecture-decision",
+            "public-contract",
+            "risky-migration",
+            "security-sensitive",
+            "critical-incident",
+            "final-author-review-before-publish",
+            "irreversible-action",
+            "rollback-unproven"
+          ]
+        },
+        "evidenceRefIds": {
+          "$ref": "#/$defs/refIds"
+        }
+      }
+    },
+    "hardBanReason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "decision",
+        "evidenceRefIds"
+      ],
+      "properties": {
+        "reason": {
+          "enum": [
+            "authority-conflict",
+            "owner-decision-required",
+            "required-fact-unavailable",
+            "delegation-explicitly-forbidden",
+            "delegation-not-explicitly-allowed",
+            "no-objectively-verifiable-unit",
+            "no-independent-work-unit"
+          ]
+        },
+        "decision": {
+          "enum": [
+            "direct",
+            "clarify"
+          ]
+        },
+        "evidenceRefIds": {
+          "$ref": "#/$defs/refIds"
+        }
+      }
+    }
+  }
+}

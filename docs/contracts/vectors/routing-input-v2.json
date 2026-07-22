@@ -1,0 +1,799 @@
+{
+  "schemaVersion": 2,
+  "contractVersion": "codex-routing-input-vector-v2",
+  "baseInput": {
+    "schemaVersion": 2,
+    "contractVersion": "codex-routing-input-v2",
+    "semanticVersion": "q+p+v+o-v2",
+    "phase": "smart-plan",
+    "taskFacts": {
+      "schemaVersion": 1,
+      "contractVersion": "codex-task-facts-v1",
+      "taskText": "Передать одну независимо проверяемую задачу чтения одному субагенту.",
+      "evidence": [
+        {
+          "evidenceRefId": "request",
+          "kind": "user-request",
+          "statement": "Пользователь просит выполнить одну проверяемую задачу.",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "evidenceRefId": "policy",
+          "kind": "explicit-policy",
+          "statement": "Делегирование этой независимо проверяемой единицы явно разрешено.",
+          "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        {
+          "evidenceRefId": "scope",
+          "kind": "repository-file",
+          "statement": "Работа ограничена одной единицей, одной границей и одним потоком.",
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ],
+      "workShape": {
+        "scopeUnits": {
+          "value": 1,
+          "evidenceRefIds": [
+            "scope"
+          ]
+        },
+        "workUnits": {
+          "value": 1,
+          "evidenceRefIds": [
+            "scope"
+          ]
+        },
+        "boundaries": {
+          "value": 1,
+          "evidenceRefIds": [
+            "scope"
+          ]
+        },
+        "workstreams": {
+          "value": 1,
+          "evidenceRefIds": [
+            "scope"
+          ]
+        }
+      },
+      "factorClaims": {
+        "q": {
+          "q1-dependent-chain": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "q1-bounded-tradeoff": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "q2-cross-boundary-invariant": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "q2-adversarial-concurrency": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "q2-conflict-synthesis": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          }
+        },
+        "v": {
+          "v1-reversible-persistent": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "v1-user-visible-isolated": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "v2-shared-or-production": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "v2-destructive-or-unproven-rollback": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "v2-trust-secret-permission": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "v2-high-stakes": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "v2-release-or-migration": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          }
+        },
+        "o": {
+          "o1-discoverable-missing-fact": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "o1-mutable-current-state": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "o1-explicit-reversible-assumption": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "o2-authority-conflict": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "o2-undiscoverable-required-fact": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "o2-unreproducible-conflict": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "o2-uncontracted-interface": {
+            "state": "false",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          }
+        }
+      },
+      "delegation": {
+        "permission": {
+          "value": "allow",
+          "evidenceRefIds": [
+            "policy"
+          ]
+        },
+        "objectivelyVerifiable": {
+          "value": true,
+          "evidenceRefIds": [
+            "scope"
+          ]
+        },
+        "independentWorkUnits": {
+          "value": 1,
+          "evidenceRefIds": [
+            "scope"
+          ]
+        }
+      },
+      "hardFloorReasons": [],
+      "hardBanReasons": []
+    },
+    "delegationPolicyRef": "codex-delegation-policy-v2/default",
+    "contextBundle": {
+      "schemaVersion": 1,
+      "contractVersion": "codex-context-bundle-v1",
+      "bundleId": "routing-base",
+      "maxBytes": 64,
+      "totalBytes": 21,
+      "entries": [
+        {
+          "contextRefId": "request",
+          "kind": "task-request",
+          "required": true,
+          "sourceEvidenceRefs": [
+            {
+              "evidenceRefId": "request",
+              "evidenceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ],
+          "sha256": "0ebb429fa86d481c2630fac53db1c91cffed5d4d41d1021c179444eb67e7ee0b",
+          "byteLength": 4,
+          "content": "task"
+        },
+        {
+          "contextRefId": "rules",
+          "kind": "repository-instruction",
+          "required": true,
+          "sourceEvidenceRefs": [
+            {
+              "evidenceRefId": "policy",
+              "evidenceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            }
+          ],
+          "sha256": "6c621d1a05138a7888d37d9269a9da8e2e11e4aced2f6cfd24b05ab1b9e61bb0",
+          "byteLength": 5,
+          "content": "rules"
+        },
+        {
+          "contextRefId": "dependencies",
+          "kind": "dependency-summary",
+          "required": true,
+          "sourceEvidenceRefs": [
+            {
+              "evidenceRefId": "scope",
+              "evidenceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            }
+          ],
+          "sha256": "2188dfc2d889b53230f6891977d505642d718b940aa3eec23985afb379141dcd",
+          "byteLength": 12,
+          "content": "dependencies"
+        }
+      ]
+    },
+    "roleTemplateId": "implementer-v1",
+    "catalogs": {
+      "policyPairs": [
+        {
+          "model": "gpt-5.6-luna",
+          "reasoningEffort": "low"
+        },
+        {
+          "model": "gpt-5.6-luna",
+          "reasoningEffort": "medium"
+        },
+        {
+          "model": "gpt-5.6-terra",
+          "reasoningEffort": "medium"
+        },
+        {
+          "model": "gpt-5.6-terra",
+          "reasoningEffort": "high"
+        },
+        {
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "high"
+        },
+        {
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "xhigh"
+        },
+        {
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "max"
+        }
+      ],
+      "bundledSnapshotPairs": [
+        {
+          "model": "gpt-5.6-luna",
+          "reasoningEffort": "low"
+        },
+        {
+          "model": "gpt-5.6-luna",
+          "reasoningEffort": "medium"
+        },
+        {
+          "model": "gpt-5.6-terra",
+          "reasoningEffort": "medium"
+        },
+        {
+          "model": "gpt-5.6-terra",
+          "reasoningEffort": "high"
+        },
+        {
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "high"
+        },
+        {
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "xhigh"
+        },
+        {
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "max"
+        }
+      ],
+      "accountPairs": null
+    },
+    "accountEvidenceJobs": [],
+    "reassessment": {
+      "mode": "initial",
+      "currentPair": null,
+      "explicitPolicyAllowed": false
+    }
+  },
+  "cases": [
+    {
+      "name": "direct-without-account-evidence",
+      "patch": {
+        "taskFacts": {
+          "delegation": {
+            "permission": {
+              "value": "forbid",
+              "evidenceRefIds": [
+                "policy"
+              ]
+            }
+          },
+          "hardBanReasons": [
+            {
+              "reason": "delegation-explicitly-forbidden",
+              "decision": "direct",
+              "evidenceRefIds": [
+                "policy"
+              ]
+            }
+          ]
+        }
+      },
+      "expected": {
+        "decision": "direct",
+        "reasons": [
+          "delegation-explicitly-forbidden"
+        ],
+        "pair": null,
+        "score": null,
+        "factors": null,
+        "accountEvidenceJobsConsumed": 0
+      }
+    },
+    {
+      "name": "clarify-without-account-evidence",
+      "patch": {
+        "taskFacts": {
+          "hardBanReasons": [
+            {
+              "reason": "authority-conflict",
+              "decision": "clarify",
+              "evidenceRefIds": [
+                "request",
+                "policy"
+              ]
+            }
+          ]
+        }
+      },
+      "expected": {
+        "decision": "clarify",
+        "reasons": [
+          "authority-conflict"
+        ],
+        "pair": null,
+        "score": null,
+        "factors": null,
+        "accountEvidenceJobsConsumed": 0
+      }
+    },
+    {
+      "name": "delegate-smart-plan-without-account-evidence",
+      "patch": {},
+      "expected": {
+        "decision": "delegate",
+        "reasons": [
+          "delegation-requirements-satisfied"
+        ],
+        "pair": {
+          "model": "gpt-5.6-luna",
+          "reasoningEffort": "low"
+        },
+        "score": 0,
+        "factors": {
+          "q": 0,
+          "p": 0,
+          "v": 0,
+          "o": 0
+        },
+        "accountEvidenceJobsConsumed": 0
+      }
+    },
+    {
+      "name": "node-attempt-requires-account-evidence",
+      "patch": {
+        "phase": "node-attempt"
+      },
+      "expected": {
+        "decision": "delegate",
+        "reasons": [
+          "delegation-requirements-satisfied"
+        ],
+        "pair": null,
+        "score": 0,
+        "factors": {
+          "q": 0,
+          "p": 0,
+          "v": 0,
+          "o": 0
+        },
+        "accountEvidenceJobsConsumed": 0,
+        "errorCode": "ACCOUNT_EVIDENCE_REQUIRED"
+      }
+    },
+    {
+      "name": "node-attempt-one-full-account-evidence-job",
+      "patch": {
+        "phase": "node-attempt",
+        "catalogs": {
+          "accountPairs": "$copy:baseInput/catalogs/policyPairs"
+        },
+        "accountEvidenceJobs": [
+          {
+            "collectionJobId": "aej2_11111111111111111111111111111111",
+            "attemptId": "att2_22222222222222222222222222222222",
+            "fullCollection": true,
+            "processCount": 5,
+            "cacheHit": false,
+            "hiddenRetry": false
+          }
+        ]
+      },
+      "expected": {
+        "decision": "delegate",
+        "reasons": [
+          "delegation-requirements-satisfied"
+        ],
+        "pair": {
+          "model": "gpt-5.6-luna",
+          "reasoningEffort": "low"
+        },
+        "score": 0,
+        "factors": {
+          "q": 0,
+          "p": 0,
+          "v": 0,
+          "o": 0
+        },
+        "accountEvidenceJobsConsumed": 1
+      }
+    },
+    {
+      "name": "exact-pair-unavailable-no-fallback",
+      "patch": {
+        "phase": "node-attempt",
+        "catalogs": {
+          "accountPairs": [
+            {
+              "model": "gpt-5.6-luna",
+              "reasoningEffort": "medium"
+            },
+            {
+              "model": "gpt-5.6-terra",
+              "reasoningEffort": "medium"
+            },
+            {
+              "model": "gpt-5.6-terra",
+              "reasoningEffort": "high"
+            },
+            {
+              "model": "gpt-5.6-sol",
+              "reasoningEffort": "high"
+            },
+            {
+              "model": "gpt-5.6-sol",
+              "reasoningEffort": "xhigh"
+            },
+            {
+              "model": "gpt-5.6-sol",
+              "reasoningEffort": "max"
+            }
+          ]
+        },
+        "accountEvidenceJobs": [
+          {
+            "collectionJobId": "aej2_33333333333333333333333333333333",
+            "attemptId": "att2_44444444444444444444444444444444",
+            "fullCollection": true,
+            "processCount": 5,
+            "cacheHit": false,
+            "hiddenRetry": false
+          }
+        ]
+      },
+      "expected": {
+        "decision": "delegate",
+        "reasons": [
+          "delegation-requirements-satisfied"
+        ],
+        "pair": null,
+        "score": 0,
+        "factors": {
+          "q": 0,
+          "p": 0,
+          "v": 0,
+          "o": 0
+        },
+        "accountEvidenceJobsConsumed": 1,
+        "errorCode": "ROUTING_PAIR_UNAVAILABLE"
+      }
+    },
+    {
+      "name": "promote-only-without-explicit-policy",
+      "patch": {
+        "reassessment": {
+          "mode": "promote-only",
+          "currentPair": {
+            "model": "gpt-5.6-terra",
+            "reasoningEffort": "medium"
+          },
+          "explicitPolicyAllowed": false
+        }
+      },
+      "expected": {
+        "decision": "delegate",
+        "reasons": [
+          "delegation-requirements-satisfied"
+        ],
+        "pair": null,
+        "score": 0,
+        "factors": {
+          "q": 0,
+          "p": 0,
+          "v": 0,
+          "o": 0
+        },
+        "accountEvidenceJobsConsumed": 0,
+        "errorCode": "REASSESSMENT_POLICY_REQUIRED"
+      }
+    },
+    {
+      "name": "known-scope-unknown-work-keeps-conservative-model",
+      "patch": {
+        "taskFacts": {
+          "workShape": {
+            "scopeUnits": {
+              "value": 1,
+              "evidenceRefIds": [
+                "scope"
+              ]
+            },
+            "workUnits": {
+              "value": null,
+              "evidenceRefIds": []
+            }
+          },
+          "factorClaims": {
+            "q": {
+              "q1-dependent-chain": {
+                "state": "true",
+                "evidenceRefIds": [
+                  "scope"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "decision": "delegate",
+        "reasons": [
+          "delegation-requirements-satisfied"
+        ],
+        "pair": {
+          "model": "gpt-5.6-terra",
+          "reasoningEffort": "medium"
+        },
+        "score": 3,
+        "factors": {
+          "q": 1,
+          "p": 2,
+          "v": 0,
+          "o": 0
+        },
+        "accountEvidenceJobsConsumed": 0
+      }
+    },
+    {
+      "name": "unknown-scope-known-work-keeps-conservative-model",
+      "patch": {
+        "taskFacts": {
+          "workShape": {
+            "scopeUnits": {
+              "value": null,
+              "evidenceRefIds": []
+            },
+            "workUnits": {
+              "value": 1,
+              "evidenceRefIds": [
+                "scope"
+              ]
+            }
+          },
+          "factorClaims": {
+            "q": {
+              "q1-dependent-chain": {
+                "state": "true",
+                "evidenceRefIds": [
+                  "scope"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "decision": "delegate",
+        "reasons": [
+          "delegation-requirements-satisfied"
+        ],
+        "pair": {
+          "model": "gpt-5.6-terra",
+          "reasoningEffort": "medium"
+        },
+        "score": 3,
+        "factors": {
+          "q": 1,
+          "p": 2,
+          "v": 0,
+          "o": 0
+        },
+        "accountEvidenceJobsConsumed": 0
+      }
+    },
+    {
+      "name": "complex-task-selects-sol-max",
+      "patch": {
+        "taskFacts": {
+          "taskText": "Согласовать выпуск через две границы и доказать инвариант для восьми единиц работы.",
+          "workShape": {
+            "scopeUnits": {
+              "value": 8,
+              "evidenceRefIds": [
+                "scope"
+              ]
+            },
+            "workUnits": {
+              "value": 8,
+              "evidenceRefIds": [
+                "scope"
+              ]
+            },
+            "boundaries": {
+              "value": 2,
+              "evidenceRefIds": [
+                "scope"
+              ]
+            },
+            "workstreams": {
+              "value": 2,
+              "evidenceRefIds": [
+                "scope"
+              ]
+            }
+          },
+          "factorClaims": {
+            "q": {
+              "q2-cross-boundary-invariant": {
+                "state": "true",
+                "evidenceRefIds": [
+                  "scope"
+                ]
+              }
+            },
+            "v": {
+              "v2-release-or-migration": {
+                "state": "true",
+                "evidenceRefIds": [
+                  "scope"
+                ]
+              }
+            },
+            "o": {
+              "o2-uncontracted-interface": {
+                "state": "true",
+                "evidenceRefIds": [
+                  "scope"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "decision": "delegate",
+        "reasons": [
+          "delegation-requirements-satisfied"
+        ],
+        "pair": {
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "max"
+        },
+        "score": 8,
+        "factors": {
+          "q": 2,
+          "p": 2,
+          "v": 2,
+          "o": 2
+        },
+        "accountEvidenceJobsConsumed": 0
+      }
+    }
+  ],
+  "mutations": [
+    {
+      "name": "legacy-semantic-version-is-rejected",
+      "baseCase": "delegate-smart-plan-without-account-evidence",
+      "path": "/semanticVersion",
+      "value": "legacy-v1",
+      "expectedError": "SEMANTIC_VERSION_MISMATCH"
+    },
+    {
+      "name": "smart-plan-account-evidence-job-is-forbidden",
+      "baseCase": "delegate-smart-plan-without-account-evidence",
+      "path": "/accountEvidenceJobs",
+      "value": [
+        {
+          "collectionJobId": "aej2_55555555555555555555555555555555",
+          "attemptId": "att2_66666666666666666666666666666666",
+          "fullCollection": true,
+          "processCount": 5,
+          "cacheHit": false,
+          "hiddenRetry": false
+        }
+      ],
+      "expectedError": "ACCOUNT_EVIDENCE_FORBIDDEN_DURING_SMART_PLAN"
+    },
+    {
+      "name": "attempt-missing-account-evidence",
+      "baseCase": "node-attempt-requires-account-evidence",
+      "path": "/accountEvidenceJobs",
+      "value": [],
+      "expectedError": "ACCOUNT_EVIDENCE_REQUIRED"
+    },
+    {
+      "name": "attempt-account-evidence-cache-hit",
+      "baseCase": "node-attempt-one-full-account-evidence-job",
+      "path": "/accountEvidenceJobs/0/cacheHit",
+      "value": true,
+      "expectedError": "ACCOUNT_EVIDENCE_REUSE_FORBIDDEN"
+    },
+    {
+      "name": "attempt-hidden-account-evidence-retry",
+      "baseCase": "node-attempt-one-full-account-evidence-job",
+      "path": "/accountEvidenceJobs/0/hiddenRetry",
+      "value": true,
+      "expectedError": "ACCOUNT_EVIDENCE_HIDDEN_RETRY_FORBIDDEN"
+    },
+    {
+      "name": "attempt-incomplete-account-evidence-job",
+      "baseCase": "node-attempt-one-full-account-evidence-job",
+      "path": "/accountEvidenceJobs/0/processCount",
+      "value": 4,
+      "expectedError": "ACCOUNT_EVIDENCE_INCOMPLETE"
+    },
+    {
+      "name": "attempt-account-catalog-missing",
+      "baseCase": "node-attempt-one-full-account-evidence-job",
+      "path": "/catalogs/accountPairs",
+      "value": null,
+      "expectedError": "ACCOUNT_EVIDENCE_REQUIRED"
+    },
+    {
+      "name": "role-required-context-missing",
+      "baseCase": "delegate-smart-plan-without-account-evidence",
+      "path": "/roleTemplateId",
+      "value": "researcher-v1",
+      "expectedError": "ROLE_CONTEXT_KIND_MISSING"
+    }
+  ]
+}

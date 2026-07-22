@@ -19,7 +19,10 @@ from typing import Any, Iterator, Mapping, Sequence
 from urllib.parse import quote
 
 from .controller import RuntimePaths, WireProtocolError
+from . import finite_file_lock_v2
 from .state import RouteState, is_terminal
+from .operation_deadline_v2 import OperationDeadlineExceededV2
+from .sqlite_deadline_v2 import connect_sqlite_with_deadline_v2
 
 
 SCHEMA_VERSION = 1
@@ -277,6 +280,8 @@ def probe_rollback_preflight(
             active_routes, active_attempts = _active_database_counts(
                 context.database_path
             )
+        except OperationDeadlineExceededV2:
+            raise
         except (OSError, sqlite3.Error, ValueError):
             active_routes = -1
             active_attempts = -1
@@ -937,6 +942,8 @@ def _probe_locked_preflight(
             active_routes, active_attempts = _active_database_counts(
                 context.database_path
             )
+        except OperationDeadlineExceededV2:
+            raise
         except (OSError, sqlite3.Error, ValueError):
             active_routes = -1
             active_attempts = -1
@@ -973,7 +980,7 @@ def _active_database_counts(path: Path) -> tuple[int, int]:
     )
     placeholders = ",".join("?" for _ in terminals)
     uri = f"file:{quote(str(path))}?mode=ro&immutable=1"
-    connection = sqlite3.connect(uri, uri=True)
+    connection = connect_sqlite_with_deadline_v2(uri, uri=True)
     try:
         route_row = connection.execute(
             f"select count(*) from routes where state not in ({placeholders})",
@@ -1367,6 +1374,7 @@ def installation_lock(path: Path) -> Iterator[None]:
             "ROLLBACK_UNSAFE_INSTALL_LOCK",
             f"не удалось безопасно открыть блокировку: {path}",
         ) from exc
+    acquired = False
     try:
         info = os.fstat(descriptor)
         if (
@@ -1384,13 +1392,28 @@ def installation_lock(path: Path) -> Iterator[None]:
                 "ROLLBACK_UNSAFE_INSTALL_LOCK",
                 f"не удалось ограничить права блокировки: {path}",
             )
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        try:
+            finite_file_lock_v2.acquire_flock_v2(
+                descriptor,
+                exclusive=True,
+                timeout_seconds=(
+                    finite_file_lock_v2.INSTALLATION_LOCK_TIMEOUT_SECONDS
+                ),
+                timeout_code="INSTALLATION_LOCK_TIMEOUT",
+            )
+        except finite_file_lock_v2.FileLockTimeoutV2 as error:
+            raise RollbackError(
+                error.code,
+                "установочная блокировка осталась занятой до истечения срока",
+            ) from error
+        acquired = True
         yield
     finally:
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
-        except OSError:
-            pass
+        if acquired:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            except OSError:
+                pass
         os.close(descriptor)
 
 

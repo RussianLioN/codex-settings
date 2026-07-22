@@ -83,66 +83,75 @@ class AppServerModelCatalogInspector:
             return self._read_pages(client)
 
     def _read_pages(self, client: Any) -> dict[str, frozenset[str]]:
-        observed: dict[str, frozenset[str]] = {}
-        cursor: str | None = None
-        seen_cursors: set[str] = set()
-        for _page in range(MAX_MODEL_LIST_PAGES):
-            parameters: dict[str, object] = {
-                "includeHidden": True,
-                "limit": 100,
-            }
-            if cursor is not None:
-                parameters["cursor"] = cursor
-            try:
-                result = client.call("model/list", parameters)
-            except AppServerError as exc:
-                raise ModelCatalogError(
-                    "MODEL_LIST_UNAVAILABLE",
-                    "Codex account model list could not be read",
-                ) from exc
-            if (
-                not isinstance(result, dict)
-                or not set(result) <= {"data", "nextCursor"}
-                or "data" not in result
-                or not isinstance(result["data"], list)
-                or len(result["data"]) > 100
-            ):
-                raise ModelCatalogError(
-                    "MODEL_LIST_INVALID",
-                    "Codex account model list is malformed",
-                )
-            for row in result["data"]:
-                model, efforts = _account_model_record(row)
-                if model in observed:
-                    raise ModelCatalogError(
-                        "MODEL_LIST_INVALID",
-                        "Codex account model list contains a duplicate",
-                    )
-                observed[model] = efforts
-                if len(observed) > MAX_MODEL_LIST_ROWS:
-                    raise ModelCatalogError(
-                        "MODEL_LIST_INVALID",
-                        "Codex account model list exceeds the row limit",
-                    )
-            next_cursor = result.get("nextCursor")
-            if next_cursor is None:
-                return observed
-            if (
-                not isinstance(next_cursor, str)
-                or not next_cursor
-                or len(next_cursor.encode("utf-8")) > 4096
-                or next_cursor in seen_cursors
-            ):
+        return read_account_model_pages(client.call)
+
+
+def read_account_model_pages(
+    call: Callable[[str, Mapping[str, object]], object],
+) -> dict[str, frozenset[str]]:
+    """Читает все страницы каталога через один предоставленный сеанс."""
+
+    if not callable(call):
+        raise TypeError("account model call must be callable")
+    observed: dict[str, frozenset[str]] = {}
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    for _page in range(MAX_MODEL_LIST_PAGES):
+        parameters: dict[str, object] = {
+            "includeHidden": True,
+            "limit": 100,
+        }
+        if cursor is not None:
+            parameters["cursor"] = cursor
+        try:
+            result = call("model/list", parameters)
+        except AppServerError as exc:
+            raise ModelCatalogError(
+                "MODEL_LIST_UNAVAILABLE",
+                "Codex account model list could not be read",
+            ) from exc
+        if (
+            not isinstance(result, dict)
+            or "data" not in result
+            or not isinstance(result["data"], list)
+            or len(result["data"]) > 100
+        ):
+            raise ModelCatalogError(
+                "MODEL_LIST_INVALID",
+                "Codex account model list is malformed",
+            )
+        for row in result["data"]:
+            model, efforts = _account_model_record(row)
+            if model in observed:
                 raise ModelCatalogError(
                     "MODEL_LIST_INVALID",
-                    "Codex account model cursor is invalid",
+                    "Codex account model list contains a duplicate",
                 )
-            seen_cursors.add(next_cursor)
-            cursor = next_cursor
-        raise ModelCatalogError(
-            "MODEL_LIST_INVALID",
-            "Codex account model list exceeds the page limit",
-        )
+            observed[model] = efforts
+            if len(observed) > MAX_MODEL_LIST_ROWS:
+                raise ModelCatalogError(
+                    "MODEL_LIST_INVALID",
+                    "Codex account model list exceeds the row limit",
+                )
+        next_cursor = result.get("nextCursor")
+        if next_cursor is None:
+            return observed
+        if (
+            not isinstance(next_cursor, str)
+            or not next_cursor
+            or len(next_cursor.encode("utf-8")) > 4096
+            or next_cursor in seen_cursors
+        ):
+            raise ModelCatalogError(
+                "MODEL_LIST_INVALID",
+                "Codex account model cursor is invalid",
+            )
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+    raise ModelCatalogError(
+        "MODEL_LIST_INVALID",
+        "Codex account model list exceeds the page limit",
+    )
 
 
 def parse_model_catalog(payload: bytes) -> dict[str, frozenset[str]]:
