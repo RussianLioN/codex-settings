@@ -34,6 +34,7 @@ from codex_smart_subagents.activation_gateway_v2 import (  # noqa: E402
     GatewayUnavailable,
     _ProofError,
     _read_owned_json,
+    _refresh_absence_proof,
     _validate_original_backup,
     clean_ordinary_environment,
     run_permanent_gateway,
@@ -78,6 +79,17 @@ class _GatewayDeadlineClock:
 
     def advance(self, seconds: float) -> None:
         self.value += int(seconds * 1_000_000_000)
+
+
+class _StatOverride:
+    def __init__(self, original: os.stat_result, **overrides: int) -> None:
+        self._original = original
+        self._overrides = overrides
+
+    def __getattr__(self, name: str):
+        if name in self._overrides:
+            return self._overrides[name]
+        return getattr(self._original, name)
 
 
 def _write_json(path: Path, value: object, mode: int = 0o600) -> None:
@@ -1201,6 +1213,123 @@ class ActivationResolverTests(unittest.TestCase):
             self.fixture.controller_identity,
             binding.controller_row["controller_identity"],
         )
+
+    def test_snapshot_device_drift_after_reboot_is_accepted(self) -> None:
+        original_verify = gateway_module._verify_private_file
+
+        def verify_with_device_drift(path, **kwargs):
+            info = original_verify(path, **kwargs)
+            if path == self.fixture.snapshot:
+                return _StatOverride(info, st_dev=info.st_dev + 1)
+            return info
+
+        with patch.object(
+            gateway_module,
+            "_verify_private_file",
+            side_effect=verify_with_device_drift,
+        ):
+            interface = self.fixture.resolver()._validate_interface(
+                self.fixture.interface_evidence,
+                identity=self.fixture.activation_document["identity"],
+                manifest=self.fixture.manifest,
+            )
+
+        self.assertEqual(self.fixture.interface_evidence, interface)
+
+    def test_snapshot_device_drift_does_not_hide_inode_change(self) -> None:
+        original_verify = gateway_module._verify_private_file
+
+        def verify_with_identity_change(path, **kwargs):
+            info = original_verify(path, **kwargs)
+            if path == self.fixture.snapshot:
+                return _StatOverride(
+                    info,
+                    st_dev=info.st_dev + 1,
+                    st_ino=info.st_ino + 1,
+                )
+            return info
+
+        with patch.object(
+            gateway_module,
+            "_verify_private_file",
+            side_effect=verify_with_identity_change,
+        ):
+            with self.assertRaisesRegex(_ProofError, "SNAPSHOT_MISMATCH"):
+                self.fixture.resolver()._validate_interface(
+                    self.fixture.interface_evidence,
+                    identity=self.fixture.activation_document["identity"],
+                    manifest=self.fixture.manifest,
+                )
+
+    def test_database_device_drift_after_reboot_is_accepted(self) -> None:
+        original_lstat = os.lstat
+
+        def lstat_with_device_drift(path, *args, **kwargs):
+            info = original_lstat(path, *args, **kwargs)
+            if Path(path) == self.fixture.database_path:
+                return _StatOverride(info, st_dev=info.st_dev + 1)
+            return info
+
+        with patch.object(
+            gateway_module.os,
+            "lstat",
+            side_effect=lstat_with_device_drift,
+        ):
+            binding, _, _ = self.fixture.resolver()._validate_database(
+                self.fixture.receipt["databaseBinding"],
+                identity=self.fixture.activation_document["identity"],
+                interface=self.fixture.interface_evidence,
+                state_home=self.fixture.state_home,
+                marketplace=self.fixture.marketplace,
+            )
+
+        self.assertEqual(self.fixture.receipt["databaseBinding"], binding)
+
+    def test_receipt_projection_device_drift_after_reboot_is_accepted(self) -> None:
+        original_lstat = os.lstat
+        durable_paths = {
+            self.fixture.layout.manifest_path,
+            self.fixture.activation_dir,
+            self.fixture.activation_path,
+        }
+
+        def lstat_with_device_drift(path, *args, **kwargs):
+            info = original_lstat(path, *args, **kwargs)
+            if Path(path) in durable_paths:
+                return _StatOverride(info, st_dev=info.st_dev + 1)
+            return info
+
+        with patch.object(
+            gateway_module.os,
+            "lstat",
+            side_effect=lstat_with_device_drift,
+        ):
+            self.fixture.resolver()._validate_receipt_projections(
+                self.fixture.receipt,
+                manifest=self.fixture.manifest,
+                activation=self.fixture.activation_document,
+                activation_dir=self.fixture.activation_dir,
+                database_binding=self.fixture.receipt["databaseBinding"],
+            )
+
+    def test_absence_parent_device_drift_after_reboot_is_accepted(self) -> None:
+        original_fstat = os.fstat
+
+        def fstat_with_device_drift(descriptor):
+            info = original_fstat(descriptor)
+            return _StatOverride(info, st_dev=info.st_dev + 1)
+
+        with patch.object(
+            gateway_module.os,
+            "fstat",
+            side_effect=fstat_with_device_drift,
+        ):
+            observed = _refresh_absence_proof(
+                self.fixture.receipt["journalAbsenceTarget"],
+                expected_journal=self.fixture.layout.journal_path,
+            )
+
+        self.assertEqual(self.fixture.receipt["journalAbsenceTarget"], observed)
 
     def test_each_binding_mismatch_closes_to_ordinary_mode(self) -> None:
         cases = {

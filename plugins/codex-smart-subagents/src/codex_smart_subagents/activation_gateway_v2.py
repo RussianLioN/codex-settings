@@ -720,7 +720,6 @@ class ActivationResolver:
             "size": info.st_size,
             "mode": stat.S_IMODE(info.st_mode),
             "uid": info.st_uid,
-            "device": info.st_dev,
             "inode": info.st_ino,
             "mtimeNs": str(info.st_mtime_ns),
         }
@@ -832,6 +831,16 @@ class ActivationResolver:
         dict[str, object],
         dict[str, object],
     ]:
+        claimed_binding_value = claimed_binding.get("value")
+        if type(claimed_binding_value) is not dict:
+            raise _ProofError(
+                "DATABASE_BINDING_MISMATCH",
+                "database binding value is invalid",
+            )
+        captured_device = _safe_integer(
+            claimed_binding_value.get("device"),
+            "DATABASE_BINDING_MISMATCH",
+        )
         database_identity = identity["database"]
         database_path = _absolute_path(
             database_identity["absolutePath"], "DATABASE_BINDING_MISMATCH"
@@ -977,7 +986,7 @@ class ActivationResolver:
         )
         binding_value = {
             "path": str(database_path),
-            "device": after.st_dev,
+            "device": captured_device,
             "inode": after.st_ino,
             "ownerUid": after.st_uid,
             "ownerGid": after.st_gid,
@@ -1034,6 +1043,17 @@ class ActivationResolver:
                 "MANIFEST_BINDING_MISMATCH",
                 "receipt manifest projection is invalid",
             )
+        claimed_manifest_file = claimed_manifest_value.get("file")
+        if type(claimed_manifest_file) is not dict:
+            raise _ProofError(
+                "MANIFEST_BINDING_MISMATCH",
+                "receipt manifest file projection is invalid",
+            )
+        manifest_file = _file_projection(self.layout.manifest_path)
+        manifest_file["device"] = _safe_integer(
+            claimed_manifest_file.get("device"),
+            "MANIFEST_BINDING_MISMATCH",
+        )
         manifest_semantic = _sha256(
             claimed_manifest_value.get("semanticFingerprint"),
             "MANIFEST_BINDING_MISMATCH",
@@ -1052,7 +1072,7 @@ class ActivationResolver:
                 "receipt semantic fingerprint differs from the live manifest",
             )
         manifest_value = {
-            "file": _file_projection(self.layout.manifest_path),
+            "file": manifest_file,
             "schemaVersion": 2,
             "installationId": manifest["installationId"],
             "release": _RELEASE,
@@ -1078,9 +1098,32 @@ class ActivationResolver:
             "databaseIdentityFingerprint"
         ]
         identity = activation["identity"]
+        claimed_activation_value = receipt["activation"].get("value")
+        if type(claimed_activation_value) is not dict:
+            raise _ProofError(
+                "ACTIVATION_BINDING_MISMATCH",
+                "receipt activation projection is invalid",
+            )
+        claimed_directory = claimed_activation_value.get("directory")
+        claimed_activation_file = claimed_activation_value.get("activationFile")
+        if type(claimed_directory) is not dict or type(claimed_activation_file) is not dict:
+            raise _ProofError(
+                "ACTIVATION_BINDING_MISMATCH",
+                "receipt activation filesystem projection is invalid",
+            )
+        activation_directory = _tree_projection(activation_dir)
+        activation_directory["device"] = _safe_integer(
+            claimed_directory.get("device"),
+            "ACTIVATION_BINDING_MISMATCH",
+        )
+        activation_file = _file_projection(activation_dir / "activation.json")
+        activation_file["device"] = _safe_integer(
+            claimed_activation_file.get("device"),
+            "ACTIVATION_BINDING_MISMATCH",
+        )
         activation_value = {
-            "directory": _tree_projection(activation_dir),
-            "activationFile": _file_projection(activation_dir / "activation.json"),
+            "directory": activation_directory,
+            "activationFile": activation_file,
             "activationId": activation["activationId"],
             "activationFingerprint": activation["activationFingerprint"],
             "generationId": identity["generationId"],
@@ -1952,7 +1995,6 @@ def _validate_original_backup(value, code: str) -> None:
     if kind == "regular":
         _sha256(value["sha256"], code)
         observed = (
-            info.st_dev,
             info.st_ino,
             info.st_uid,
             info.st_gid,
@@ -1962,7 +2004,6 @@ def _validate_original_backup(value, code: str) -> None:
             _hash_file(path),
         )
         expected = (
-            value["device"],
             value["inode"],
             value["ownerUid"],
             value["ownerGid"],
@@ -1978,7 +2019,6 @@ def _validate_original_backup(value, code: str) -> None:
     if kind == "directory":
         _sha256(value["treeSha256"], code)
         observed = (
-            info.st_dev,
             info.st_ino,
             info.st_uid,
             info.st_gid,
@@ -1987,7 +2027,6 @@ def _validate_original_backup(value, code: str) -> None:
             _tree_sha256(path),
         )
         expected = (
-            value["device"],
             value["inode"],
             value["ownerUid"],
             value["ownerGid"],
@@ -2010,7 +2049,6 @@ def _validate_original_backup(value, code: str) -> None:
         raise _ProofError(code, "original backup symlink target is invalid")
     parent_info = os.lstat(path.parent)
     observed = (
-        parent_info.st_dev,
         parent_info.st_ino,
         info.st_uid,
         info.st_gid,
@@ -2018,7 +2056,6 @@ def _validate_original_backup(value, code: str) -> None:
         os.readlink(path) if stat.S_ISLNK(info.st_mode) else None,
     )
     expected = (
-        value["parentDevice"],
         value["parentInode"],
         value["ownerUid"],
         value["ownerGid"],
@@ -2224,10 +2261,8 @@ def _refresh_absence_proof(value, *, expected_journal: Path) -> dict[str, object
     )
     try:
         info = os.fstat(descriptor)
-        if (info.st_dev, info.st_ino) != (
-            entry["parentDevice"],
-            entry["parentInode"],
-        ):
+        _safe_integer(entry["parentDevice"], "ABSENCE_PROOF_MISMATCH")
+        if info.st_ino != entry["parentInode"]:
             raise _ProofError(
                 "ABSENCE_PROOF_MISMATCH", "absence parent identity differs"
             )

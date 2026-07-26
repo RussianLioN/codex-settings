@@ -373,6 +373,74 @@ class _InstallationFixture:
         receipt_path.write_bytes(canonical_json_bytes(receipt))
         receipt_path.chmod(0o600)
 
+    def shift_persisted_devices(self, delta: int) -> None:
+        receipt_dir = self.receipts_root / INSTALLATION_ID
+        for receipt_path in receipt_dir.glob("*.commit.json"):
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+            activation_projection = receipt["activation"]
+            activation_value = activation_projection["value"]
+            activation_value["directory"]["device"] += delta
+            activation_value["activationFile"]["device"] += delta
+            activation_projection["valueFingerprint"] = domain_fingerprint(
+                "codex-smart/test-projection/v2",
+                {
+                    key: value
+                    for key, value in activation_projection.items()
+                    if key != "valueFingerprint"
+                },
+            )
+            database_projection = receipt["databaseBinding"]
+            database_projection["value"]["device"] += delta
+            database_projection["valueFingerprint"] = domain_fingerprint(
+                "codex-smart/test-projection/v2",
+                {
+                    key: value
+                    for key, value in database_projection.items()
+                    if key != "valueFingerprint"
+                },
+            )
+            receipt["receiptFingerprint"] = domain_fingerprint(
+                "codex-smart/activation-commit-receipt/v2",
+                {
+                    key: value
+                    for key, value in receipt.items()
+                    if key != "receiptFingerprint"
+                },
+            )
+            receipt_path.write_bytes(canonical_json_bytes(receipt))
+
+    def shift_persisted_directory_inode(
+        self,
+        activation_id: str,
+        delta: int,
+    ) -> None:
+        operation_id = self.operation_ids[activation_id]
+        receipt_path = (
+            self.receipts_root
+            / INSTALLATION_ID
+            / f"{operation_id}.commit.json"
+        )
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        activation_projection = receipt["activation"]
+        activation_projection["value"]["directory"]["inode"] += delta
+        activation_projection["valueFingerprint"] = domain_fingerprint(
+            "codex-smart/test-projection/v2",
+            {
+                key: value
+                for key, value in activation_projection.items()
+                if key != "valueFingerprint"
+            },
+        )
+        receipt["receiptFingerprint"] = domain_fingerprint(
+            "codex-smart/activation-commit-receipt/v2",
+            {
+                key: value
+                for key, value in receipt.items()
+                if key != "receiptFingerprint"
+            },
+        )
+        receipt_path.write_bytes(canonical_json_bytes(receipt))
+
     def _write_manifest(self) -> None:
         manifest = {
             "schemaVersion": 2,
@@ -478,6 +546,43 @@ class InstallerMaintenanceV2Tests(unittest.TestCase):
         self.assertIn(self.fixture.database_path, inventory.retained_paths)
         self.assertIn(self.fixture.backups_root, inventory.retained_paths)
         self.assertIn(self.fixture.quarantine_root, inventory.retained_paths)
+
+    def test_inventory_accepts_persisted_device_drift_after_reboot(self) -> None:
+        self.fixture.shift_persisted_devices(1)
+
+        inventory = inspect_maintenance_inventory_v2(
+            self.fixture.layout,
+            registrations=self.fixture.registrations.callbacks,
+        )
+
+        self.assertEqual((), inventory.issues)
+        self.assertEqual((STALE_ID,), inventory.cleanup_candidate_ids)
+
+    def test_cleanup_accepts_persisted_device_drift_after_reboot(self) -> None:
+        self.fixture.shift_persisted_devices(1)
+
+        result = cleanup_inactive_activations_v2(
+            self.fixture.layout,
+            execute=True,
+            now=lambda: NOW,
+            id_factory=lambda _prefix: "cl2_" + "a" * 32,
+        )
+
+        self.assertEqual("cleaned", result.status)
+        self.assertFalse((self.fixture.activations_root / STALE_ID).exists())
+
+    def test_inventory_still_rejects_persisted_inode_drift(self) -> None:
+        self.fixture.shift_persisted_directory_inode(STALE_ID, 1)
+
+        inventory = inspect_maintenance_inventory_v2(
+            self.fixture.layout,
+            registrations=self.fixture.registrations.callbacks,
+        )
+
+        self.assertIn(
+            "ACTIVATION_PROJECTION_CHANGED",
+            {issue.code for issue in inventory.issues},
+        )
 
     def test_cleanup_preview_has_no_effect(self) -> None:
         before = _snapshot(self.root)

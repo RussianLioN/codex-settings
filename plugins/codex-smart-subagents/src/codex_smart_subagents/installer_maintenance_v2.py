@@ -361,7 +361,10 @@ def inspect_maintenance_inventory_v2(
         except (OSError, InstallerMaintenanceV2Error) as exc:
             _issue(issues, "ACTIVATION_PROJECTION_CHANGED", owned.directory, str(exc))
             continue
-        if observed != dict(owned.directory_projection):
+        if not _durable_projection_matches(
+            observed,
+            owned.directory_projection,
+        ):
             _issue(
                 issues,
                 "ACTIVATION_PROJECTION_CHANGED",
@@ -788,7 +791,6 @@ def _validate_database_binding(
         _issue(issues, "DATABASE_BINDING_CHANGED", path, str(exc))
         return
     expected = (
-        value.get("device"),
         value.get("inode"),
         value.get("ownerUid"),
         value.get("ownerGid"),
@@ -796,14 +798,17 @@ def _validate_database_binding(
         value.get("linkCount"),
     )
     observed = (
-        info.st_dev,
         info.st_ino,
         info.st_uid,
         info.st_gid,
         f"0{stat.S_IMODE(info.st_mode):03o}",
         info.st_nlink,
     )
-    if not stat.S_ISREG(info.st_mode) or expected != observed:
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or not _captured_device_is_valid(value.get("device"))
+        or expected != observed
+    ):
         _issue(issues, "DATABASE_BINDING_CHANGED", path, "inode или метаданные базы изменились")
 
 
@@ -909,6 +914,24 @@ def _file_projection(path: Path) -> JsonObject:
         "size": info.st_size,
         "sha256": _sha256_file(path),
     }
+
+
+def _captured_device_is_valid(value: object) -> bool:
+    return type(value) is int and 0 <= value <= 9_007_199_254_740_991
+
+
+def _durable_projection_matches(
+    observed: Mapping[str, Any],
+    captured: Mapping[str, Any],
+) -> bool:
+    if set(observed) != set(captured):
+        return False
+    if not _captured_device_is_valid(captured.get("device")):
+        return False
+    return all(
+        key == "device" or observed[key] == captured[key]
+        for key in observed
+    )
 
 
 def _sha256_file(path: Path) -> str:
@@ -1240,7 +1263,10 @@ def _execute_cleanup_journal(
                 continue
             if _path_exists(path):
                 observed = _tree_projection(path)
-                if observed != item["projection"]:
+                if not _durable_projection_matches(
+                    observed,
+                    item["projection"],
+                ):
                     raise InstallerMaintenanceV2Error(
                         "ACTIVATION_PROJECTION_CHANGED",
                         f"объект cleanup изменился: {path}",
@@ -1603,10 +1629,11 @@ def _delete_private_file(path: Path) -> None:
 
 def _remove_tree_exact(path: Path, expected: Mapping[str, Any]) -> None:
     observed = _tree_projection(path)
-    if observed != dict(expected):
+    if not _durable_projection_matches(observed, expected):
         raise InstallerMaintenanceV2Error(
             "ACTIVATION_PROJECTION_CHANGED", f"дерево изменилось перед удалением: {path}"
         )
+    current_identity = (observed["device"], observed["inode"])
     parent_descriptor = os.open(
         path.parent,
         os.O_RDONLY
@@ -1625,10 +1652,7 @@ def _remove_tree_exact(path: Path, expected: Mapping[str, Any]) -> None:
             dir_fd=parent_descriptor,
         )
         opened = os.fstat(tree_descriptor)
-        if (opened.st_dev, opened.st_ino) != (
-            expected.get("device"),
-            expected.get("inode"),
-        ):
+        if (opened.st_dev, opened.st_ino) != current_identity:
             raise InstallerMaintenanceV2Error(
                 "ACTIVATION_PROJECTION_CHANGED", "корневой inode заменён"
             )
@@ -1637,10 +1661,10 @@ def _remove_tree_exact(path: Path, expected: Mapping[str, Any]) -> None:
         os.close(tree_descriptor)
         tree_descriptor = -1
         final = os.stat(path.name, dir_fd=parent_descriptor, follow_symlinks=False)
-        if (final.st_dev, final.st_ino) != (
-            expected.get("device"),
-            expected.get("inode"),
-        ) or not stat.S_ISDIR(final.st_mode):
+        if (
+            (final.st_dev, final.st_ino) != current_identity
+            or not stat.S_ISDIR(final.st_mode)
+        ):
             raise InstallerMaintenanceV2Error(
                 "ACTIVATION_PROJECTION_CHANGED", "корень заменён во время удаления"
             )
@@ -2460,11 +2484,17 @@ def _verify_uninstall_retained_data(
         or database.get("schemaId") != "database-binding-v2"
         or not isinstance(database.get("value"), Mapping)
         or not _is_within(Path(str(database["value"].get("path"))), layout.databases_root)
-        or _file_binding_observation(Path(str(database["value"]["path"])))
-        != _binding_tuple(database["value"])
+        or not _durable_file_binding_matches(
+            Path(str(database["value"]["path"])),
+            database["value"],
+        )
         or not isinstance(recovery, Mapping)
         or recovery.get("schemaId") != "file-object-v2"
-        or recovery.get("value") != _file_projection(layout.recovery_entrypoint)
+        or not isinstance(recovery.get("value"), Mapping)
+        or not _durable_projection_matches(
+            _file_projection(layout.recovery_entrypoint),
+            recovery["value"],
+        )
     ):
         raise InstallerMaintenanceV2Error(
             "RETAINED_DATA_CHANGED", "сохраняемые данные изменились"
@@ -2552,7 +2582,10 @@ def _execute_uninstall_journal(
             changed = False
             if _path_exists(path):
                 projection = item["projection"]["value"]
-                if _tree_projection(path) != projection:
+                if not _durable_projection_matches(
+                    _tree_projection(path),
+                    projection,
+                ):
                     raise InstallerMaintenanceV2Error(
                         "ACTIVATION_PROJECTION_CHANGED",
                         f"активация изменилась перед удалением: {path}",
@@ -2735,7 +2768,10 @@ def _execute_file_removal(
         return journal, False
     changed = False
     if _path_exists(path):
-        if _file_projection(path) != dict(expected):
+        if not _durable_projection_matches(
+            _file_projection(path),
+            expected,
+        ):
             raise InstallerMaintenanceV2Error(
                 "FILE_PROJECTION_CHANGED", f"файл изменился: {path}"
             )
@@ -2937,7 +2973,11 @@ def _verify_completed_uninstall(
             "codex-smart/installation-uninstall-receipt/v2", unsigned_receipt
         )
         or receipt_value.get("receiptFingerprint") != receipt.get("receiptFingerprint")
-        or receipt_value.get("file") != _file_projection(receipt_path)
+        or not isinstance(receipt_value.get("file"), Mapping)
+        or not _durable_projection_matches(
+            _file_projection(receipt_path),
+            receipt_value["file"],
+        )
         or canonical_json_bytes(tombstone.get("absenceProof"))
         != canonical_json_bytes(receipt.get("absenceProof"))
     ):
@@ -3003,8 +3043,11 @@ def _verify_retained_receipt(
     database_path = Path(str(database_value.get("path")))
     if (
         not _is_within(database_path, layout.databases_root)
-        or _file_binding_observation(database_path) != _binding_tuple(database_value)
-        or _file_projection(layout.recovery_entrypoint) != recovery_value
+        or not _durable_file_binding_matches(database_path, database_value)
+        or not _durable_projection_matches(
+            _file_projection(layout.recovery_entrypoint),
+            recovery_value,
+        )
     ):
         raise InstallerMaintenanceV2Error(
             "RETAINED_DATA_CHANGED", "сохранённый inode или точка восстановления изменены"
@@ -3061,7 +3104,7 @@ def _verify_absence_projection(projection: object) -> None:
             ) from exc
         if (
             entry.get("basename") != path.name
-            or entry.get("parentDevice") != parent.st_dev
+            or not _captured_device_is_valid(entry.get("parentDevice"))
             or entry.get("parentInode") != parent.st_ino
             or entry.get("absent") is not True
         ):
@@ -3072,7 +3115,6 @@ def _verify_absence_projection(projection: object) -> None:
 
 def _binding_tuple(value: Mapping[str, Any]) -> tuple[object, ...]:
     return (
-        value.get("device"),
         value.get("inode"),
         value.get("ownerUid"),
         value.get("ownerGid"),
@@ -3093,10 +3135,19 @@ def _file_binding_observation(path: Path) -> tuple[object, ...]:
             "RETAINED_DATA_CHANGED", f"путь базы не является файлом: {path}"
         )
     return (
-        info.st_dev,
         info.st_ino,
         info.st_uid,
         info.st_gid,
         f"0{stat.S_IMODE(info.st_mode):03o}",
         info.st_nlink,
+    )
+
+
+def _durable_file_binding_matches(
+    path: Path,
+    captured: Mapping[str, Any],
+) -> bool:
+    return (
+        _captured_device_is_valid(captured.get("device"))
+        and _file_binding_observation(path) == _binding_tuple(captured)
     )
