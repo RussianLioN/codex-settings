@@ -13,6 +13,8 @@ from typing import Any, Mapping
 from .activation_gateway_v2 import GatewayLayout, _file_projection, _tree_projection
 from .activation_transition_v2 import (
     ActivationTransitionProofV2,
+    _durable_filesystem_projection_matches,
+    _durable_manifest_projection_matches,
     _manifest_projection,
     _observe_link,
     _projection,
@@ -652,7 +654,10 @@ def _verify_stable_artifacts(snapshot: ActivationTransitionProofSnapshotV2) -> N
         hashlib.sha256(activation_raw).hexdigest()
         != snapshot.activation_raw_sha256
         or activation != dict(snapshot.activation_document)
-        or activation_tree != snapshot.activation_tree_projection
+        or not _durable_tree_projection_matches(
+            snapshot.activation_tree_projection,
+            activation_tree,
+        )
     ):
         _fail("stable activation tree changed")
     commit_raw, commit = _read_private_json_bytes(
@@ -660,12 +665,30 @@ def _verify_stable_artifacts(snapshot: ActivationTransitionProofSnapshotV2) -> N
         code="COMMIT_RECEIPT_CHANGED",
         require_canonical=True,
     )
+    commit_file = _file_projection(snapshot.commit_receipt_path)
+    commit_projection = _projection(
+        "receipt-object-v2",
+        {
+            "file": commit_file,
+            "receiptKind": commit["receiptKind"],
+            "installationId": commit["installationId"],
+            "operationId": commit["operationId"],
+            "receiptFingerprint": commit["receiptFingerprint"],
+        },
+        "codex-smart/receipt-object/v2",
+    )
     if (
         hashlib.sha256(commit_raw).hexdigest()
         != snapshot.commit_receipt_raw_sha256
         or commit != dict(snapshot.commit_receipt_document)
-        or _file_projection(snapshot.commit_receipt_path)
-        != dict(snapshot.commit_receipt_file_projection)
+        or not _durable_filesystem_projection_matches(
+            snapshot.commit_receipt_file_projection,
+            commit_file,
+        )
+        or not _durable_receipt_projection_matches(
+            snapshot.commit_receipt_projection,
+            commit_projection,
+        )
     ):
         _fail("stable commit receipt changed")
     installer_raw, installer = _read_private_json_bytes(
@@ -673,12 +696,24 @@ def _verify_stable_artifacts(snapshot: ActivationTransitionProofSnapshotV2) -> N
         code="INSTALLER_RECEIPT_CHANGED",
         require_canonical=False,
     )
+    installer_file = _file_projection(snapshot.installer_receipt_path)
+    installer_projection = _projection(
+        "file-object-v2",
+        installer_file,
+        "codex-smart/file-object/v2",
+    )
     if (
         hashlib.sha256(installer_raw).hexdigest()
         != snapshot.installer_receipt_raw_sha256
         or installer != dict(snapshot.installer_receipt_document)
-        or _file_projection(snapshot.installer_receipt_path)
-        != dict(snapshot.installer_receipt_file_projection)
+        or not _durable_filesystem_projection_matches(
+            snapshot.installer_receipt_file_projection,
+            installer_file,
+        )
+        or not _durable_file_projection_matches(
+            snapshot.installer_receipt_projection,
+            installer_projection,
+        )
     ):
         _fail("stable installer receipt changed")
     _validate_database_file_identity(snapshot.database_binding)
@@ -705,19 +740,43 @@ def _verify_transition_state(
     before_identity: tuple[int, int] | None = None,
     current_identity: tuple[int, int] | None = None,
 ) -> None:
+    def matches_current(expected: ProjectionV2) -> bool:
+        if kind == "activation_link":
+            return _durable_symlink_projection_matches(expected, current)
+        if kind == "manifest_commit":
+            return _durable_manifest_projection_matches(expected, current)
+        return current == expected
+
+    def before_identity_matches() -> bool:
+        if before_identity is None:
+            return True
+        if current_identity is None:
+            return False
+        if kind == "activation_link":
+            before_device, before_inode = before_identity
+            current_device, current_inode = current_identity
+            return (
+                _captured_device_is_valid(before_device)
+                and _captured_device_is_valid(current_device)
+                and current_inode == before_inode
+            )
+        return current_identity == before_identity
+
     if journal is None:
-        if current != captured_before or (
-            before_identity is not None and current_identity != before_identity
-        ):
+        if not matches_current(captured_before) or not before_identity_matches():
             _fail(f"{kind} changed without a durable journal")
         return
     steps = journal.get("steps")
     if type(steps) is not list:
         _fail("main journal has no steps")
-    matches = [step for step in steps if isinstance(step, Mapping) and step.get("kind") == kind]
-    if len(matches) != 1:
+    matching_steps = [
+        step
+        for step in steps
+        if isinstance(step, Mapping) and step.get("kind") == kind
+    ]
+    if len(matching_steps) != 1:
         _fail(f"main journal must contain exactly one {kind} step")
-    step = matches[0]
+    step = matching_steps[0]
     before = ProjectionV2.from_document(_object(step.get("before"), f"{kind}.before"))
     expected_after = ProjectionV2.from_document(
         _object(step.get("expectedAfter"), f"{kind}.expectedAfter")
@@ -725,19 +784,21 @@ def _verify_transition_state(
     if before != captured_before:
         _fail(f"{kind}.before differs from transition snapshot")
     state = step.get("state")
+    current_is_before = matches_current(before)
+    current_is_after = matches_current(expected_after)
     if state == "PLANNED":
-        accepted = current == before
+        accepted = current_is_before
         if before_identity is not None:
-            accepted = accepted and current_identity == before_identity
+            accepted = accepted and before_identity_matches()
     elif state == "INTENT_DURABLE":
-        accepted = current == before or current == expected_after
-        if current == before and before_identity is not None:
-            accepted = accepted and current_identity == before_identity
+        accepted = current_is_before or current_is_after
+        if current_is_before and before_identity is not None:
+            accepted = accepted and before_identity_matches()
     elif state == "COMPLETED":
         observed_after = ProjectionV2.from_document(
             _object(step.get("observedAfter"), f"{kind}.observedAfter")
         )
-        accepted = observed_after == expected_after and current == observed_after
+        accepted = observed_after == expected_after and matches_current(observed_after)
     else:
         _fail(f"{kind} has an unknown durable state")
     if not accepted:
@@ -770,15 +831,115 @@ def _verify_prepared_manifest_pair(
     expected_file = expected_after.value.get("file")
     if type(expected_file) is not dict:
         _fail("manifest expectedAfter has no file projection")
-    if current == before:
+    current_is_before = _durable_manifest_projection_matches(before, current)
+    current_is_after = _durable_manifest_projection_matches(expected_after, current)
+    if current_is_before:
         if source_projection is None:
             _fail("manifest target is before but prepared source is absent")
         normalized = copy.deepcopy(source_projection)
         normalized["path"] = str(target)
-        if normalized != expected_file:
+        if not _durable_filesystem_projection_matches(expected_file, normalized):
             _fail("prepared manifest source differs from expectedAfter inode")
-    elif current == expected_after and source_projection is not None:
+    elif current_is_after and source_projection is not None:
         _fail("manifest target is after but prepared source still exists")
+
+
+def _durable_tree_projection_matches(
+    captured: ProjectionV2,
+    observed: ProjectionV2,
+) -> bool:
+    return (
+        _durable_projection_header_matches(
+            captured,
+            observed,
+            "codex-smart/tree-object/v2",
+        )
+        and _durable_filesystem_projection_matches(captured.value, observed.value)
+    )
+
+
+def _durable_file_projection_matches(
+    captured: ProjectionV2,
+    observed: ProjectionV2,
+) -> bool:
+    return (
+        _durable_projection_header_matches(
+            captured,
+            observed,
+            "codex-smart/file-object/v2",
+        )
+        and _durable_filesystem_projection_matches(captured.value, observed.value)
+    )
+
+
+def _durable_receipt_projection_matches(
+    captured: ProjectionV2,
+    observed: ProjectionV2,
+) -> bool:
+    if not _durable_projection_header_matches(
+        captured,
+        observed,
+        "codex-smart/receipt-object/v2",
+    ):
+        return False
+    captured_file = captured.value.get("file")
+    observed_file = observed.value.get("file")
+    if not isinstance(observed_file, Mapping):
+        return False
+    if not _durable_filesystem_projection_matches(captured_file, observed_file):
+        return False
+    return all(
+        key == "file" or captured.value[key] == observed.value[key]
+        for key in observed.value
+    )
+
+
+def _durable_symlink_projection_matches(
+    captured: ProjectionV2,
+    observed: ProjectionV2,
+) -> bool:
+    if not _durable_projection_header_matches(
+        captured,
+        observed,
+        "codex-smart/symlink-object/v2",
+    ):
+        return False
+    parent_device = captured.value.get("parentDevice")
+    if not _captured_device_is_valid(parent_device):
+        return False
+    return all(
+        key == "parentDevice" or captured.value[key] == observed.value[key]
+        for key in observed.value
+    )
+
+
+def _captured_device_is_valid(value: object) -> bool:
+    return type(value) is int and 0 <= value <= 9_007_199_254_740_991
+
+
+def _durable_projection_header_matches(
+    captured: ProjectionV2,
+    observed: ProjectionV2,
+    domain: str,
+) -> bool:
+    return (
+        captured.schema_id == observed.schema_id
+        and captured.schema_sha256 == observed.schema_sha256
+        and set(captured.value) == set(observed.value)
+        and _projection_value_fingerprint_matches(captured, domain)
+    )
+
+
+def _projection_value_fingerprint_matches(
+    projection: ProjectionV2,
+    domain: str,
+) -> bool:
+    envelope = {
+        "schemaId": projection.schema_id,
+        "schemaSha256": projection.schema_sha256,
+        "value": copy.deepcopy(dict(projection.value)),
+    }
+    return projection.value_fingerprint == domain_fingerprint(domain, envelope)
 
 
 def _object(value: object, name: str) -> dict[str, Any]:

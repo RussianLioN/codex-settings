@@ -55,6 +55,13 @@ MAX_APP_SERVER_SESSION_REQUESTS = 128
 SANDBOX_RESULT_PREFIX = "CODEX_PERMISSION_CANARY_V1:"
 EXEC_RESULT_PREFIX = "CODEX_EXEC_PERMISSION_CANARY_V1:"
 EXEC_STDIN_NOTICE = b"Reading prompt from stdin...\n"
+_MODEL_REFRESH_TIMEOUT_NOTICE = re.compile(
+    rb"\d{4}-\d{2}-\d{2}T"
+    rb"\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z ERROR "
+    rb"codex_models_manager::manager: failed to refresh available models: "
+    rb"timeout waiting for child process to exit\n"
+)
+_MAX_MODEL_REFRESH_TIMEOUT_NOTICES = 4
 SANDBOX_CHECKS = (
     "snapshot_read_allowed",
     "snapshot_write_denied",
@@ -157,9 +164,9 @@ class StrictAppServerClient:
     ) -> None:
         self._codex = _safe_executable(codex_executable, "Codex")
         self._codex_home = _safe_owned_directory(codex_home, "CODEX_HOME")
-        self._home = _safe_private_directory(home, "app-server HOME")
+        self._home = _safe_owned_directory(home, "app-server HOME")
         self._tmpdir = _safe_private_directory(tmpdir, "app-server TMPDIR")
-        self._cwd = _safe_private_directory(cwd, "app-server cwd")
+        self._cwd = _safe_owned_directory(cwd, "app-server cwd")
         if (
             not isinstance(timeout_seconds, (int, float))
             or isinstance(timeout_seconds, bool)
@@ -458,6 +465,7 @@ class AppServerManagedConfigInspector:
                 cwd=runtime.work,
                 timeout_seconds=self._timeout_seconds,
                 max_output_bytes=self._max_output_bytes,
+                use_temporary_sqlite_home=False,
             )
             try:
                 result = client.call("configRequirements/read", {})
@@ -2009,7 +2017,7 @@ def _parse_exec_result(
 ) -> bool:
     if (
         result.exit_code != 0
-        or result.stderr not in {b"", EXEC_STDIN_NOTICE}
+        or not _expected_exec_stderr(result.stderr)
         or _NONCE.fullmatch(nonce) is None
     ):
         return False
@@ -2049,6 +2057,21 @@ def _parse_exec_result(
         ):
             return True
     return False
+
+
+def _expected_exec_stderr(stderr: bytes) -> bool:
+    if stderr in {b"", EXEC_STDIN_NOTICE}:
+        return True
+    lines = stderr.splitlines(keepends=True)
+    if lines and lines[0] == EXEC_STDIN_NOTICE:
+        lines = lines[1:]
+    return (
+        1 <= len(lines) <= _MAX_MODEL_REFRESH_TIMEOUT_NOTICES
+        and all(
+            _MODEL_REFRESH_TIMEOUT_NOTICE.fullmatch(line) is not None
+            for line in lines
+        )
+    )
 
 
 def _exec_command_matches(observed: str, expected: str) -> bool:

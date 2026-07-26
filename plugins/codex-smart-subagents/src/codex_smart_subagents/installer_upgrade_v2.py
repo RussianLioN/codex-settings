@@ -22,7 +22,7 @@ from .activation_gateway_v2 import (
 )
 from .activation_materializer_v2 import (
     _EXCLUDED_TREE_NAMES,
-    _POLICY_VECTOR_FILES,
+    _CONFIG_CONTRACT_VECTOR_FILES,
     StagedActivationV2,
     _RUNTIME_SCHEMA_FILES,
     _RUNTIME_VECTOR_FILES,
@@ -1830,7 +1830,7 @@ def installer_source_digest_from_materialized_activation_v2(
             f"docs/contracts/vectors/{name}": (
                 plugin_root / "config" / "contracts" / name
             )
-            for name in _POLICY_VECTOR_FILES
+            for name in _CONFIG_CONTRACT_VECTOR_FILES
         },
         **{
             f"docs/contracts/schemas/{name}": (

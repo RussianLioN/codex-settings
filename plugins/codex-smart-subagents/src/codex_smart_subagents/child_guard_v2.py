@@ -27,6 +27,7 @@ from .child_launch_v2 import (
 
 _MAX_FRAME_BYTES = 16 * 1024
 _MAX_CONFIG_FRAME_BYTES = 512 * 1024
+_COMMIT_FRAME_TIMEOUT_SECONDS = 180.0
 _READ_CHUNK = 64 * 1024
 _PROC_PIDTBSDINFO = 3
 
@@ -706,7 +707,7 @@ def _child_guard_main(
         )
         _close_fd(hello_fd)
         hello_fd = -1
-        commit = _read_frame(control_fd, 8.0)
+        commit = _read_frame(control_fd, _COMMIT_FRAME_TIMEOUT_SECONDS)
         expected = {
             "frame": "COMMIT",
             "protocolVersion": 2,

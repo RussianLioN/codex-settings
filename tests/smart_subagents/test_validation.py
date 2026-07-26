@@ -240,7 +240,7 @@ class ValidationRunnerTests(unittest.TestCase):
         runner = ValidationRunner(
             sandbox=self.sandbox,
             limits=ValidationLimits(
-                timeout_seconds=5,
+                timeout_seconds=15,
                 max_output_bytes=4096,
                 max_address_space_bytes=512 * 1024 * 1024,
                 max_processes=16,

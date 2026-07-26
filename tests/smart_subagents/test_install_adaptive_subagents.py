@@ -1599,6 +1599,45 @@ class InstallerV2ApplyTests(_InstallerBase):
 
 
 class InstallerV2RepeatTests(_InstallerBase):
+    def test_upgrade_recovers_current_controller_before_preparation(self) -> None:
+        events: list[str] = []
+
+        def supervise(*_args, **_kwargs):
+            events.append("supervise")
+            return self.ready_decision()
+
+        def capture(**_kwargs):
+            events.append("capture")
+            raise RuntimeError("stop after ordering proof")
+
+        with (
+            mock.patch.object(
+                self.installer,
+                "_supervise_existing",
+                side_effect=supervise,
+            ),
+            mock.patch.object(
+                self.installer,
+                "capture_activation_transition_proof_v2",
+                side_effect=capture,
+            ),
+            mock.patch.object(
+                self.installer,
+                "_try_reconcile_pending_committed_upgrade_v2",
+                return_value=None,
+            ),
+            self.assertRaisesRegex(RuntimeError, "ordering proof"),
+        ):
+            self.installer._upgrade_install(
+                self.layout,
+                previous_receipt={},
+                source_digest="a" * 64,
+                codex_version="0.144.4",
+                extra_environment=None,
+            )
+
+        self.assertEqual(["supervise", "capture"], events)
+
     def test_apply_resumes_first_install_after_registration_before_receipt(
         self,
     ) -> None:

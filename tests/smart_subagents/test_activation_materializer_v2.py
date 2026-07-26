@@ -318,6 +318,21 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
             result.bundled_catalog_path.read_text(encoding="utf-8")
         )
         self.assertEqual(result.bundled_catalog, catalog_projection)
+        installed_routing_input = (
+            result.activation_dir
+            / "marketplace"
+            / "plugins"
+            / "codex-smart-subagents"
+            / "config"
+            / "contracts"
+            / "routing-input-v2.json"
+        )
+        self.assertEqual(
+            (
+                ROOT / "docs" / "contracts" / "vectors" / "routing-input-v2.json"
+            ).read_bytes(),
+            installed_routing_input.read_bytes(),
+        )
         self.assertEqual(3, len(self.interface_executor.commands))
         self.assertTrue(
             all(

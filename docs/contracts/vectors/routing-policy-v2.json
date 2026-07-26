@@ -2778,7 +2778,7 @@
         "hardFloor": "none",
         "hardBan": "none"
       },
-      "expected": "schema-invalid"
+      "expected": "policy-invalid"
     },
     {
       "name": "missing-criterion",

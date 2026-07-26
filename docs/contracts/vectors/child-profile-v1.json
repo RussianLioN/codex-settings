@@ -143,7 +143,7 @@
           {
             "slot": "shellEnvironmentSet",
             "prefix": "shell_environment_policy.set=",
-            "encoding": "canonical-json"
+            "encoding": "toml-inline-table"
           },
           {
             "literal": "-c"
@@ -278,8 +278,8 @@
           "classifier-strict-unknown-config"
         ]
       },
-      "canonicalUtf8": "{\"argvTemplate\":[{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"snapshotPath\"},{\"literal\":\"exec\"},{\"literal\":\"--ignore-user-config\"},{\"literal\":\"--ignore-rules\"},{\"literal\":\"--strict-config\"},{\"literal\":\"--ephemeral\"},{\"literal\":\"--json\"},{\"literal\":\"--skip-git-repo-check\"},{\"literal\":\"--model\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"model\"},{\"literal\":\"-C\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"workDir\"},{\"literal\":\"--output-schema\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"resultSchemaPath\"},{\"literal\":\"-c\"},{\"encoding\":\"json-string\",\"prefix\":\"model_reasoning_effort=\",\"slot\":\"reasoningEffort\"},{\"literal\":\"-c\"},{\"literal\":\"approval_policy=\\\"never\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"default_permissions=\\\"codex-smart-classifier\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionDescriptionConfig\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionFilesystemConfig\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionNetworkConfig\"},{\"literal\":\"-c\"},{\"literal\":\"project_root_markers=[]\"},{\"literal\":\"-c\"},{\"literal\":\"project_doc_max_bytes=0\"},{\"literal\":\"-c\"},{\"literal\":\"shell_environment_policy.inherit=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"canonical-json\",\"prefix\":\"shell_environment_policy.set=\",\"slot\":\"shellEnvironmentSet\"},{\"literal\":\"-c\"},{\"literal\":\"allow_login_shell=false\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_threads=1\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_depth=1\"},{\"literal\":\"-c\"},{\"literal\":\"web_search=\\\"disabled\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.environment=\\\"adaptive-child\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.log_user_prompt=false\"},{\"literal\":\"-c\"},{\"literal\":\"otel.metrics_exporter=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.trace_exporter=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"otelExporterConfig\"}],\"contractVersion\":\"codex-child-profile-v1\",\"disabledFeatures\":[\"apps\",\"auth_elicitation\",\"browser_use\",\"browser_use_external\",\"browser_use_full_cdp_access\",\"code_mode_host\",\"computer_use\",\"enable_fanout\",\"enable_mcp_apps\",\"goals\",\"hooks\",\"image_generation\",\"in_app_browser\",\"memories\",\"multi_agent\",\"multi_agent_v2\",\"plugins\",\"remote_plugin\",\"request_permissions_tool\",\"shell_snapshot\",\"shell_tool\",\"skill_mcp_dependency_install\",\"tool_call_mcp_elicitation\",\"tool_suggest\",\"unified_exec\",\"workspace_dependencies\"],\"environmentTemplate\":{\"CODEX_ADAPTIVE_CHILD\":{\"literal\":\"1\"},\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":{\"slot\":\"snapshotRoot\"},\"CODEX_HOME\":{\"slot\":\"codexHome\"},\"CODEX_SQLITE_HOME\":{\"slot\":\"codexSqliteHome\"},\"HOME\":{\"slot\":\"home\"},\"LANG\":{\"literal\":\"C\"},\"LC_ALL\":{\"literal\":\"C\"},\"NO_COLOR\":{\"literal\":\"1\"},\"OTEL_EXPORTER_OTLP_ENDPOINT\":{\"slot\":\"otelEndpoint\"},\"OTEL_EXPORTER_OTLP_HEADERS\":{\"secretSlot\":\"otelHeaders\"},\"PATH\":{\"literal\":\"/usr/bin:/bin:/usr/sbin:/sbin\"},\"TMPDIR\":{\"slot\":\"tmpDir\"}},\"negativeProbeIds\":[\"classifier-no-login-shell\",\"classifier-no-network\",\"classifier-no-subagents\",\"classifier-no-write\",\"classifier-prompt-cannot-enable-feature\",\"classifier-source-tree-unchanged\",\"classifier-strict-unknown-config\"],\"permissionProfileId\":\"codex-smart-classifier\",\"resultSchemaId\":\"boundary-result-v1\",\"role\":\"classifier\",\"sandboxMode\":\"read-only\",\"schemaVersion\":1}",
-      "fingerprint": "5f4e0d4806315e973cc2163eb9cc2c79144490b974adfabcbf8455f8fe661faa"
+      "canonicalUtf8": "{\"argvTemplate\":[{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"snapshotPath\"},{\"literal\":\"exec\"},{\"literal\":\"--ignore-user-config\"},{\"literal\":\"--ignore-rules\"},{\"literal\":\"--strict-config\"},{\"literal\":\"--ephemeral\"},{\"literal\":\"--json\"},{\"literal\":\"--skip-git-repo-check\"},{\"literal\":\"--model\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"model\"},{\"literal\":\"-C\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"workDir\"},{\"literal\":\"--output-schema\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"resultSchemaPath\"},{\"literal\":\"-c\"},{\"encoding\":\"json-string\",\"prefix\":\"model_reasoning_effort=\",\"slot\":\"reasoningEffort\"},{\"literal\":\"-c\"},{\"literal\":\"approval_policy=\\\"never\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"default_permissions=\\\"codex-smart-classifier\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionDescriptionConfig\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionFilesystemConfig\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionNetworkConfig\"},{\"literal\":\"-c\"},{\"literal\":\"project_root_markers=[]\"},{\"literal\":\"-c\"},{\"literal\":\"project_doc_max_bytes=0\"},{\"literal\":\"-c\"},{\"literal\":\"shell_environment_policy.inherit=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"toml-inline-table\",\"prefix\":\"shell_environment_policy.set=\",\"slot\":\"shellEnvironmentSet\"},{\"literal\":\"-c\"},{\"literal\":\"allow_login_shell=false\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_threads=1\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_depth=1\"},{\"literal\":\"-c\"},{\"literal\":\"web_search=\\\"disabled\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.environment=\\\"adaptive-child\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.log_user_prompt=false\"},{\"literal\":\"-c\"},{\"literal\":\"otel.metrics_exporter=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.trace_exporter=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"otelExporterConfig\"}],\"contractVersion\":\"codex-child-profile-v1\",\"disabledFeatures\":[\"apps\",\"auth_elicitation\",\"browser_use\",\"browser_use_external\",\"browser_use_full_cdp_access\",\"code_mode_host\",\"computer_use\",\"enable_fanout\",\"enable_mcp_apps\",\"goals\",\"hooks\",\"image_generation\",\"in_app_browser\",\"memories\",\"multi_agent\",\"multi_agent_v2\",\"plugins\",\"remote_plugin\",\"request_permissions_tool\",\"shell_snapshot\",\"shell_tool\",\"skill_mcp_dependency_install\",\"tool_call_mcp_elicitation\",\"tool_suggest\",\"unified_exec\",\"workspace_dependencies\"],\"environmentTemplate\":{\"CODEX_ADAPTIVE_CHILD\":{\"literal\":\"1\"},\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":{\"slot\":\"snapshotRoot\"},\"CODEX_HOME\":{\"slot\":\"codexHome\"},\"CODEX_SQLITE_HOME\":{\"slot\":\"codexSqliteHome\"},\"HOME\":{\"slot\":\"home\"},\"LANG\":{\"literal\":\"C\"},\"LC_ALL\":{\"literal\":\"C\"},\"NO_COLOR\":{\"literal\":\"1\"},\"OTEL_EXPORTER_OTLP_ENDPOINT\":{\"slot\":\"otelEndpoint\"},\"OTEL_EXPORTER_OTLP_HEADERS\":{\"secretSlot\":\"otelHeaders\"},\"PATH\":{\"literal\":\"/usr/bin:/bin:/usr/sbin:/sbin\"},\"TMPDIR\":{\"slot\":\"tmpDir\"}},\"negativeProbeIds\":[\"classifier-no-login-shell\",\"classifier-no-network\",\"classifier-no-subagents\",\"classifier-no-write\",\"classifier-prompt-cannot-enable-feature\",\"classifier-source-tree-unchanged\",\"classifier-strict-unknown-config\"],\"permissionProfileId\":\"codex-smart-classifier\",\"resultSchemaId\":\"boundary-result-v1\",\"role\":\"classifier\",\"sandboxMode\":\"read-only\",\"schemaVersion\":1}",
+      "fingerprint": "253a97da8791de3984c8098c61158e91d1c1c5a3f4b737c4822a000a49fddea6"
     },
     {
       "name": "reader",
@@ -409,7 +409,7 @@
           {
             "slot": "shellEnvironmentSet",
             "prefix": "shell_environment_policy.set=",
-            "encoding": "canonical-json"
+            "encoding": "toml-inline-table"
           },
           {
             "literal": "-c"
@@ -535,8 +535,8 @@
           "reader-strict-unknown-config"
         ]
       },
-      "canonicalUtf8": "{\"argvTemplate\":[{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"snapshotPath\"},{\"literal\":\"exec\"},{\"literal\":\"--ignore-user-config\"},{\"literal\":\"--ignore-rules\"},{\"literal\":\"--strict-config\"},{\"literal\":\"--ephemeral\"},{\"literal\":\"--json\"},{\"literal\":\"--skip-git-repo-check\"},{\"literal\":\"--model\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"model\"},{\"literal\":\"-C\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"workDir\"},{\"literal\":\"--output-schema\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"resultSchemaPath\"},{\"literal\":\"-c\"},{\"encoding\":\"json-string\",\"prefix\":\"model_reasoning_effort=\",\"slot\":\"reasoningEffort\"},{\"literal\":\"-c\"},{\"literal\":\"approval_policy=\\\"never\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"default_permissions=\\\"codex-smart-reader\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionDescriptionConfig\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionFilesystemConfig\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionNetworkConfig\"},{\"literal\":\"-c\"},{\"literal\":\"project_root_markers=[]\"},{\"literal\":\"-c\"},{\"literal\":\"project_doc_max_bytes=0\"},{\"literal\":\"-c\"},{\"literal\":\"shell_environment_policy.inherit=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"canonical-json\",\"prefix\":\"shell_environment_policy.set=\",\"slot\":\"shellEnvironmentSet\"},{\"literal\":\"-c\"},{\"literal\":\"allow_login_shell=false\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_threads=1\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_depth=1\"},{\"literal\":\"-c\"},{\"literal\":\"web_search=\\\"disabled\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.environment=\\\"adaptive-child\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.log_user_prompt=false\"},{\"literal\":\"-c\"},{\"literal\":\"otel.metrics_exporter=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.trace_exporter=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"otelExporterConfig\"}],\"contractVersion\":\"codex-child-profile-v1\",\"disabledFeatures\":[\"apps\",\"browser_use\",\"browser_use_external\",\"browser_use_full_cdp_access\",\"computer_use\",\"enable_fanout\",\"enable_mcp_apps\",\"hooks\",\"in_app_browser\",\"memories\",\"multi_agent\",\"multi_agent_v2\",\"plugins\",\"remote_plugin\",\"shell_snapshot\",\"skill_mcp_dependency_install\",\"workspace_dependencies\"],\"environmentTemplate\":{\"CODEX_ADAPTIVE_CHILD\":{\"literal\":\"1\"},\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":{\"slot\":\"snapshotRoot\"},\"CODEX_HOME\":{\"slot\":\"codexHome\"},\"CODEX_SQLITE_HOME\":{\"slot\":\"codexSqliteHome\"},\"HOME\":{\"slot\":\"home\"},\"LANG\":{\"literal\":\"C\"},\"LC_ALL\":{\"literal\":\"C\"},\"NO_COLOR\":{\"literal\":\"1\"},\"OTEL_EXPORTER_OTLP_ENDPOINT\":{\"slot\":\"otelEndpoint\"},\"OTEL_EXPORTER_OTLP_HEADERS\":{\"secretSlot\":\"otelHeaders\"},\"PATH\":{\"literal\":\"/usr/bin:/bin:/usr/sbin:/sbin\"},\"TMPDIR\":{\"slot\":\"tmpDir\"}},\"negativeProbeIds\":[\"reader-no-login-shell\",\"reader-no-network\",\"reader-no-subagents\",\"reader-no-write\",\"reader-prompt-cannot-enable-feature\",\"reader-source-tree-unchanged\",\"reader-strict-unknown-config\"],\"permissionProfileId\":\"codex-smart-reader\",\"resultSchemaId\":\"reader-result-v1\",\"role\":\"reader\",\"sandboxMode\":\"read-only\",\"schemaVersion\":1}",
-      "fingerprint": "420cc6149c82385171ba699854d9b033e415c4549349a6bcb0875d94111a47f6"
+      "canonicalUtf8": "{\"argvTemplate\":[{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"snapshotPath\"},{\"literal\":\"exec\"},{\"literal\":\"--ignore-user-config\"},{\"literal\":\"--ignore-rules\"},{\"literal\":\"--strict-config\"},{\"literal\":\"--ephemeral\"},{\"literal\":\"--json\"},{\"literal\":\"--skip-git-repo-check\"},{\"literal\":\"--model\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"model\"},{\"literal\":\"-C\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"workDir\"},{\"literal\":\"--output-schema\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"resultSchemaPath\"},{\"literal\":\"-c\"},{\"encoding\":\"json-string\",\"prefix\":\"model_reasoning_effort=\",\"slot\":\"reasoningEffort\"},{\"literal\":\"-c\"},{\"literal\":\"approval_policy=\\\"never\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"default_permissions=\\\"codex-smart-reader\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionDescriptionConfig\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionFilesystemConfig\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionNetworkConfig\"},{\"literal\":\"-c\"},{\"literal\":\"project_root_markers=[]\"},{\"literal\":\"-c\"},{\"literal\":\"project_doc_max_bytes=0\"},{\"literal\":\"-c\"},{\"literal\":\"shell_environment_policy.inherit=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"toml-inline-table\",\"prefix\":\"shell_environment_policy.set=\",\"slot\":\"shellEnvironmentSet\"},{\"literal\":\"-c\"},{\"literal\":\"allow_login_shell=false\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_threads=1\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_depth=1\"},{\"literal\":\"-c\"},{\"literal\":\"web_search=\\\"disabled\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.environment=\\\"adaptive-child\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.log_user_prompt=false\"},{\"literal\":\"-c\"},{\"literal\":\"otel.metrics_exporter=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.trace_exporter=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"otelExporterConfig\"}],\"contractVersion\":\"codex-child-profile-v1\",\"disabledFeatures\":[\"apps\",\"browser_use\",\"browser_use_external\",\"browser_use_full_cdp_access\",\"computer_use\",\"enable_fanout\",\"enable_mcp_apps\",\"hooks\",\"in_app_browser\",\"memories\",\"multi_agent\",\"multi_agent_v2\",\"plugins\",\"remote_plugin\",\"shell_snapshot\",\"skill_mcp_dependency_install\",\"workspace_dependencies\"],\"environmentTemplate\":{\"CODEX_ADAPTIVE_CHILD\":{\"literal\":\"1\"},\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":{\"slot\":\"snapshotRoot\"},\"CODEX_HOME\":{\"slot\":\"codexHome\"},\"CODEX_SQLITE_HOME\":{\"slot\":\"codexSqliteHome\"},\"HOME\":{\"slot\":\"home\"},\"LANG\":{\"literal\":\"C\"},\"LC_ALL\":{\"literal\":\"C\"},\"NO_COLOR\":{\"literal\":\"1\"},\"OTEL_EXPORTER_OTLP_ENDPOINT\":{\"slot\":\"otelEndpoint\"},\"OTEL_EXPORTER_OTLP_HEADERS\":{\"secretSlot\":\"otelHeaders\"},\"PATH\":{\"literal\":\"/usr/bin:/bin:/usr/sbin:/sbin\"},\"TMPDIR\":{\"slot\":\"tmpDir\"}},\"negativeProbeIds\":[\"reader-no-login-shell\",\"reader-no-network\",\"reader-no-subagents\",\"reader-no-write\",\"reader-prompt-cannot-enable-feature\",\"reader-source-tree-unchanged\",\"reader-strict-unknown-config\"],\"permissionProfileId\":\"codex-smart-reader\",\"resultSchemaId\":\"reader-result-v1\",\"role\":\"reader\",\"sandboxMode\":\"read-only\",\"schemaVersion\":1}",
+      "fingerprint": "3181b10f6f9cee3409ebc3e890da15035619e60a854644a5a747a9cb6e8856cb"
     },
     {
       "name": "writer",
@@ -666,7 +666,7 @@
           {
             "slot": "shellEnvironmentSet",
             "prefix": "shell_environment_policy.set=",
-            "encoding": "canonical-json"
+            "encoding": "toml-inline-table"
           },
           {
             "literal": "-c"
@@ -795,22 +795,22 @@
           "writer-strict-unknown-config"
         ]
       },
-      "canonicalUtf8": "{\"argvTemplate\":[{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"snapshotPath\"},{\"literal\":\"exec\"},{\"literal\":\"--ignore-user-config\"},{\"literal\":\"--ignore-rules\"},{\"literal\":\"--strict-config\"},{\"literal\":\"--ephemeral\"},{\"literal\":\"--json\"},{\"literal\":\"--skip-git-repo-check\"},{\"literal\":\"--model\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"model\"},{\"literal\":\"-C\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"workDir\"},{\"literal\":\"--output-schema\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"resultSchemaPath\"},{\"literal\":\"-c\"},{\"encoding\":\"json-string\",\"prefix\":\"model_reasoning_effort=\",\"slot\":\"reasoningEffort\"},{\"literal\":\"-c\"},{\"literal\":\"approval_policy=\\\"never\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"default_permissions=\\\"codex-smart-writer\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionDescriptionConfig\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionFilesystemConfig\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionNetworkConfig\"},{\"literal\":\"-c\"},{\"literal\":\"project_root_markers=[]\"},{\"literal\":\"-c\"},{\"literal\":\"project_doc_max_bytes=0\"},{\"literal\":\"-c\"},{\"literal\":\"shell_environment_policy.inherit=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"canonical-json\",\"prefix\":\"shell_environment_policy.set=\",\"slot\":\"shellEnvironmentSet\"},{\"literal\":\"-c\"},{\"literal\":\"allow_login_shell=false\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_threads=1\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_depth=1\"},{\"literal\":\"-c\"},{\"literal\":\"web_search=\\\"disabled\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.environment=\\\"adaptive-child\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.log_user_prompt=false\"},{\"literal\":\"-c\"},{\"literal\":\"otel.metrics_exporter=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.trace_exporter=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"otelExporterConfig\"}],\"contractVersion\":\"codex-child-profile-v1\",\"disabledFeatures\":[\"apps\",\"browser_use\",\"browser_use_external\",\"browser_use_full_cdp_access\",\"computer_use\",\"enable_fanout\",\"enable_mcp_apps\",\"hooks\",\"in_app_browser\",\"memories\",\"multi_agent\",\"multi_agent_v2\",\"plugins\",\"remote_plugin\",\"shell_snapshot\",\"skill_mcp_dependency_install\",\"workspace_dependencies\"],\"environmentTemplate\":{\"CODEX_ADAPTIVE_CHILD\":{\"literal\":\"1\"},\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":{\"slot\":\"snapshotRoot\"},\"CODEX_ADAPTIVE_WORKSPACE_ROOT\":{\"slot\":\"workspaceRoot\"},\"CODEX_HOME\":{\"slot\":\"codexHome\"},\"CODEX_SQLITE_HOME\":{\"slot\":\"codexSqliteHome\"},\"HOME\":{\"slot\":\"home\"},\"LANG\":{\"literal\":\"C\"},\"LC_ALL\":{\"literal\":\"C\"},\"NO_COLOR\":{\"literal\":\"1\"},\"OTEL_EXPORTER_OTLP_ENDPOINT\":{\"slot\":\"otelEndpoint\"},\"OTEL_EXPORTER_OTLP_HEADERS\":{\"secretSlot\":\"otelHeaders\"},\"PATH\":{\"literal\":\"/usr/bin:/bin:/usr/sbin:/sbin\"},\"TMPDIR\":{\"slot\":\"tmpDir\"}},\"negativeProbeIds\":[\"writer-no-login-shell\",\"writer-no-network\",\"writer-no-subagents\",\"writer-no-write-outside-quarantine\",\"writer-prompt-cannot-enable-feature\",\"writer-source-tree-unchanged\",\"writer-strict-unknown-config\"],\"permissionProfileId\":\"codex-smart-writer\",\"resultSchemaId\":\"writer-result-v1\",\"role\":\"writer\",\"sandboxMode\":\"workspace-write\",\"schemaVersion\":1}",
-      "fingerprint": "bee300cda286a7404b5beef425d8941b6f38f1e28ab8e79ed32449d536bee020"
+      "canonicalUtf8": "{\"argvTemplate\":[{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"snapshotPath\"},{\"literal\":\"exec\"},{\"literal\":\"--ignore-user-config\"},{\"literal\":\"--ignore-rules\"},{\"literal\":\"--strict-config\"},{\"literal\":\"--ephemeral\"},{\"literal\":\"--json\"},{\"literal\":\"--skip-git-repo-check\"},{\"literal\":\"--model\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"model\"},{\"literal\":\"-C\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"workDir\"},{\"literal\":\"--output-schema\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"resultSchemaPath\"},{\"literal\":\"-c\"},{\"encoding\":\"json-string\",\"prefix\":\"model_reasoning_effort=\",\"slot\":\"reasoningEffort\"},{\"literal\":\"-c\"},{\"literal\":\"approval_policy=\\\"never\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"default_permissions=\\\"codex-smart-writer\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionDescriptionConfig\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionFilesystemConfig\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"permissionNetworkConfig\"},{\"literal\":\"-c\"},{\"literal\":\"project_root_markers=[]\"},{\"literal\":\"-c\"},{\"literal\":\"project_doc_max_bytes=0\"},{\"literal\":\"-c\"},{\"literal\":\"shell_environment_policy.inherit=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"toml-inline-table\",\"prefix\":\"shell_environment_policy.set=\",\"slot\":\"shellEnvironmentSet\"},{\"literal\":\"-c\"},{\"literal\":\"allow_login_shell=false\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_threads=1\"},{\"literal\":\"-c\"},{\"literal\":\"agents.max_depth=1\"},{\"literal\":\"-c\"},{\"literal\":\"web_search=\\\"disabled\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.environment=\\\"adaptive-child\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.log_user_prompt=false\"},{\"literal\":\"-c\"},{\"literal\":\"otel.metrics_exporter=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"literal\":\"otel.trace_exporter=\\\"none\\\"\"},{\"literal\":\"-c\"},{\"encoding\":\"raw\",\"prefix\":\"\",\"slot\":\"otelExporterConfig\"}],\"contractVersion\":\"codex-child-profile-v1\",\"disabledFeatures\":[\"apps\",\"browser_use\",\"browser_use_external\",\"browser_use_full_cdp_access\",\"computer_use\",\"enable_fanout\",\"enable_mcp_apps\",\"hooks\",\"in_app_browser\",\"memories\",\"multi_agent\",\"multi_agent_v2\",\"plugins\",\"remote_plugin\",\"shell_snapshot\",\"skill_mcp_dependency_install\",\"workspace_dependencies\"],\"environmentTemplate\":{\"CODEX_ADAPTIVE_CHILD\":{\"literal\":\"1\"},\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":{\"slot\":\"snapshotRoot\"},\"CODEX_ADAPTIVE_WORKSPACE_ROOT\":{\"slot\":\"workspaceRoot\"},\"CODEX_HOME\":{\"slot\":\"codexHome\"},\"CODEX_SQLITE_HOME\":{\"slot\":\"codexSqliteHome\"},\"HOME\":{\"slot\":\"home\"},\"LANG\":{\"literal\":\"C\"},\"LC_ALL\":{\"literal\":\"C\"},\"NO_COLOR\":{\"literal\":\"1\"},\"OTEL_EXPORTER_OTLP_ENDPOINT\":{\"slot\":\"otelEndpoint\"},\"OTEL_EXPORTER_OTLP_HEADERS\":{\"secretSlot\":\"otelHeaders\"},\"PATH\":{\"literal\":\"/usr/bin:/bin:/usr/sbin:/sbin\"},\"TMPDIR\":{\"slot\":\"tmpDir\"}},\"negativeProbeIds\":[\"writer-no-login-shell\",\"writer-no-network\",\"writer-no-subagents\",\"writer-no-write-outside-quarantine\",\"writer-prompt-cannot-enable-feature\",\"writer-source-tree-unchanged\",\"writer-strict-unknown-config\"],\"permissionProfileId\":\"codex-smart-writer\",\"resultSchemaId\":\"writer-result-v1\",\"role\":\"writer\",\"sandboxMode\":\"workspace-write\",\"schemaVersion\":1}",
+      "fingerprint": "2bfca069f4869e873e85a483ce6d0c882a13cc14b21e5e72b9ad2801ede1de2a"
     }
   ],
   "concreteLaunch": {
     "schemaRef": "child-profile-v1.schema.json#/$defs/launchBinding",
     "trustedContextSchemaRef": "child-profile-v1.schema.json#/$defs/trustedLaunchContext",
     "profileResolution": "InterfaceEvidence.semantic.childProfiles[role]",
-    "shellEnvironmentSetProjection": "all nonSecretEnvironment entries in canonical-json-v1 order; OTEL_EXPORTER_OTLP_HEADERS is forbidden",
+    "shellEnvironmentSetProjection": "all nonSecretEnvironment entries in sorted TOML inline-table order; OTEL_EXPORTER_OTLP_HEADERS is forbidden",
     "positiveRoles": {
       "classifier": {
         "trustedContext": {
           "schemaVersion": 1,
           "contractVersion": "codex-trusted-launch-context-v1",
           "role": "classifier",
-          "compatibilityFingerprint": "bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9",
+          "compatibilityFingerprint": "34faaaff5f71c498383bb748a6db0459eb532b991cbd8783c5cf5d6d3ed91b97",
           "selectedPair": {
             "model": "gpt-5.6-luna",
             "reasoningEffort": "medium"
@@ -833,7 +833,7 @@
           "schemaVersion": 1,
           "contractVersion": "codex-child-launch-v1",
           "role": "classifier",
-          "compatibilityFingerprint": "bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9",
+          "compatibilityFingerprint": "34faaaff5f71c498383bb748a6db0459eb532b991cbd8783c5cf5d6d3ed91b97",
           "arguments": {
             "snapshotPath": "/private/codex",
             "model": "gpt-5.6-luna",
@@ -879,7 +879,7 @@
             "-c",
             "shell_environment_policy.inherit=\"none\"",
             "-c",
-            "shell_environment_policy.set={\"CODEX_ADAPTIVE_CHILD\":\"1\",\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":\"/private/snapshot-root\",\"CODEX_HOME\":\"/private/codex-home\",\"CODEX_SQLITE_HOME\":\"/private/sqlite-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"OTEL_EXPORTER_OTLP_ENDPOINT\":\"http://127.0.0.1:4318/fixture\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"}",
+            "shell_environment_policy.set={\"CODEX_ADAPTIVE_CHILD\"=\"1\",\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\"=\"/private/snapshot-root\",\"CODEX_HOME\"=\"/private/codex-home\",\"CODEX_SQLITE_HOME\"=\"/private/sqlite-home\",\"HOME\"=\"/private/home\",\"LANG\"=\"C\",\"LC_ALL\"=\"C\",\"NO_COLOR\"=\"1\",\"OTEL_EXPORTER_OTLP_ENDPOINT\"=\"http://127.0.0.1:4318/fixture\",\"PATH\"=\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\"=\"/private/tmp\"}",
             "-c",
             "allow_login_shell=false",
             "-c",
@@ -964,7 +964,7 @@
             "TMPDIR": "/private/tmp",
             "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318/fixture"
           },
-          "argvFingerprint": "1125dc0883f4b0f451328ea4bfb6b30d4b3c7edc1996cadb7c109908a7fc3fee",
+          "argvFingerprint": "fd14c4c897c73f49686d23b2b381d9ebe7cd06bd0d349668c4b777f44b0db544",
           "environmentFingerprint": "7d6517765e832554ef5655f5daede4cd91dd8c248387596f191bf2c0a18488a9",
           "secretSha256": "85ca20bbb5920a133e51b3d08c1079445ecb9fc4b40b328a3e73f1efbc34b36c"
         }
@@ -974,7 +974,7 @@
           "schemaVersion": 1,
           "contractVersion": "codex-trusted-launch-context-v1",
           "role": "reader",
-          "compatibilityFingerprint": "bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9",
+          "compatibilityFingerprint": "34faaaff5f71c498383bb748a6db0459eb532b991cbd8783c5cf5d6d3ed91b97",
           "selectedPair": {
             "model": "gpt-5.6-luna",
             "reasoningEffort": "medium"
@@ -997,7 +997,7 @@
           "schemaVersion": 1,
           "contractVersion": "codex-child-launch-v1",
           "role": "reader",
-          "compatibilityFingerprint": "bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9",
+          "compatibilityFingerprint": "34faaaff5f71c498383bb748a6db0459eb532b991cbd8783c5cf5d6d3ed91b97",
           "arguments": {
             "snapshotPath": "/private/codex",
             "model": "gpt-5.6-luna",
@@ -1043,7 +1043,7 @@
             "-c",
             "shell_environment_policy.inherit=\"none\"",
             "-c",
-            "shell_environment_policy.set={\"CODEX_ADAPTIVE_CHILD\":\"1\",\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":\"/private/snapshot-root\",\"CODEX_HOME\":\"/private/codex-home\",\"CODEX_SQLITE_HOME\":\"/private/sqlite-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"OTEL_EXPORTER_OTLP_ENDPOINT\":\"http://127.0.0.1:4318/fixture\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"}",
+            "shell_environment_policy.set={\"CODEX_ADAPTIVE_CHILD\"=\"1\",\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\"=\"/private/snapshot-root\",\"CODEX_HOME\"=\"/private/codex-home\",\"CODEX_SQLITE_HOME\"=\"/private/sqlite-home\",\"HOME\"=\"/private/home\",\"LANG\"=\"C\",\"LC_ALL\"=\"C\",\"NO_COLOR\"=\"1\",\"OTEL_EXPORTER_OTLP_ENDPOINT\"=\"http://127.0.0.1:4318/fixture\",\"PATH\"=\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\"=\"/private/tmp\"}",
             "-c",
             "allow_login_shell=false",
             "-c",
@@ -1110,7 +1110,7 @@
             "TMPDIR": "/private/tmp",
             "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318/fixture"
           },
-          "argvFingerprint": "4dc9604786d4710786514dba0eada57dc91116438eb3ef57858bda5849aa3853",
+          "argvFingerprint": "6765d48ad4848334b94996ad6235e13e0a99ef0d4a3b4b49d38424aa2f593e8d",
           "environmentFingerprint": "7d6517765e832554ef5655f5daede4cd91dd8c248387596f191bf2c0a18488a9",
           "secretSha256": "85ca20bbb5920a133e51b3d08c1079445ecb9fc4b40b328a3e73f1efbc34b36c"
         }
@@ -1120,7 +1120,7 @@
           "schemaVersion": 1,
           "contractVersion": "codex-trusted-launch-context-v1",
           "role": "writer",
-          "compatibilityFingerprint": "bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9",
+          "compatibilityFingerprint": "34faaaff5f71c498383bb748a6db0459eb532b991cbd8783c5cf5d6d3ed91b97",
           "selectedPair": {
             "model": "gpt-5.6-terra",
             "reasoningEffort": "high"
@@ -1144,7 +1144,7 @@
           "schemaVersion": 1,
           "contractVersion": "codex-child-launch-v1",
           "role": "writer",
-          "compatibilityFingerprint": "bcd05a2d2186dd367a9d1775779ba7aaaecab9903d83a9df3450557642c1f4c9",
+          "compatibilityFingerprint": "34faaaff5f71c498383bb748a6db0459eb532b991cbd8783c5cf5d6d3ed91b97",
           "arguments": {
             "snapshotPath": "/private/codex",
             "model": "gpt-5.6-terra",
@@ -1190,7 +1190,7 @@
             "-c",
             "shell_environment_policy.inherit=\"none\"",
             "-c",
-            "shell_environment_policy.set={\"CODEX_ADAPTIVE_CHILD\":\"1\",\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\":\"/private/snapshot-root\",\"CODEX_ADAPTIVE_WORKSPACE_ROOT\":\"/private/workspace\",\"CODEX_HOME\":\"/private/codex-home\",\"CODEX_SQLITE_HOME\":\"/private/sqlite-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"OTEL_EXPORTER_OTLP_ENDPOINT\":\"http://127.0.0.1:4318/fixture\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"}",
+            "shell_environment_policy.set={\"CODEX_ADAPTIVE_CHILD\"=\"1\",\"CODEX_ADAPTIVE_SNAPSHOT_ROOT\"=\"/private/snapshot-root\",\"CODEX_ADAPTIVE_WORKSPACE_ROOT\"=\"/private/workspace\",\"CODEX_HOME\"=\"/private/codex-home\",\"CODEX_SQLITE_HOME\"=\"/private/sqlite-home\",\"HOME\"=\"/private/home\",\"LANG\"=\"C\",\"LC_ALL\"=\"C\",\"NO_COLOR\"=\"1\",\"OTEL_EXPORTER_OTLP_ENDPOINT\"=\"http://127.0.0.1:4318/fixture\",\"PATH\"=\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\"=\"/private/tmp\"}",
             "-c",
             "allow_login_shell=false",
             "-c",
@@ -1258,7 +1258,7 @@
             "CODEX_ADAPTIVE_WORKSPACE_ROOT": "/private/workspace",
             "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318/fixture"
           },
-          "argvFingerprint": "9ad0e60eea1483da36e96da9afd7dca48503fca860502d69cc818c3b234f2ee9",
+          "argvFingerprint": "0942680d46a96bc095afe0e0b0858151d0dd71f4f518f8030e669c2f3594e1d2",
           "environmentFingerprint": "3fd5586f502caf82c047d5f84f79f02d0833b119acd70b632c4d7d0e6b22e712",
           "secretSha256": "85ca20bbb5920a133e51b3d08c1079445ecb9fc4b40b328a3e73f1efbc34b36c"
         }
@@ -1375,7 +1375,7 @@
       "mutation": {
         "kind": "replace",
         "pointer": "/reader",
-        "value": "5f4e0d4806315e973cc2163eb9cc2c79144490b974adfabcbf8455f8fe661faa"
+        "value": "253a97da8791de3984c8098c61158e91d1c1c5a3f4b737c4822a000a49fddea6"
       },
       "expected": "profile-resolution-invalid"
     },
@@ -1400,7 +1400,7 @@
       "rematerialized": {
         "argvIndex": 0,
         "argvValue": "/private/codex-other",
-        "argvFingerprint": "8ce6eca3f2992af064d8f2d6cafc293c85784585eb20ca2efdb269d62a22c35c"
+        "argvFingerprint": "2aad0fc9881d5bf98d99af07b8adc76b04887a3eb56cf2ce01c14f178a68916a"
       },
       "expected": "launch-schema-valid-context-invalid"
     },
@@ -1415,7 +1415,7 @@
       "rematerialized": {
         "argvIndex": 9,
         "argvValue": "gpt-5.6-terra",
-        "argvFingerprint": "87af639813248368ed2d459b0376c5882cb78baf2c55daba991061a263e73d44"
+        "argvFingerprint": "ed5d8b3ebae6f3af522dc70a407aafe7d1e2c730d161e85f1faed4c24999cf7b"
       },
       "expected": "launch-schema-valid-context-invalid"
     },
@@ -1430,7 +1430,7 @@
       "rematerialized": {
         "argvIndex": 15,
         "argvValue": "model_reasoning_effort=\"low\"",
-        "argvFingerprint": "7efafc7b57c742e84820571b9293d8446b02c5c97b245a02829886c593ed4be4"
+        "argvFingerprint": "53feb6f94ca3d65034e63d2a756eca4b88b65aa7a0daecbe77cb4c95f8174c0c"
       },
       "expected": "launch-schema-valid-context-invalid"
     },
@@ -1445,7 +1445,7 @@
       "rematerialized": {
         "argvIndex": 13,
         "argvValue": "/private/schemas/reader-result-v1-copy.schema.json",
-        "argvFingerprint": "4ba53f7441bb10a20950543eedcda702b96834b88c9e25635861bd48989ce51d"
+        "argvFingerprint": "72b3dcbe3b27fcfbfb2a2b3591c99c2071a523c7c14ff97ae96fa50a5ce14e23"
       },
       "expected": "launch-schema-valid-context-invalid"
     },
@@ -1460,7 +1460,7 @@
       "rematerialized": {
         "argvIndex": 11,
         "argvValue": "/private/other-work",
-        "argvFingerprint": "e5c4e96f40cd8a29e83388010c2b3d3f2e6ba6768d932d290ac6a3bd8cdc1575"
+        "argvFingerprint": "95af94a94408173a44c6aa000cf8dc7ce2d13b2f598cf6665321e69ad14b1d38"
       },
       "expected": "launch-schema-valid-context-invalid"
     }
@@ -1474,7 +1474,7 @@
       "before": "/private/snapshot-root",
       "value": "/private/snapshot-root-other",
       "expected": {
-        "argvFingerprint": "8d39f5ac49a967d99beda3d387d8a33058366e9662fde4773e78a68e5dce1570",
+        "argvFingerprint": "b3958d5c489d20ab65e77576e8d12c1ea86a8798109c437bed980cc56983a8c2",
         "environmentFingerprint": "19cf3dbe7f2e0e69b15cb8f16af0fe611795bc48feed68f68814fc410e5bd1ca",
         "fingerprintDelta": {
           "argvFingerprint": "changed",
@@ -1491,7 +1491,7 @@
       "before": "/private/codex-home",
       "value": "/private/codex-home-other",
       "expected": {
-        "argvFingerprint": "80b8ef0a58573c02ee54c0814a3b0df7d9ef6a40e5eaee72517670590323c745",
+        "argvFingerprint": "fc6b72834741567e7e1fba4dbee4381044cec72feeb237e31b00d3818e8507a1",
         "environmentFingerprint": "167b78d283f79f4f47df3025f9cbca8f0a180123a8c0535ff887235473b52781",
         "fingerprintDelta": {
           "argvFingerprint": "changed",
@@ -1508,7 +1508,7 @@
       "before": "/private/sqlite-home",
       "value": "/private/sqlite-home-other",
       "expected": {
-        "argvFingerprint": "940cda0b3da258e9baccd521c53c8d152864e08442c5d11b119f6dbe44a33479",
+        "argvFingerprint": "2a499d0ad701406f7cafb94ef6dadfbe518fee860f91af9666216e457ba67c19",
         "environmentFingerprint": "9a9da8cf0ff5e6781c20011f1a68ac35b655b4bfdf773f030647792040ffdda2",
         "fingerprintDelta": {
           "argvFingerprint": "changed",
@@ -1525,7 +1525,7 @@
       "before": "/private/home",
       "value": "/private/home-other",
       "expected": {
-        "argvFingerprint": "79807c67eb096cc0f730048f2952fd7f978fb9683275d5bcce7a2eb2a322d941",
+        "argvFingerprint": "ffd9c0308eef3f076616e6528f418405b7f6b28da5b25aa935a1c9e1d1508403",
         "environmentFingerprint": "5ae7ec5a8094549978043fbf8dcccef3a23a6bd05ba4311bb678922c171b7cbb",
         "fingerprintDelta": {
           "argvFingerprint": "changed",
@@ -1542,7 +1542,7 @@
       "before": "/private/tmp",
       "value": "/private/tmp-other",
       "expected": {
-        "argvFingerprint": "d663df0143e6b1dae5ae99c513acf52448ae44e97fcd86257908b24f7fa3fc43",
+        "argvFingerprint": "5d4dc84c9c52f45692b98e60bae35f898839a903887b45e534989837fcb8bbb8",
         "environmentFingerprint": "88446c7368f99f13bc698a3597c5fef1be681e8a735b8f11e2656a5ff18717a3",
         "fingerprintDelta": {
           "argvFingerprint": "changed",
@@ -1559,7 +1559,7 @@
       "before": "http://127.0.0.1:4318/fixture",
       "value": "http://127.0.0.1:4319/fixture",
       "expected": {
-        "argvFingerprint": "d8de699f27f3d6156b164da412b4f3b553770b803f1c978e1753ab9e0d20780f",
+        "argvFingerprint": "dfad7c51d1e8b39cfc9d8682629c8c90e50361887a96d977a31b909fdd334a47",
         "environmentFingerprint": "fbc62d67adc03842b4075dfd4967dd711fbdc6b243c3c9c3a61ab7cc4b13a444",
         "fingerprintDelta": {
           "argvFingerprint": "changed",
@@ -1576,7 +1576,7 @@
       "before": "/private/workspace",
       "value": "/private/workspace-other",
       "expected": {
-        "argvFingerprint": "8b44c48584cc51988093dfab38ff75ce703f205330112c7c03357a783f90d98d",
+        "argvFingerprint": "be82bd119f776e42301e254284082d5106e001709e5281dd753042ef9450ad64",
         "environmentFingerprint": "bc140fee82aaf445290f74a248565ee82517948aa02d39816d465f13a731ef20",
         "fingerprintDelta": {
           "argvFingerprint": "changed",
@@ -1593,7 +1593,7 @@
       "before": "85ca20bbb5920a133e51b3d08c1079445ecb9fc4b40b328a3e73f1efbc34b36c",
       "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
       "expected": {
-        "argvFingerprint": "4dc9604786d4710786514dba0eada57dc91116438eb3ef57858bda5849aa3853",
+        "argvFingerprint": "6765d48ad4848334b94996ad6235e13e0a99ef0d4a3b4b49d38424aa2f593e8d",
         "environmentFingerprint": "f5f03f60b5866c30fb0b895ca5b9342f397f6e03074e5166d91a4584d3b37d90",
         "fingerprintDelta": {
           "argvFingerprint": "unchanged",

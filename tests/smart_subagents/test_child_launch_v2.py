@@ -191,7 +191,7 @@ class ChildLaunchV2Tests(unittest.TestCase):
             prepared.non_secret_environment["CODEX_ADAPTIVE_WORKSPACE_ROOT"],
         )
         self.assertIn(
-            '"CODEX_ADAPTIVE_WORKSPACE_ROOT":',
+            '"CODEX_ADAPTIVE_WORKSPACE_ROOT"=',
             "\0".join(prepared.argv),
         )
 

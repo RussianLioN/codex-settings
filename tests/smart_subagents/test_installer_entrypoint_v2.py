@@ -844,6 +844,14 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 ),
                 mock.patch.object(
                     self.installer,
+                    "_supervise_existing",
+                    return_value=SimpleNamespace(
+                        state=self.installer.GatewayState.READY,
+                        reason_code="READY",
+                    ),
+                ) as supervise,
+                mock.patch.object(
+                    self.installer,
                     "capture_activation_transition_proof_v2",
                     return_value=proof,
                 ),
@@ -887,6 +895,10 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
             )
             self.assertEqual("upgraded", result["status"])
             self.assertEqual(d2, result["sourceDigest"])
+            supervise.assert_called_once_with(
+                layout,
+                extra_environment={"TEST_BOUNDARY": "closed"},
+            )
             execute_d2.assert_called_once()
 
     def test_recovered_d1_is_reconciled_before_dispatching_d2(self) -> None:

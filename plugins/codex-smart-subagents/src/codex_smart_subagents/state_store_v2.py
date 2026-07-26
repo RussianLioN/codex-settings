@@ -5934,6 +5934,13 @@ def _canonical_activation_gate(
     return gate, canonical_json_v1(proof)
 
 
+def canonical_activation_gate_v2(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Проверяет публичную форму шлюза и возвращает независимую копию."""
+
+    gate, _proof_json = _canonical_activation_gate(value)
+    return json.loads(canonical_json_v1(gate))
+
+
 def _gate_from_node(row: sqlite3.Row) -> dict[str, Any]:
     try:
         proof = json.loads(str(row["admission_journal_absence_proof_json"]))

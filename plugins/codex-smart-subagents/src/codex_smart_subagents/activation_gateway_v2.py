@@ -2274,6 +2274,141 @@ def _refresh_absence_proof(value, *, expected_journal: Path) -> dict[str, object
     return value
 
 
+def refresh_activation_journal_absence_v2(
+    value: Mapping[str, object],
+    *,
+    expected_journal: Path,
+) -> dict[str, object]:
+    """Повторно проверяет доказанное отсутствие главного журнала установки."""
+
+    return _refresh_absence_proof(
+        dict(value),
+        expected_journal=expected_journal,
+    )
+
+
+def require_pinned_controller_health_v2(
+    *,
+    codex_home: Path,
+    state_home: Path,
+    activation_id: str,
+    controller_probe=None,
+) -> None:
+    """Быстро подтверждает живой принимающий контроллер заданной активации.
+
+    Полное доказательство дерева активации остаётся обязанностью шлюза перед
+    запуском Codex и поставщика контроллера перед каждой командой. Этот проход
+    проверяет только неизменяемую привязку запуска и локальный ответ ``health``,
+    чтобы короткий обработчик запроса не хешировал весь снимок Codex повторно.
+    """
+
+    code = "PINNED_CONTROLLER_INVALID"
+    codex_root = Path(codex_home).expanduser().absolute()
+    state_root = Path(state_home).expanduser().absolute()
+    _verify_directory(codex_root, private=False, code=code)
+    _verify_directory(state_root, private=True, code=code)
+    pinned_activation_id = _identifier(activation_id, "act2_", 64, code)
+    pinned_fingerprint = pinned_activation_id.removeprefix("act2_")
+
+    socket_path = state_root / "controller.sock"
+    socket_info = os.lstat(socket_path)
+    if (
+        not stat.S_ISSOCK(socket_info.st_mode)
+        or socket_info.st_uid != os.getuid()
+        or stat.S_IMODE(socket_info.st_mode) != 0o600
+        or socket_info.st_nlink != 1
+    ):
+        raise _ProofError(code, "pinned controller socket is not private")
+
+    codex_home_hash = hashlib.sha256(
+        str(codex_root.resolve()).encode("utf-8")
+    ).hexdigest()
+    request_projection = {
+        "messageType": "request",
+        "protocolVersion": 2,
+        "release": _RELEASE,
+        "codexHomeHash": codex_home_hash,
+        "shellSessionId": "user-prompt-v2",
+        "controllerIdentity": None,
+        "instanceId": None,
+        "controllerStartId": None,
+        "commandId": None,
+        "expectedControlEpoch": None,
+        "operationId": None,
+        "method": "health",
+        "params": {},
+    }
+    request = dict(request_projection)
+    request["requestFingerprint"] = domain_fingerprint(
+        "codex-smart/controller-request/v2",
+        request_projection,
+    )
+    request["extensions"] = {}
+    probe = controller_probe or _unix_controller_probe
+    try:
+        response = probe(socket_path, request)
+    except operation_deadline_v2.OperationDeadlineExceededV2:
+        raise
+    except _ProofError:
+        raise
+    except Exception as exc:
+        raise _ProofError(code, "pinned controller did not answer") from exc
+
+    _validate_health_response(response, request=request)
+    payload = response["payload"]
+    expected_runtime = {
+        "namespace": _NAMESPACE,
+        "state": "ACCEPTING",
+        "maintenanceMode": None,
+        "operationId": None,
+        "acceptingNewRoutes": True,
+        "activationFingerprint": pinned_fingerprint,
+        "databaseSchemaVersion": 2,
+    }
+    if any(payload[name] != expected for name, expected in expected_runtime.items()):
+        raise _ProofError(code, "pinned controller is not accepting this activation")
+
+    _identifier(payload["instanceId"], "ci2_", 32, code)
+    _identifier(payload["controllerStartId"], "cs2_", 32, code)
+    _identifier(payload["databaseId"], "db2_", 32, code)
+    for name in (
+        "controllerIdentity",
+        "compatibilityFingerprint",
+        "routingPolicyFingerprint",
+        "bundledCatalogFingerprint",
+    ):
+        _sha256(payload[name], code)
+    if (
+        type(payload["pid"]) is not int
+        or payload["pid"] <= 0
+        or type(payload["processGroupId"]) is not int
+        or payload["processGroupId"] <= 0
+        or type(payload["processStartMarker"]) is not str
+        or not payload["processStartMarker"]
+    ):
+        raise _ProofError(code, "pinned controller process identity is invalid")
+
+    controller_projection = {
+        "protocolVersion": 2,
+        "release": _RELEASE,
+        "namespace": _NAMESPACE,
+        "codexHomeHash": codex_home_hash,
+        "stateHome": str(state_root),
+        "activationFingerprint": pinned_fingerprint,
+        "compatibilityFingerprint": payload["compatibilityFingerprint"],
+        "routingPolicyFingerprint": payload["routingPolicyFingerprint"],
+        "bundledCatalogFingerprint": payload["bundledCatalogFingerprint"],
+        "databaseId": payload["databaseId"],
+        "databaseSchemaVersion": 2,
+    }
+    expected_identity = domain_fingerprint(
+        "codex-smart/controller-identity/v2",
+        controller_projection,
+    )
+    if payload["controllerIdentity"] != expected_identity:
+        raise _ProofError(code, "pinned controller identity differs")
+
+
 def _require_absent_at(directory_fd: int, name: str) -> None:
     try:
         os.stat(name, dir_fd=directory_fd, follow_symlinks=False)

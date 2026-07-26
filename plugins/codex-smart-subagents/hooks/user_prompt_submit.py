@@ -47,6 +47,7 @@ class V2ControllerChecker(Protocol):
     def __call__(
         self,
         config: IntegrationConfigV2,
+        environ: Mapping[str, str],
         *,
         deadline: float,
     ) -> None: ...
@@ -189,7 +190,7 @@ def _handle_v2(
         # фактическом обращении к инструментам.
         require_current_user_mcp_policy_v2(config, environ)
         mcp_contract_checker(PLUGIN_ROOT)
-        controller_checker(config, deadline=deadline)
+        controller_checker(config, environ, deadline=deadline)
         record = capture_hook_turn_context_v2(
             payload,
             config,

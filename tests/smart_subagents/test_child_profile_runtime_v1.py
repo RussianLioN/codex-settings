@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import copy
 import sys
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -93,6 +94,28 @@ class ChildProfileRuntimeV1Tests(unittest.TestCase):
         self.assertNotIn("first-secret-value", argv_text)
         self.assertNotIn("second-secret-value", argv_text)
         self.assertNotIn("first-secret-value", repr(first))
+
+    def test_shell_environment_override_is_a_toml_inline_table(self) -> None:
+        raw_header = self.vectors["syntheticSecretFixture"]["syntheticSecretUtf8"]
+        prefix = "shell_environment_policy.set="
+        for role, fixture in self.vectors["concreteLaunch"]["positiveRoles"].items():
+            with self.subTest(role=role):
+                binding = materialize_child_profile_v1(
+                    profile=self.profiles[role],
+                    trusted_context=fixture["trustedContext"],
+                    snapshot_path="/private/codex",
+                    raw_otel_headers=raw_header,
+                    domains=self.domains,
+                )
+                override = next(
+                    item for item in binding.argv if item.startswith(prefix)
+                )
+                parsed = tomllib.loads(override)
+
+                self.assertEqual(
+                    dict(binding.non_secret_environment),
+                    parsed["shell_environment_policy"]["set"],
+                )
 
     def test_profile_without_complete_permission_table_is_not_launchable(self) -> None:
         fixture = self.vectors["concreteLaunch"]["positiveRoles"]["reader"]

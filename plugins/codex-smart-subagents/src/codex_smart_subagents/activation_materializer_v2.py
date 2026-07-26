@@ -62,11 +62,12 @@ from .sqlite_deadline_v2 import connect_sqlite_with_deadline_v2
 _RELEASE = "0.2.0"
 _PLUGIN_NAME = "codex-smart-subagents"
 _MARKETPLACE_NAME = "codex-settings-adaptive"
-_POLICY_VECTOR_FILES = (
+_CONFIG_CONTRACT_VECTOR_FILES = (
     "routing-policy-v2.json",
     "delegation-policy-v2.json",
     "role-template-v1.json",
     "child-profile-v1.json",
+    "routing-input-v2.json",
 )
 _RUNTIME_VECTOR_FILES = ("lifecycle-v2.json",)
 _MCP_RUNTIME_SCHEMA_FILES = (
@@ -2096,7 +2097,7 @@ def _materialize_marketplace(
     )
     contract_root = config_root / "contracts"
     _ensure_private_directory(contract_root)
-    for name in _POLICY_VECTOR_FILES:
+    for name in _CONFIG_CONTRACT_VECTOR_FILES:
         _copy_regular_file_with_deadline(
             source_root / "docs" / "contracts" / "vectors" / name,
             contract_root / name,

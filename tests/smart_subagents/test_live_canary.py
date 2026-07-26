@@ -940,6 +940,31 @@ class LivePermissionCanaryTests(unittest.TestCase):
         evidence = self.canary().verify(request(self.profile))
         self.assertFalse(evidence.checks["exec_negative_probe"])
 
+    def test_exec_accepts_only_known_model_refresh_timeout_diagnostics(
+        self,
+    ) -> None:
+        self.executor.exec_stderr = (
+            b"Reading prompt from stdin...\n"
+            b"2026-07-26T14:41:57.944573Z ERROR "
+            b"codex_models_manager::manager: failed to refresh available "
+            b"models: timeout waiting for child process to exit\n"
+            b"2026-07-26T14:41:57.978471Z ERROR "
+            b"codex_models_manager::manager: failed to refresh available "
+            b"models: timeout waiting for child process to exit\n"
+        )
+
+        evidence = self.canary().verify(request(self.profile))
+
+        self.assertTrue(all(evidence.checks.values()))
+
+        self.executor.exec_stderr = self.executor.exec_stderr.replace(
+            b"timeout waiting for child process to exit",
+            b"unexpected model manager failure",
+            1,
+        )
+        evidence = self.canary().verify(request(self.profile))
+        self.assertFalse(evidence.checks["exec_negative_probe"])
+
     def test_exec_accepts_only_the_exact_codex_zsh_wrapper(self) -> None:
         self.executor.exec_mode = "shell_wrapper"
 
@@ -1171,6 +1196,19 @@ emit({
         self.assertRegex(first.sha256, r"^[0-9a-f]{64}$")
         self.assertEqual([], list(self.runtime_parent.iterdir()))
 
+    def test_inspection_uses_real_codex_sqlite_state(self) -> None:
+        executable, _ = self.fake_app_server(requirements=None)
+        with patch(
+            "codex_smart_subagents.live_canary.StrictAppServerClient"
+        ) as client_type:
+            client_type.return_value.call.return_value = {"requirements": None}
+
+            self.inspector(executable).inspect()
+
+        self.assertFalse(
+            client_type.call_args.kwargs["use_temporary_sqlite_home"]
+        )
+
     def test_canonical_hash_ignores_object_key_order_and_tracks_content(self) -> None:
         executable, requirements_file = self.fake_app_server(
             requirements={
@@ -1340,7 +1378,6 @@ emit({
         self.assertEqual(
             {
                 "CODEX_HOME",
-                "CODEX_SQLITE_HOME",
                 "HOME",
                 "LANG",
                 "LC_ALL",
@@ -1350,15 +1387,7 @@ emit({
             },
             set(kwargs["env"]),
         )
-        sqlite_home = Path(kwargs["env"]["CODEX_SQLITE_HOME"])
-        self.assertEqual(
-            Path(kwargs["env"]["TMPDIR"]),
-            sqlite_home.parent,
-        )
-        self.assertTrue(
-            sqlite_home.name.startswith("app-server-sqlite-")
-        )
-        self.assertFalse(sqlite_home.exists())
+        self.assertNotIn("CODEX_SQLITE_HOME", kwargs["env"])
         self.assertEqual(
             (
                 str(executable.resolve()),

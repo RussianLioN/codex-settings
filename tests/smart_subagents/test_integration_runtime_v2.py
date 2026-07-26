@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import importlib.util
 import os
+import socket
 import sqlite3
 import stat
 import sys
@@ -11,6 +13,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import Mapping
 from unittest import mock
 
 
@@ -18,6 +21,9 @@ ROOT = Path(__file__).resolve().parents[2]
 PLUGIN = ROOT / "plugins" / "codex-smart-subagents"
 sys.path.insert(0, str(PLUGIN / "scripts"))
 sys.path.insert(0, str(PLUGIN / "src"))
+LIFECYCLE_SCHEMA_SHA256 = (
+    "f9f03f8bd7437b48c65e027e582caf574cd1b85932941929d9a49ef30d91795d"
+)
 
 from integration_runtime_v2 import (  # noqa: E402
     FreshActivationProviderV2,
@@ -45,6 +51,14 @@ from codex_smart_subagents.mcp_server_v2 import (  # noqa: E402
     MCP_PROTOCOL,
     SERVER_NAME,
     SERVER_VERSION,
+)
+from codex_smart_subagents.canonical_json import (  # noqa: E402
+    canonical_json_bytes,
+    domain_fingerprint,
+)
+from codex_smart_subagents.schema_projection import (  # noqa: E402
+    APPLICATION_ID,
+    database_schema_fingerprint,
 )
 
 
@@ -78,6 +92,15 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         self.catalog.write_text("schema_version = 1\n", encoding="utf-8")
         self.activation_fingerprint = "a" * 64
         self.compatibility_fingerprint = "b" * 64
+        self.routing_fingerprint = "6" * 64
+        self.catalog_fingerprint = "7" * 64
+        self.schema_fingerprint = "8" * 64
+        self.schema_artifact_sha256 = "9" * 64
+        self.activation_binding_nonce = "0" * 64
+        self.installation_id = "ins2_" + "3" * 32
+        self.operation_id = "op2_" + "9" * 32
+        self.generation_id = "gen2_" + "4" * 64
+        self.receipt_fingerprint = "5" * 64
         self.gate_fingerprint = "c" * 64
         self.activation_id = "act2_" + self.activation_fingerprint
         self.config = IntegrationConfigV2.from_environ(self._environment())
@@ -104,6 +127,56 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             "CODEX_SMART_ACTIVATION_ID": self.activation_id,
             "CODEX_SMART_GATE_FINGERPRINT": self.gate_fingerprint,
             "CODEX_ADAPTIVE_CATALOG": str(self.catalog),
+        }
+
+    def _launch_gate(self) -> dict[str, object]:
+        absence_value = {
+            "proofId": "ap2_" + "a" * 32,
+            "installationId": "ins2_" + "b" * 32,
+            "operationId": "op2_" + "c" * 32,
+            "entries": [
+                {
+                    "path": str(
+                        self.codex_home
+                        / "install-manifests"
+                        / "codex-smart-subagents-v2.transaction.json"
+                    ),
+                    "basename": "codex-smart-subagents-v2.transaction.json",
+                    "parentDevice": 1,
+                    "parentInode": 2,
+                    "absent": True,
+                }
+            ],
+            "directorySyncCompleted": True,
+        }
+        absence_value["proofFingerprint"] = domain_fingerprint(
+            "codex-smart/absence-proof/v2",
+            dict(absence_value),
+        )
+        proof = {
+            "schemaId": "absence-proof-v2",
+            "schemaSha256": LIFECYCLE_SCHEMA_SHA256,
+            "value": absence_value,
+        }
+        proof["valueFingerprint"] = domain_fingerprint(
+            "codex-smart/absence-proof-projection/v2",
+            proof,
+        )
+        projection = {
+            "manifestSemanticFingerprint": getattr(
+                self,
+                "manifest_semantic_fingerprint",
+                "4" * 64,
+            ),
+            "activationReceiptFingerprint": self.receipt_fingerprint,
+            "journalAbsenceProof": proof,
+        }
+        return {
+            **projection,
+            "gateFingerprint": domain_fingerprint(
+                "codex-smart/activation-gate/v2",
+                projection,
+            ),
         }
 
     def _decision(self) -> GatewayDecision:
@@ -168,6 +241,598 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             protocol_version=MCP_PROTOCOL,
         )
         return environment, publisher
+
+    def _publish_launch_gate(self, environment: dict[str, str]) -> dict[str, object]:
+        gate = self._launch_gate()
+        environment["CODEX_SMART_GATE_FINGERPRINT"] = str(gate["gateFingerprint"])
+        environment["CODEX_SMART_ACTIVATION_GATE"] = canonical_json_bytes(
+            gate
+        ).decode("utf-8")
+        return gate
+
+    def _write_minimal_active_manifest(self, database_id: str) -> None:
+        manifest_root = self.codex_home / "install-manifests"
+        manifest_root.mkdir(mode=0o700)
+        manifest = {
+            "stateHome": str(self.state_home),
+            "activeActivation": {
+                "activationId": self.activation_id,
+                "activationFingerprint": self.activation_fingerprint,
+                "databaseId": database_id,
+            },
+            "interfaceEvidence": {
+                "compatibilityFingerprint": self.compatibility_fingerprint,
+            },
+            "routingPolicyFingerprint": self.routing_fingerprint,
+            "bundledCatalogFingerprint": self.catalog_fingerprint,
+            "lastCommittedOperation": self.operation_id,
+        }
+        path = manifest_root / "codex-smart-subagents-v2.json"
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        path.chmod(0o600)
+
+    def _write_active_manifest(
+        self,
+        database_id: str,
+        *,
+        full_receipt: bool = True,
+    ) -> None:
+        manifest_root = self.codex_home / "install-manifests"
+        manifest_root.mkdir(mode=0o700)
+        source_locator = {
+            "lexicalPath": str(self.gateway),
+            "resolvedPathAtCapture": str(self.gateway),
+            "sourceObservedSha256": "a" * 64,
+        }
+        manifest = {
+            "schemaVersion": 2,
+            "installationId": self.installation_id,
+            "release": "0.2.0",
+            "pluginId": "codex-smart-subagents",
+            "marketplaceName": "codex-settings-adaptive",
+            "stateHome": str(self.state_home),
+            "sourceLocator": source_locator,
+            "codexSnapshot": {
+                "absolutePath": str(self.gateway),
+                "sha256": "a" * 64,
+            },
+            "activeActivation": {
+                "activationId": self.activation_id,
+                "activationFingerprint": self.activation_fingerprint,
+                "symlinkTarget": f"activations/{self.activation_id}/marketplace",
+                "generationId": self.generation_id,
+                "databaseId": database_id,
+            },
+            "previousActivation": None,
+            "interfaceEvidence": {
+                "compatibilityFingerprint": self.compatibility_fingerprint,
+            },
+            "routingPolicyFingerprint": self.routing_fingerprint,
+            "bundledCatalogFingerprint": self.catalog_fingerprint,
+            "artifacts": [],
+            "originalBackup": {
+                "type": "absent",
+                "path": str(self.codex_home / "original-codex-backup"),
+                "parentPath": str(self.codex_home),
+                "name": "original-codex-backup",
+            },
+            "lastCommittedOperation": self.operation_id,
+            "databaseSchemaVersion": 2,
+            "extensions": {},
+        }
+        self.manifest_semantic_fingerprint = domain_fingerprint(
+            "codex-smart/manifest-semantic/v2",
+            {key: value for key, value in manifest.items() if key != "extensions"},
+        )
+        path = manifest_root / "codex-smart-subagents-v2.json"
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        path.chmod(0o600)
+        receipt_root = manifest_root / "codex-smart-subagents-v2.receipts"
+        receipt_dir = receipt_root / self.installation_id
+        receipt_dir.mkdir(parents=True, mode=0o700)
+        if full_receipt:
+            receipt = self._activation_commit_receipt(manifest, path)
+        else:
+            receipt = {
+                "schemaVersion": 2,
+                "receiptKind": "activation-commit",
+                "receiptFingerprint": self.receipt_fingerprint,
+            }
+        receipt_path = receipt_dir / f"{self.operation_id}.commit.json"
+        receipt_path.write_bytes(canonical_json_bytes(receipt))
+        receipt_path.chmod(0o600)
+
+    def _write_minimal_routes_database(
+        self,
+        database_id: str,
+        *,
+        disposition: str = "delegate",
+        state: str = "PLANNED",
+        include_route: bool = False,
+    ) -> Path:
+        database_path = (
+            self.state_home / "databases" / database_id / "smart-subagents.sqlite3"
+        )
+        database_path.parent.mkdir(parents=True, mode=0o700)
+        socket_info = self._controller_socket_info()
+        controller_identity = self._controller_identity(database_id)
+        connection = sqlite3.connect(database_path)
+        try:
+            connection.execute(
+                "create table database_identity ("
+                "database_id text not null,"
+                "schema_version integer not null,"
+                "schema_fingerprint text not null,"
+                "schema_artifact_sha256 text not null,"
+                "activation_binding_nonce text not null,"
+                "activation_id text not null,"
+                "activation_fingerprint text not null,"
+                "source_shape text not null)"
+            )
+            connection.execute(
+                "insert into database_identity values (?,?,?,?,?,?,?,?)",
+                (
+                    database_id,
+                    2,
+                    self.schema_fingerprint,
+                    self.schema_artifact_sha256,
+                    self.activation_binding_nonce,
+                    self.activation_id,
+                    self.activation_fingerprint,
+                    "fresh-v2",
+                ),
+            )
+            connection.execute(
+                "create table controller_state ("
+                "database_id text not null,"
+                "protocol_version integer not null,"
+                "release text not null,"
+                "controller_identity text not null,"
+                "instance_id text not null,"
+                "controller_start_id text not null,"
+                "controller_pid integer not null,"
+                "controller_process_start_marker text not null,"
+                "controller_process_group_id integer not null,"
+                "activation_id text not null,"
+                "activation_fingerprint text not null,"
+                "compatibility_fingerprint text not null,"
+                "routing_policy_fingerprint text not null,"
+                "bundled_catalog_fingerprint text not null,"
+                "control_epoch integer not null,"
+                "state text not null,"
+                "maintenance_mode text not null,"
+                "reason_code text not null,"
+                "operation_id text,"
+                "socket_path text not null,"
+                "socket_device integer not null,"
+                "socket_inode integer not null,"
+                "socket_owner_uid integer not null,"
+                "socket_owner_gid integer not null,"
+                "socket_mode text not null,"
+                "lock_held integer not null,"
+                "accepting_new_routes integer not null,"
+                "quiescent integer not null)"
+            )
+            connection.execute(
+                "insert into controller_state values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
+                "?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    database_id,
+                    2,
+                    "0.2.0",
+                    controller_identity,
+                    "ci2_" + "1" * 32,
+                    "cs2_" + "2" * 32,
+                    os.getpid(),
+                    "test-controller-start",
+                    os.getpgrp(),
+                    self.activation_id,
+                    self.activation_fingerprint,
+                    self.compatibility_fingerprint,
+                    self.routing_fingerprint,
+                    self.catalog_fingerprint,
+                    7,
+                    "ACCEPTING",
+                    "NONE",
+                    "NONE",
+                    None,
+                    str(self.state_home / "controller.sock"),
+                    socket_info.st_dev,
+                    socket_info.st_ino,
+                    socket_info.st_uid,
+                    socket_info.st_gid,
+                    "0" + oct(stat.S_IMODE(socket_info.st_mode))[2:],
+                    1,
+                    1,
+                    0,
+                ),
+            )
+            connection.execute(
+                "create table routes ("
+                "shell_session_id text not null,"
+                "session_id text not null,"
+                "turn_id text not null,"
+                "disposition text not null,"
+                "state text not null)"
+            )
+            if include_route:
+                connection.execute(
+                    "insert into routes values (?,?,?,?,?)",
+                    (
+                        self.record.shell_session_id,
+                        self.record.session_id,
+                        self.record.turn_id,
+                        disposition,
+                        state,
+                    ),
+                )
+            connection.commit()
+        finally:
+            connection.close()
+        database_path.chmod(0o600)
+        return database_path
+
+    def _activation_commit_receipt(
+        self,
+        manifest: dict[str, object],
+        manifest_path: Path,
+    ) -> dict[str, object]:
+        database_binding = self.database_binding
+        manifest_value = {
+            "file": self._file_projection(manifest_path),
+            "schemaVersion": 2,
+            "installationId": manifest["installationId"],
+            "release": "0.2.0",
+            "pluginId": manifest["pluginId"],
+            "stateHome": manifest["stateHome"],
+            "activeActivationId": self.activation_id,
+            "previousActivationId": None,
+            "lastCommittedOperation": self.operation_id,
+            "sourceLocatorFingerprint": hashlib.sha256(
+                canonical_json_bytes(manifest["sourceLocator"])
+            ).hexdigest(),
+            "artifactsFingerprint": hashlib.sha256(
+                canonical_json_bytes(manifest["artifacts"])
+            ).hexdigest(),
+            "semanticFingerprint": self.manifest_semantic_fingerprint,
+        }
+        activation_value = {
+            "directory": {
+                "path": str(self.state_home),
+                "device": 1,
+                "inode": 2,
+                "ownerUid": os.getuid(),
+                "ownerGid": os.getgid(),
+                "mode": "0700",
+                "entryCount": 0,
+                "treeSha256": "a" * 64,
+            },
+            "activationFile": {
+                "path": str(self.state_home / "activation.json"),
+                "device": 1,
+                "inode": 3,
+                "ownerUid": os.getuid(),
+                "ownerGid": os.getgid(),
+                "mode": "0600",
+                "linkCount": 1,
+                "size": 2,
+                "sha256": "b" * 64,
+            },
+            "activationId": self.activation_id,
+            "activationFingerprint": self.activation_fingerprint,
+            "generationId": self.generation_id,
+            "release": "0.2.0",
+            "databaseId": database_binding["value"]["databaseId"],
+            "databaseIdentityFingerprint": database_binding["value"][
+                "databaseIdentityFingerprint"
+            ],
+            "marketplaceTreeSha256": "c" * 64,
+            "generationTreeSha256": "d" * 64,
+        }
+        lineage = {
+            "transitionKind": "initial",
+            "sourceReceipt": None,
+            "activationProofFingerprint": None,
+            "shutdownCommandIds": None,
+            "stoppedController": None,
+        }
+        lineage["lineageFingerprint"] = domain_fingerprint(
+            "codex-smart/activation-transition-lineage/v2",
+            dict(lineage),
+        )
+        receipt = {
+            "schemaVersion": 2,
+            "receiptKind": "activation-commit",
+            "installationId": self.installation_id,
+            "operationId": self.operation_id,
+            "frozenJournalFingerprint": domain_fingerprint(
+                "codex-smart/materialization-intent/v2",
+                {
+                    "installationId": self.installation_id,
+                    "operationId": self.operation_id,
+                    "activationId": self.activation_id,
+                },
+            ),
+            "manifest": self._journal_projection("manifest-v2", manifest_value),
+            "manifestDocument": copy.deepcopy(manifest),
+            "transitionLineage": lineage,
+            "activation": self._journal_projection("activation-v2", activation_value),
+            "databaseBinding": database_binding,
+            "journalAbsenceTarget": self._launch_gate()["journalAbsenceProof"],
+            "controllerIdentity": self._controller_identity(
+                database_binding["value"]["databaseId"]
+            ),
+            "completedStepIds": ["st2_" + "e" * 32],
+            "completedAt": "2026-07-26T00:00:00.000000Z",
+        }
+        self.receipt_fingerprint = domain_fingerprint(
+            "codex-smart/activation-commit-receipt/v2",
+            receipt,
+        )
+        receipt["receiptFingerprint"] = self.receipt_fingerprint
+        return receipt
+
+    def _write_schema_routes_database(
+        self,
+        database_id: str,
+        *,
+        disposition: str = "delegate",
+        state: str = "PLANNED",
+        include_route: bool = False,
+    ) -> Path:
+        database_path = (
+            self.state_home / "databases" / database_id / "smart-subagents.sqlite3"
+        )
+        database_path.parent.mkdir(parents=True, mode=0o700)
+        schema_path = (
+            PLUGIN
+            / "src"
+            / "codex_smart_subagents"
+            / "schema"
+            / "state-v2.sql"
+        )
+        socket_info = self._controller_socket_info()
+        controller_identity = self._controller_identity(database_id)
+        connection = sqlite3.connect(database_path)
+        try:
+            connection.execute(f"pragma application_id={APPLICATION_ID}")
+            connection.executescript(schema_path.read_text(encoding="utf-8"))
+            connection.execute("pragma user_version=2")
+            schema = database_schema_fingerprint(connection, version=2)
+            self.schema_fingerprint = schema.fingerprint
+            connection.execute(
+                """
+                insert into database_identity(
+                  singleton,database_id,schema_version,schema_fingerprint,
+                  schema_artifact_sha256,activation_binding_nonce,activation_id,
+                  activation_fingerprint,source_shape,source_schema_fingerprint,
+                  source_backup_sha256,created_operation_id,created_at
+                ) values(1,?,?,?,?,?,?,?,'fresh-v2',null,null,?,?)
+                """,
+                (
+                    database_id,
+                    2,
+                    self.schema_fingerprint,
+                    self.schema_artifact_sha256,
+                    self.activation_binding_nonce,
+                    self.activation_id,
+                    self.activation_fingerprint,
+                    self.operation_id,
+                    "2026-07-26T00:00:00.000000Z",
+                ),
+            )
+            connection.execute(
+                """
+                insert into controller_state(
+                  singleton,database_id,protocol_version,release,
+                  controller_identity,instance_id,controller_start_id,
+                  controller_pid,controller_process_start_marker,
+                  controller_process_group_id,control_epoch,state,
+                  maintenance_mode,reason_code,operation_id,activation_id,
+                  activation_fingerprint,compatibility_fingerprint,
+                  routing_policy_fingerprint,bundled_catalog_fingerprint,
+                  socket_path,socket_device,socket_inode,socket_owner_uid,
+                  socket_owner_gid,socket_mode,lock_held,accepting_new_routes,
+                  quiescent,updated_at
+                ) values(1,?,?,?,?,?,?,?,?,?,7,'ACCEPTING','NONE','NONE',null,
+                         ?,?,?,?,?,?,?,?,?,?,'0600',1,1,0,?)
+                """,
+                (
+                    database_id,
+                    2,
+                    "0.2.0",
+                    controller_identity,
+                    "ci2_" + "1" * 32,
+                    "cs2_" + "2" * 32,
+                    os.getpid(),
+                    "test-controller-start",
+                    os.getpgrp(),
+                    self.activation_id,
+                    self.activation_fingerprint,
+                    self.compatibility_fingerprint,
+                    self.routing_fingerprint,
+                    self.catalog_fingerprint,
+                    str(self.state_home / "controller.sock"),
+                    socket_info.st_dev,
+                    socket_info.st_ino,
+                    socket_info.st_uid,
+                    socket_info.st_gid,
+                    "2026-07-26T00:00:00.000000Z",
+                ),
+            )
+            if include_route:
+                self._insert_route(connection, disposition=disposition, state=state)
+            connection.commit()
+        finally:
+            connection.close()
+        database_path.chmod(0o600)
+        self.database_binding = self._database_binding_projection(
+            database_path,
+            database_id,
+        )
+        return database_path
+
+    def _insert_route(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        disposition: str,
+        state: str,
+    ) -> None:
+        startable = 0 if state in {"DIRECT", "CLARIFY"} else 1
+        context = self.record.value_without_fingerprint()
+        context_hash = domain_fingerprint("test/stop-context", context)
+        connection.execute(
+            """
+            insert into routes(
+              route_id,request_key,request_hash,context_hash,context_json,
+              shell_session_id,session_id,turn_id,codex_home_hash,repo_root_hash,
+              base_sha,worktree_fingerprint,catalog_generation,algorithm_version,
+              disposition,startable,state,expires_at,run_id,cancel_reason,
+              plan_output_json,terminal_result_json,created_at,updated_at,
+              activation_fingerprint,compatibility_fingerprint
+            ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,null,null,?,null,?,?,?,?)
+            """,
+            (
+                "route2_" + "1" * 32,
+                "request-key",
+                "2" * 64,
+                context_hash,
+                json.dumps(context),
+                self.record.shell_session_id,
+                self.record.session_id,
+                self.record.turn_id,
+                "3" * 64,
+                "4" * 64,
+                self.record.base_sha,
+                self.record.worktree_fingerprint,
+                "generation-test",
+                "algorithm-test",
+                disposition,
+                startable,
+                state,
+                "2026-07-27T00:00:00.000000Z",
+                "{}",
+                "2026-07-26T00:00:00.000000Z",
+                "2026-07-26T00:00:00.000000Z",
+                self.activation_fingerprint,
+                self.compatibility_fingerprint,
+            ),
+        )
+
+    def _database_binding_projection(
+        self,
+        database_path: Path,
+        database_id: str,
+    ) -> dict[str, object]:
+        info = database_path.lstat()
+        identity_value = {
+            "databaseId": database_id,
+            "activationBindingNonce": self.activation_binding_nonce,
+            "activationId": self.activation_id,
+            "activationFingerprint": self.activation_fingerprint,
+        }
+        identity_fingerprint = domain_fingerprint(
+            "codex-smart/database-identity/v2",
+            identity_value,
+        )
+        binding_value = {
+            "path": str(database_path),
+            "device": info.st_dev,
+            "inode": info.st_ino,
+            "ownerUid": info.st_uid,
+            "ownerGid": info.st_gid,
+            "mode": f"0{stat.S_IMODE(info.st_mode):03o}",
+            "linkCount": info.st_nlink,
+            "databaseId": database_id,
+            "databaseIdentity": identity_value,
+            "databaseIdentityFingerprint": identity_fingerprint,
+            "activationIdentity": {
+                "activationId": self.activation_id,
+                "activationFingerprint": self.activation_fingerprint,
+            },
+            "databaseVersion": "0.2.0",
+            "schemaVersion": 2,
+            "userVersion": 2,
+            "schemaFingerprint": self.schema_fingerprint,
+            "schemaArtifactSha256": self.schema_artifact_sha256,
+        }
+        binding = {
+            "schemaId": "database-binding-v2",
+            "schemaSha256": (
+                LIFECYCLE_SCHEMA_SHA256
+            ),
+            "value": binding_value,
+        }
+        binding["valueFingerprint"] = domain_fingerprint(
+            "codex-smart/database-binding/v2",
+            binding,
+        )
+        return binding
+
+    def _file_projection(self, path: Path) -> dict[str, object]:
+        info = path.lstat()
+        return {
+            "path": str(path),
+            "device": info.st_dev,
+            "inode": info.st_ino,
+            "ownerUid": info.st_uid,
+            "ownerGid": info.st_gid,
+            "mode": f"0{stat.S_IMODE(info.st_mode):03o}",
+            "linkCount": info.st_nlink,
+            "size": info.st_size,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+
+    def _journal_projection(
+        self,
+        schema_id: str,
+        value: dict[str, object],
+    ) -> dict[str, object]:
+        projection = {
+            "schemaId": schema_id,
+            "schemaSha256": (
+                LIFECYCLE_SCHEMA_SHA256
+            ),
+            "value": value,
+        }
+        projection["valueFingerprint"] = domain_fingerprint(
+            "codex-smart/journal-state/v2",
+            projection,
+        )
+        return projection
+
+    def _controller_socket_info(self) -> os.stat_result:
+        controller_socket = getattr(self, "_controller_socket", None)
+        socket_path = self.state_home / "controller.sock"
+        if controller_socket is None:
+            controller_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            controller_socket.bind(str(socket_path))
+            socket_path.chmod(0o600)
+            self._controller_socket = controller_socket
+            self.addCleanup(controller_socket.close)
+        return socket_path.lstat()
+
+    def _controller_identity(self, database_id: str) -> str:
+        projection = {
+            "protocolVersion": 2,
+            "release": "0.2.0",
+            "namespace": "codex-smart-subagents-v2",
+            "codexHomeHash": hashlib.sha256(
+                str(self.codex_home.resolve()).encode("utf-8")
+            ).hexdigest(),
+            "stateHome": str(self.state_home),
+            "activationFingerprint": self.activation_fingerprint,
+            "compatibilityFingerprint": self.compatibility_fingerprint,
+            "routingPolicyFingerprint": self.routing_fingerprint,
+            "bundledCatalogFingerprint": self.catalog_fingerprint,
+            "databaseId": database_id,
+            "databaseSchemaVersion": 2,
+        }
+        return domain_fingerprint(
+            "codex-smart/controller-identity/v2",
+            projection,
+        )
 
     def test_private_turn_record_round_trips_and_rejects_tampering(self) -> None:
         store = TurnContextStoreV2(self.config)
@@ -274,39 +939,62 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         with self.assertRaisesRegex(IntegrationV2Error, "после запуска"):
             provider.request_context()
 
-    def test_live_controller_check_repeats_ready_resolution_in_hook_deadline(
+    def test_live_controller_check_uses_the_bounded_launch_proof_not_full_resolution(
         self,
     ) -> None:
         runtime = sys.modules["integration_runtime_v2"]
-        observed_deadlines: list[object] = []
+        gate = self._launch_gate()
+        environment = self._environment()
+        environment["CODEX_SMART_GATE_FINGERPRINT"] = str(
+            gate["gateFingerprint"]
+        )
+        environment["CODEX_SMART_ACTIVATION_GATE"] = canonical_json_bytes(
+            gate
+        ).decode("utf-8")
+        config = IntegrationConfigV2.from_environ(environment)
+        observed: list[tuple[str, object]] = []
 
-        class ObservingResolver(_Resolver):
-            def resolve(self) -> GatewayDecision:
-                observed_deadlines.append(
-                    operation_deadline_v2.current_operation_deadline_v2()
+        def absence_checker(
+            value: object,
+            *,
+            expected_journal: Path,
+        ) -> object:
+            observed.append(("absence", expected_journal))
+            self.assertEqual(gate["journalAbsenceProof"], value)
+            return value
+
+        def health_checker(**kwargs: object) -> None:
+            observed.append(
+                (
+                    "health",
+                    operation_deadline_v2.current_operation_deadline_v2(),
                 )
-                return super().resolve()
+            )
+            self.assertEqual(self.codex_home, kwargs["codex_home"])
+            self.assertEqual(self.state_home, kwargs["state_home"])
+            self.assertEqual(self.activation_id, kwargs["activation_id"])
 
         runtime.require_live_controller_v2(
-            self.config,
+            config,
+            environment,
             deadline=time.monotonic() + 1,
-            resolver_factory=lambda _config: ObservingResolver(self._decision()),
+            absence_checker=absence_checker,
+            health_checker=health_checker,
         )
 
-        self.assertEqual(1, len(observed_deadlines))
-        self.assertIsNotNone(observed_deadlines[0])
+        self.assertEqual(["absence", "health"], [item[0] for item in observed])
+        self.assertIsNotNone(observed[1][1])
         self.assertIsNone(operation_deadline_v2.current_operation_deadline_v2())
 
-        ordinary = GatewayDecision(
-            state=GatewayState.ORDINARY,
-            reason_code="CONTROLLER_UNAVAILABLE",
-            executable=self.gateway,
-        )
+        damaged = dict(environment)
+        damaged["CODEX_SMART_ACTIVATION_GATE"] += " "
         with self.assertRaisesRegex(IntegrationV2Error, "контроллер"):
             runtime.require_live_controller_v2(
-                self.config,
+                config,
+                damaged,
                 deadline=time.monotonic() + 1,
-                resolver_factory=lambda _config: _Resolver(ordinary),
+                absence_checker=absence_checker,
+                health_checker=health_checker,
             )
 
     def test_config_rejects_relative_or_incomplete_adaptive_environment(self) -> None:
@@ -453,6 +1141,237 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             ),
         )
 
+    def test_stop_reads_pinned_database_without_full_activation_resolution(
+        self,
+    ) -> None:
+        runtime = sys.modules["integration_runtime_v2"]
+        database_id = "db2_" + "f" * 32
+        self._write_schema_routes_database(database_id, include_route=False)
+        self._write_active_manifest(database_id)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        gate = self._publish_launch_gate(environment)
+        config = IntegrationConfigV2.from_environ(environment)
+        TurnContextStoreV2(config).save(self.record)
+        path = PLUGIN / "hooks" / "stop.py"
+        spec = importlib.util.spec_from_file_location(
+            "smart_stop_fast_path_test",
+            path,
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        with (
+            mock.patch.object(
+                runtime,
+                "ActivationResolver",
+                side_effect=AssertionError("Stop не должен запускать resolve"),
+            ),
+            mock.patch.object(
+                runtime,
+                "refresh_activation_journal_absence_v2",
+                return_value=gate["journalAbsenceProof"],
+            ),
+            mock.patch.object(
+                runtime,
+                "require_pinned_controller_health_v2",
+                return_value=None,
+            ),
+        ):
+            response = module.handle(
+                {
+                    "session_id": self.record.session_id,
+                    "turn_id": self.record.turn_id,
+                    "hook_event_name": "Stop",
+                },
+                environment,
+            )
+
+        self.assertIn("decision", response)
+        self.assertEqual("block", response["decision"])
+        self.assertIn("smart_plan", response["reason"])
+        self.assertEqual(1, TurnContextStoreV2(config).load().continuation_count)
+
+    def test_stop_rejects_synthetic_minimal_manifest_and_database(self) -> None:
+        runtime = sys.modules["integration_runtime_v2"]
+        database_id = "db2_" + "f" * 32
+        self._write_minimal_routes_database(database_id, include_route=False)
+        self._write_minimal_active_manifest(database_id)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        self._publish_launch_gate(environment)
+        config = IntegrationConfigV2.from_environ(environment)
+
+        with self.assertRaisesRegex(IntegrationV2Error, "закреплённая база"):
+            runtime.durable_stop_smart_turn_state_v2(
+                config,
+                self.record,
+                environ=environment,
+                deadline=time.monotonic() + 1,
+                absence_checker=lambda *_args, **_kwargs: None,
+                health_checker=lambda **_kwargs: None,
+            )
+
+    def test_stop_rejects_database_with_wrong_application_id(self) -> None:
+        runtime = sys.modules["integration_runtime_v2"]
+        database_id = "db2_" + "f" * 32
+        database_path = self._write_schema_routes_database(
+            database_id,
+            include_route=False,
+        )
+        self._write_active_manifest(database_id)
+        connection = sqlite3.connect(database_path)
+        try:
+            connection.execute("pragma application_id=0")
+            connection.commit()
+        finally:
+            connection.close()
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        self._publish_launch_gate(environment)
+        config = IntegrationConfigV2.from_environ(environment)
+
+        with self.assertRaisesRegex(IntegrationV2Error, "закреплённая база"):
+            runtime.durable_stop_smart_turn_state_v2(
+                config,
+                self.record,
+                environ=environment,
+                deadline=time.monotonic() + 1,
+                absence_checker=lambda *_args, **_kwargs: None,
+                health_checker=lambda **_kwargs: None,
+            )
+
+    def test_stop_database_verification_honors_deadline_while_database_is_locked(
+        self,
+    ) -> None:
+        runtime = sys.modules["integration_runtime_v2"]
+        database_id = "db2_" + "f" * 32
+        database_path = self._write_schema_routes_database(
+            database_id,
+            include_route=False,
+        )
+        self._write_active_manifest(database_id)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        self._publish_launch_gate(environment)
+        config = IntegrationConfigV2.from_environ(environment)
+
+        locking_connection = sqlite3.connect(database_path)
+        try:
+            locking_connection.execute("begin exclusive")
+            started = time.monotonic()
+            with self.assertRaisesRegex(IntegrationV2Error, "закреплённая база"):
+                runtime.durable_stop_smart_turn_state_v2(
+                    config,
+                    self.record,
+                    environ=environment,
+                    deadline=started + 0.005,
+                    absence_checker=lambda *_args, **_kwargs: None,
+                    health_checker=lambda **_kwargs: None,
+                )
+            elapsed = time.monotonic() - started
+        finally:
+            locking_connection.rollback()
+            locking_connection.close()
+
+        self.assertLess(elapsed, 0.04)
+
+    def test_stop_rejects_minimal_commit_receipt_document(self) -> None:
+        runtime = sys.modules["integration_runtime_v2"]
+        database_id = "db2_" + "f" * 32
+        self._write_schema_routes_database(database_id, include_route=False)
+        self._write_active_manifest(database_id, full_receipt=False)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        self._publish_launch_gate(environment)
+        config = IntegrationConfigV2.from_environ(environment)
+
+        with self.assertRaisesRegex(IntegrationV2Error, "закреплённая база"):
+            runtime.durable_stop_smart_turn_state_v2(
+                config,
+                self.record,
+                environ=environment,
+                deadline=time.monotonic() + 1,
+                absence_checker=lambda *_args, **_kwargs: None,
+                health_checker=lambda **_kwargs: None,
+            )
+
+    def test_stop_rejects_controller_catalog_binding_mismatch(self) -> None:
+        runtime = sys.modules["integration_runtime_v2"]
+        database_id = "db2_" + "f" * 32
+        database_path = self._write_schema_routes_database(
+            database_id,
+            include_route=False,
+        )
+        self._write_active_manifest(database_id)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        self._publish_launch_gate(environment)
+        config = IntegrationConfigV2.from_environ(environment)
+        connection = sqlite3.connect(database_path)
+        try:
+            connection.execute(
+                "update controller_state set bundled_catalog_fingerprint=?",
+                ("5" * 64,),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        with self.assertRaisesRegex(IntegrationV2Error, "закреплённая база"):
+            runtime.durable_stop_smart_turn_state_v2(
+                config,
+                self.record,
+                environ=environment,
+                deadline=time.monotonic() + 1,
+                absence_checker=lambda *_args, **_kwargs: None,
+                health_checker=lambda **_kwargs: None,
+            )
+
+    def test_stop_rechecks_absence_and_health_after_database_read(self) -> None:
+        runtime = sys.modules["integration_runtime_v2"]
+        database_id = "db2_" + "f" * 32
+        self._write_schema_routes_database(database_id, include_route=False)
+        self._write_active_manifest(database_id)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        gate = self._publish_launch_gate(environment)
+        config = IntegrationConfigV2.from_environ(environment)
+        calls: list[str] = []
+
+        def absence_checker(value: object, *, expected_journal: Path) -> object:
+            calls.append("absence")
+            self.assertEqual(gate["journalAbsenceProof"], value)
+            self.assertEqual(
+                self.codex_home
+                / "install-manifests"
+                / "codex-smart-subagents-v2.transaction.json",
+                expected_journal,
+            )
+            return value
+
+        def health_checker(**kwargs: object) -> None:
+            calls.append("health")
+            self.assertEqual(self.codex_home, kwargs["codex_home"])
+            self.assertEqual(self.state_home, kwargs["state_home"])
+            self.assertEqual(self.activation_id, kwargs["activation_id"])
+
+        self.assertEqual(
+            "MISSING",
+            runtime.durable_stop_smart_turn_state_v2(
+                config,
+                self.record,
+                environ=environment,
+                deadline=time.monotonic() + 1,
+                absence_checker=absence_checker,
+                health_checker=health_checker,
+            ),
+        )
+
+        self.assertEqual(["absence", "health", "absence", "health"], calls)
+
     def test_user_prompt_falls_back_when_required_mcp_contract_is_unproved(
         self,
     ) -> None:
@@ -478,7 +1397,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             payload,
             environment,
             v2_mcp_contract_checker=unproved,
-            v2_controller_checker=lambda _config, *, deadline: None,
+            v2_controller_checker=lambda _config, _environ, *, deadline: None,
         )
 
         self.assertTrue(response["continue"])
@@ -502,6 +1421,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
 
         def dead_controller(
             _config: IntegrationConfigV2,
+            _environ: Mapping[str, str],
             *,
             deadline: float,
         ) -> None:
@@ -551,7 +1471,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             payload,
             valid,
             v2_mcp_contract_checker=lambda _plugin_root: None,
-            v2_controller_checker=lambda _config, *, deadline: None,
+            v2_controller_checker=lambda _config, _environ, *, deadline: None,
         )
         self.assertIn("hookSpecificOutput", response)
         self.assertEqual("turn-from-hook", store.load().turn_id)
@@ -563,7 +1483,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             payload,
             missing_proof,
             v2_mcp_contract_checker=lambda _plugin_root: None,
-            v2_controller_checker=lambda _config, *, deadline: None,
+            v2_controller_checker=lambda _config, _environ, *, deadline: None,
         )
         self.assertNotIn("hookSpecificOutput", response)
         self.assertIn("обычном режиме", response["systemMessage"].lower())
@@ -575,7 +1495,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             payload,
             damaged_proof,
             v2_mcp_contract_checker=lambda _plugin_root: None,
-            v2_controller_checker=lambda _config, *, deadline: None,
+            v2_controller_checker=lambda _config, _environ, *, deadline: None,
         )
         self.assertNotIn("hookSpecificOutput", response)
         self.assertFalse(store.path.exists())
@@ -605,7 +1525,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             },
             environment,
             v2_plan_state_provider=(
-                lambda _config, _record, *, deadline: "MISSING"
+                lambda _config, _record, *, environ, deadline: "MISSING"
             ),
         )
 
@@ -645,7 +1565,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             },
             environment,
             v2_mcp_contract_checker=lambda _plugin_root: None,
-            v2_controller_checker=lambda _config, *, deadline: None,
+            v2_controller_checker=lambda _config, _environ, *, deadline: None,
         )
         self.assertIn("hookSpecificOutput", response)
         self.assertEqual(
@@ -682,7 +1602,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             },
             environment,
             v2_mcp_contract_checker=lambda _plugin_root: None,
-            v2_controller_checker=lambda _config, *, deadline: None,
+            v2_controller_checker=lambda _config, _environ, *, deadline: None,
         )
         self.assertNotIn("hookSpecificOutput", response)
 
@@ -733,7 +1653,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             payload,
             environment,
             v2_mcp_contract_checker=lambda _plugin_root: None,
-            v2_controller_checker=lambda _config, *, deadline: None,
+            v2_controller_checker=lambda _config, _environ, *, deadline: None,
         )
 
         self.assertTrue(response["continue"])
@@ -762,7 +1682,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
                 stop_payload,
                 environment,
                 v2_plan_state_provider=(
-                    lambda _config, _record, *, deadline: "MISSING"
+                    lambda _config, _record, *, environ, deadline: "MISSING"
                 ),
             )
             self.assertEqual("block", continuation["decision"])
@@ -777,7 +1697,9 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         bounded = stop_module.handle(
             stop_payload,
             environment,
-            v2_plan_state_provider=lambda _config, _record, *, deadline: "MISSING",
+            v2_plan_state_provider=(
+                lambda _config, _record, *, environ, deadline: "MISSING"
+            ),
         )
         self.assertTrue(bounded["continue"])
         self.assertIn("двух попыток", bounded["systemMessage"].lower())
@@ -787,7 +1709,9 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             stop_module.handle(
                 stop_payload,
                 environment,
-                v2_plan_state_provider=lambda _config, _record, *, deadline: "DIRECT",
+                v2_plan_state_provider=(
+                    lambda _config, _record, *, environ, deadline: "DIRECT"
+                ),
             )
         )
         environment = self._environment()
@@ -821,7 +1745,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
                 },
                 environment,
                 v2_plan_state_provider=(
-                    lambda _config, _record, *, deadline: "MISSING"
+                    lambda _config, _record, *, environ, deadline: "MISSING"
                 ),
             )
 
@@ -862,6 +1786,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             _config: IntegrationConfigV2,
             _record: HookTurnContextV2,
             *,
+            environ: Mapping[str, str],
             deadline: float,
         ) -> str:
             provider_remaining.append(deadline - time.monotonic())
@@ -926,7 +1851,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             payload,
             environment,
             v2_plan_state_provider=(
-                lambda _config, _record, *, deadline: "DELEGATE_PENDING"
+                lambda _config, _record, *, environ, deadline: "DELEGATE_PENDING"
             ),
         )
 
@@ -938,7 +1863,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
                 payload,
                 environment,
                 v2_plan_state_provider=(
-                    lambda _config, _record, *, deadline: "DELEGATE_TERMINAL"
+                    lambda _config, _record, *, environ, deadline: "DELEGATE_TERMINAL"
                 ),
             )
         )

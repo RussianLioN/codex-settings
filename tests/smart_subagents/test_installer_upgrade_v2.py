@@ -392,9 +392,10 @@ class InstallerUpgradePreparationV2Tests(unittest.TestCase):
         with self.assertRaises(ActivationPreparationIntegrityErrorV2):
             replace(receipt, transition_proof_snapshot=foreign_snapshot)
 
-    def test_transition_proof_rehydrates_before_and_after_link_and_manifest(
+    def test_transition_proof_rehydrates_after_durable_device_drift(
         self,
     ) -> None:
+        self.fixture.shift_commit_receipt_devices(1)
         proof = self.fixture.capture()
         operation_id = "op2_" + "2" * 32
         preparation = build_upgrade_preparation_v2(

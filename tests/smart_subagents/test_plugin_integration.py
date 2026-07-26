@@ -805,6 +805,7 @@ class SkillContractTests(unittest.TestCase):
             / "using-smart-subagents"
             / "SKILL.md"
         ).read_text(encoding="utf-8")
+        normalized_text = " ".join(text.split())
         self.assertIn("name: using-smart-subagents", text)
         self.assertIn("Use when", text)
         for tool in ("smart_plan", "route_start", "smart_wait", "smart_cancel"):
@@ -812,6 +813,32 @@ class SkillContractTests(unittest.TestCase):
             self.assertIn(f"mcp__codex_smart_subagents__{tool}", text)
         self.assertIn("direct", text)
         self.assertIn("не применяют", text.lower())
+        self.assertIn("JSON.parse", text)
+        self.assertIn("baseInput", text)
+        self.assertIn("factorClaims", text)
+        self.assertIn("не перепечатывай нормативный объект", text.lower())
+        self.assertIn("researcher-v1", text)
+        self.assertIn("implementer-v1", text)
+        self.assertIn("byteLength", text)
+        self.assertIn("UTF-8", text)
+        self.assertIn("до единственного вызова", text.lower())
+        self.assertIn("clientNodeId", text)
+        self.assertIn("dependencyIds", text)
+        self.assertIn("nodes: [", text)
+        self.assertIn("const planInput", text)
+        self.assertIn("smart_plan(planInput)", text)
+        self.assertIn(
+            "никогда не присваивай его переменной `routinginput`",
+            normalized_text.lower(),
+        )
+        self.assertIn(
+            "не оборачивай повторно в новый `nodes`",
+            normalized_text.lower(),
+        )
+        self.assertIn("первый `smart_wait`", normalized_text.lower())
+        self.assertIn("`cursor: null`", normalized_text)
+        self.assertIn("непустой `nextCursor`", normalized_text)
+        self.assertNotIn("lastCursor", text)
         self.assertNotIn("smart_integrate", text)
 
 

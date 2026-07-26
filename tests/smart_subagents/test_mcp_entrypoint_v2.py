@@ -470,7 +470,7 @@ class MCPEntrypointV2Tests(unittest.TestCase):
                             self.environment,
                             v2_mcp_contract_checker=lambda _plugin_root: None,
                             v2_controller_checker=(
-                                lambda _config, *, deadline: None
+                                lambda _config, _environ, *, deadline: None
                             ),
                         )
                     )

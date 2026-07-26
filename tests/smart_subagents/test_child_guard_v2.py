@@ -21,6 +21,7 @@ sys.path.insert(0, str(PLUGIN_SRC))
 from codex_smart_subagents.child_guard_v2 import (  # noqa: E402
     ChildGuardV2Error,
     ForkExecGuardFactoryV2,
+    _child_guard_main,
     _terminate_and_reap,
     system_process_start_marker_v2,
 )
@@ -318,6 +319,71 @@ class ForkExecGuardV2Tests(unittest.TestCase):
             handle.abort()
 
         self.assertFalse(self.marker.exists())
+
+    def test_guard_waits_long_enough_for_verified_commit_without_unbounded_wait(
+        self,
+    ) -> None:
+        permit_id = "lp2_" + "7" * 32
+        one_time_token = "guard-token-abcdefghijklmnopqrstuvwxyz-000007"
+        simulated_coordinator_seconds = 120.0
+        observed_timeouts: list[float] = []
+        expected_commit = {
+            "frame": "COMMIT",
+            "protocolVersion": 2,
+            "permitId": permit_id,
+            "oneTimeToken": one_time_token,
+            "argvFingerprint": self.prepared.argv_fingerprint,
+            "snapshotIdentityFingerprint": self.prepared.snapshot_identity_fingerprint,
+        }
+
+        def delayed_commit(_descriptor: int, timeout_seconds: float, **_kwargs):
+            observed_timeouts.append(timeout_seconds)
+            if timeout_seconds < simulated_coordinator_seconds:
+                raise ChildGuardV2Error(
+                    "GUARD_DEADLINE",
+                    "simulated coordinator verification delay exceeded guard wait",
+                )
+            return expected_commit
+
+        with (
+            patch("codex_smart_subagents.child_guard_v2.os.setsid"),
+            patch("codex_smart_subagents.child_guard_v2.fcntl.fcntl"),
+            patch("codex_smart_subagents.child_guard_v2._write_frame"),
+            patch("codex_smart_subagents.child_guard_v2._read_frame", delayed_commit),
+            patch("codex_smart_subagents.child_guard_v2._close_fd"),
+            patch("codex_smart_subagents.child_guard_v2._close_many"),
+            patch("codex_smart_subagents.child_guard_v2.os.dup2"),
+            patch("codex_smart_subagents.child_guard_v2.os.umask"),
+            patch("codex_smart_subagents.child_guard_v2._reset_signals"),
+            patch(
+                "codex_smart_subagents.child_guard_v2.os.execve",
+            ) as execve,
+            patch(
+                "codex_smart_subagents.child_guard_v2.os._exit",
+                side_effect=AssertionError("guard exited before COMMIT"),
+            ),
+        ):
+            _child_guard_main(
+                prepared=self.prepared,
+                permit_id=permit_id,
+                one_time_token=one_time_token,
+                snapshot_probe=lambda _prepared: SnapshotObservationV2(
+                    snapshot_sha256=self.snapshot_sha,
+                    snapshot_identity_fingerprint=self.identity,
+                ),
+                process_start_marker_provider=lambda _pid: "marker",
+                control_fd=10,
+                hello_fd=11,
+                error_fd=12,
+                stdin_fd=0,
+                stdout_fd=1,
+                stderr_fd=2,
+            )
+
+        self.assertEqual(1, len(observed_timeouts))
+        self.assertGreaterEqual(observed_timeouts[0], simulated_coordinator_seconds)
+        self.assertLessEqual(observed_timeouts[0], 180.0)
+        execve.assert_called_once()
 
     def test_system_marker_distinguishes_a_process_awaiting_collection(self) -> None:
         process = subprocess.Popen(["/bin/sleep", "30"])

@@ -87,6 +87,7 @@ def profile_references(child: dict[str, Any]) -> tuple[dict[str, str], dict[str,
         profile = case["profile"]
         template = profile["argvTemplate"]
         ensure_permission_argv(profile)
+        ensure_shell_environment_argv(profile)
         if not any(item.get("slot") == "otelExporterConfig" for item in template):
             template.extend(copy.deepcopy(OTEL_ARGV_SUFFIX))
         case["canonicalUtf8"] = canonical_json_v1(profile)
@@ -97,6 +98,20 @@ def profile_references(child: dict[str, Any]) -> tuple[dict[str, str], dict[str,
         after[role] = case["fingerprint"]
     ensure_permission_negative_case(child)
     return before, after
+
+
+def ensure_shell_environment_argv(profile: dict[str, Any]) -> None:
+    items = [
+        item
+        for item in profile["argvTemplate"]
+        if item.get("slot") == "shellEnvironmentSet"
+    ]
+    if len(items) != 1:
+        raise ValueError("child profile must have one shell environment slot")
+    item = items[0]
+    if item.get("prefix") != "shell_environment_policy.set=":
+        raise ValueError("child profile has another shell environment prefix")
+    item["encoding"] = "toml-inline-table"
 
 
 def ensure_permission_argv(profile: dict[str, Any]) -> None:
@@ -237,21 +252,25 @@ def update_interface(
     *,
     old_profiles: dict[str, str],
     new_profiles: dict[str, str],
-    child_schema_sha256: str,
+    machine_schema_sha256: dict[str, str],
 ) -> tuple[dict[str, Any], str, str]:
     old_semantic = interface["base"]["semanticFingerprint"]
     old_compatibility = interface["base"]["compatibilityFingerprint"]
-    old_schema = interface["base"]["semantic"]["machineSchemas"]["child-profile-v1"][
-        "schemaSha256"
-    ]
     replacements = {old_profiles[role]: new_profiles[role] for role in old_profiles}
-    replacements[old_schema] = child_schema_sha256
+    machine_schemas = interface["base"]["semantic"]["machineSchemas"]
+    if set(machine_schema_sha256) != set(machine_schemas):
+        raise ValueError("machine schema files differ from InterfaceEvidence")
+    for schema_id, sha256 in machine_schema_sha256.items():
+        replacements[machine_schemas[schema_id]["schemaSha256"]] = sha256
     interface = replace_strings(interface, replacements)
     base = interface["base"]
     base["semantic"]["childProfiles"] = copy.deepcopy(new_profiles)
-    base["semantic"]["machineSchemas"]["child-profile-v1"] = {
-        "schemaId": "child-profile-v1",
-        "schemaSha256": child_schema_sha256,
+    base["semantic"]["machineSchemas"] = {
+        schema_id: {
+            "schemaId": schema_id,
+            "schemaSha256": machine_schema_sha256[schema_id],
+        }
+        for schema_id in sorted(machine_schema_sha256)
     }
     new_fingerprints = interface_fingerprints(base)
     interface = replace_strings(
@@ -369,7 +388,7 @@ def materialize_argv(
             argv.append(item["literal"])
             continue
         if item["slot"] == "shellEnvironmentSet":
-            raw = canonical_json_v1(environment)
+            raw = toml_inline_string_map(environment)
         else:
             raw = arguments[item["slot"]]
             if item["encoding"] == "json-string":
@@ -378,6 +397,14 @@ def materialize_argv(
     for feature in profile["disabledFeatures"]:
         argv.extend(("--disable", feature))
     return argv
+
+
+def toml_inline_string_map(value: dict[str, str]) -> str:
+    entries = ",".join(
+        canonical_json_v1(name) + "=" + canonical_json_v1(item)
+        for name, item in sorted(value.items())
+    )
+    return "{" + entries + "}"
 
 
 def update_child(
@@ -390,6 +417,10 @@ def update_child(
     child = replace_strings(
         child,
         {old_profiles[role]: new_profiles[role] for role in old_profiles},
+    )
+    child["concreteLaunch"]["shellEnvironmentSetProjection"] = (
+        "all nonSecretEnvironment entries in sorted TOML inline-table order; "
+        "OTEL_EXPORTER_OTLP_HEADERS is forbidden"
     )
     profiles = {case["name"]: case["profile"] for case in child["cases"]}
     for case in child["cases"]:
@@ -614,12 +645,17 @@ def main() -> None:
     old_profiles, new_profiles = profile_references(child)
     child_schema = update_child_schema(load(child_schema_path), child)
     write(child_schema_path, child_schema)
-    child_schema_sha256 = hashlib.sha256(child_schema_path.read_bytes()).hexdigest()
+    machine_schema_sha256 = {
+        schema_id: hashlib.sha256(
+            (ROOT / "docs/contracts/schemas" / f"{schema_id}.schema.json").read_bytes()
+        ).hexdigest()
+        for schema_id in load(interface_path)["base"]["semantic"]["machineSchemas"]
+    }
     interface, old_compatibility, new_compatibility = update_interface(
         load(interface_path),
         old_profiles=old_profiles,
         new_profiles=new_profiles,
-        child_schema_sha256=child_schema_sha256,
+        machine_schema_sha256=machine_schema_sha256,
     )
     child = update_child(
         child,

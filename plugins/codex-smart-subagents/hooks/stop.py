@@ -29,7 +29,7 @@ from integration_runtime_v2 import (  # noqa: E402
     HookTurnContextV2,
     IntegrationConfigV2,
     TurnContextStoreV2,
-    durable_smart_turn_state_v2,
+    durable_stop_smart_turn_state_v2,
     require_current_user_mcp_policy_v2,
 )
 
@@ -40,6 +40,7 @@ class V2PlanStateProvider(Protocol):
         config: IntegrationConfigV2,
         record: HookTurnContextV2,
         *,
+        environ: Mapping[str, str],
         deadline: float,
     ) -> str: ...
 
@@ -48,7 +49,7 @@ def handle(
     payload: dict[str, Any],
     environ: Mapping[str, str],
     *,
-    v2_plan_state_provider: V2PlanStateProvider = durable_smart_turn_state_v2,
+    v2_plan_state_provider: V2PlanStateProvider = durable_stop_smart_turn_state_v2,
 ) -> dict[str, Any] | None:
     if not environment_is_active(environ):
         return None
@@ -80,6 +81,7 @@ def handle(
                 route_state = v2_plan_state_provider(
                     config_v2,
                     current,
+                    environ=environ,
                     deadline=deadline,
                 )
                 if route_state in {"DIRECT", "CLARIFY", "DELEGATE_TERMINAL"}:

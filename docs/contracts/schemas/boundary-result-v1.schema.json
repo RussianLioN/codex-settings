@@ -37,6 +37,7 @@
           ],
           "properties": {
             "q1-dependent-chain": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -45,6 +46,7 @@
               ]
             },
             "q1-bounded-tradeoff": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -53,6 +55,7 @@
               ]
             },
             "q2-cross-boundary-invariant": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -61,6 +64,7 @@
               ]
             },
             "q2-adversarial-concurrency": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -69,6 +73,7 @@
               ]
             },
             "q2-conflict-synthesis": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -89,6 +94,7 @@
           ],
           "properties": {
             "p1-scope-2-to-5": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -97,6 +103,7 @@
               ]
             },
             "p2-scope-6-plus": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -105,6 +112,7 @@
               ]
             },
             "p2-boundaries-2-plus": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -113,6 +121,7 @@
               ]
             },
             "p2-workstreams-2-plus": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -136,6 +145,7 @@
           ],
           "properties": {
             "v1-reversible-persistent": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -144,6 +154,7 @@
               ]
             },
             "v1-user-visible-isolated": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -152,6 +163,7 @@
               ]
             },
             "v2-shared-or-production": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -160,6 +172,7 @@
               ]
             },
             "v2-destructive-or-unproven-rollback": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -168,6 +181,7 @@
               ]
             },
             "v2-trust-secret-permission": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -176,6 +190,7 @@
               ]
             },
             "v2-high-stakes": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -184,6 +199,7 @@
               ]
             },
             "v2-release-or-migration": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -207,6 +223,7 @@
           ],
           "properties": {
             "o1-discoverable-missing-fact": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -215,6 +232,7 @@
               ]
             },
             "o1-mutable-current-state": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -223,6 +241,7 @@
               ]
             },
             "o1-explicit-reversible-assumption": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -231,6 +250,7 @@
               ]
             },
             "o2-authority-conflict": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -239,6 +259,7 @@
               ]
             },
             "o2-undiscoverable-required-fact": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -247,6 +268,7 @@
               ]
             },
             "o2-unreproducible-conflict": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -255,6 +277,7 @@
               ]
             },
             "o2-uncontracted-interface": {
+              "type": "string",
               "enum": [
                 "false",
                 "true",
@@ -280,8 +303,8 @@
     },
     "hardFloorReasons": {
       "type": "array",
-      "uniqueItems": true,
       "items": {
+        "type": "string",
         "enum": [
           "architecture-decision",
           "public-contract",
@@ -295,6 +318,7 @@
       }
     },
     "hardFloor": {
+      "type": "string",
       "enum": [
         "none",
         "terra",
@@ -302,6 +326,7 @@
       ]
     },
     "hardBan": {
+      "type": "string",
       "enum": [
         "none",
         "direct",
@@ -328,46 +353,7 @@
           "minimum": 0,
           "maximum": 2
         }
-      },
-      "oneOf": [
-        {
-          "properties": {
-            "min": {
-              "const": 0
-            },
-            "max": {
-              "enum": [
-                0,
-                1,
-                2
-              ]
-            }
-          }
-        },
-        {
-          "properties": {
-            "min": {
-              "const": 1
-            },
-            "max": {
-              "enum": [
-                1,
-                2
-              ]
-            }
-          }
-        },
-        {
-          "properties": {
-            "min": {
-              "const": 2
-            },
-            "max": {
-              "const": 2
-            }
-          }
-        }
-      ]
+      }
     }
   }
 }

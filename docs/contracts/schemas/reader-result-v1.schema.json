@@ -7,7 +7,10 @@
   "required": ["summary", "validationState", "artifactId"],
   "properties": {
     "summary": {"type": "string", "minLength": 1, "maxLength": 4000},
-    "validationState": {"enum": ["not_applicable", "passed", "failed"]},
-    "artifactId": {"const": ""}
+    "validationState": {
+      "type": "string",
+      "enum": ["not_applicable", "passed", "failed"]
+    },
+    "artifactId": {"type": "string", "const": ""}
   }
 }

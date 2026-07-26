@@ -2631,7 +2631,7 @@ def _materialize_argv(
             continue
         slot = item["slot"]
         if slot == "shellEnvironmentSet":
-            value = canonical_json_v1(non_secret_environment)
+            value = _toml_inline_string_map(non_secret_environment)
         else:
             value = arguments[slot]
             if item["encoding"] == "json-string":
@@ -2640,6 +2640,14 @@ def _materialize_argv(
     for feature in profile["disabledFeatures"]:
         result.extend(["--disable", feature])
     return result
+
+
+def _toml_inline_string_map(value: dict[str, str]) -> str:
+    entries = ",".join(
+        canonical_json_v1(name) + "=" + canonical_json_v1(item)
+        for name, item in sorted(value.items())
+    )
+    return "{" + entries + "}"
 
 
 def materialize_launch_binding(
@@ -3292,11 +3300,11 @@ def validate_child_negative_cases(root: Path = ROOT) -> CheckSummary:
                     for index, value in enumerate(changed["concreteArgv"])
                     if value.startswith(prefix)
                 )
-                environment = strict_json_loads(
-                    changed["concreteArgv"][index][len(prefix) :]
-                )
+                environment = copy.deepcopy(changed["nonSecretEnvironment"])
                 environment[operation["key"]] = operation["value"]
-                changed["concreteArgv"][index] = prefix + canonical_json_v1(environment)
+                changed["concreteArgv"][index] = (
+                    prefix + _toml_inline_string_map(environment)
+                )
                 actual = (
                     "profile-resolution-valid"
                     if _binding_internal_valid(
@@ -3463,10 +3471,13 @@ def _boundary_policy_valid(
         for index, level in enumerate(policy["hardFloorDefinitions"]["levels"]):
             for reason in level["reasons"]:
                 reason_rank[reason] = index
-        if any(reason not in reason_rank for reason in value["hardFloorReasons"]):
+        hard_floor_reasons = value["hardFloorReasons"]
+        if len(set(hard_floor_reasons)) != len(hard_floor_reasons):
+            return False
+        if any(reason not in reason_rank for reason in hard_floor_reasons):
             return False
         floor_index = max(
-            [0] + [reason_rank[reason] for reason in value["hardFloorReasons"]]
+            [0] + [reason_rank[reason] for reason in hard_floor_reasons]
         )
         return (
             value["hardFloor"]

@@ -6,8 +6,10 @@ import os
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 from jsonschema import Draft202012Validator
 from referencing import Registry, Resource
@@ -40,6 +42,7 @@ from codex_smart_subagents.activation_transition_v2 import (  # noqa: E402
     shutdown_current_activation_v2,
     stage_upgrade_activation_v2,
 )
+import codex_smart_subagents.activation_transition_v2 as transition_v2  # noqa: E402
 from codex_smart_subagents.health_bootstrap_v2 import (  # noqa: E402
     bootstrap_health_activation_v2,
 )
@@ -324,6 +327,63 @@ class ActivationTransitionV2Tests(unittest.TestCase):
         )
         self.layout.journal_path.chmod(0o600)
 
+    def shift_commit_receipt_devices(self, delta: int) -> None:
+        receipt_path = self.runtime.materialization.receipt_path
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        for name, domain in (
+            ("manifest", "codex-smart/journal-state/v2"),
+            ("activation", "codex-smart/journal-state/v2"),
+            ("databaseBinding", "codex-smart/database-binding/v2"),
+        ):
+            projection = receipt[name]
+            if name == "manifest":
+                projection["value"]["file"]["device"] += delta
+            elif name == "activation":
+                projection["value"]["directory"]["device"] += delta
+                projection["value"]["activationFile"]["device"] += delta
+            else:
+                projection["value"]["device"] += delta
+            projection["valueFingerprint"] = domain_fingerprint(
+                domain,
+                {
+                    key: value
+                    for key, value in projection.items()
+                    if key != "valueFingerprint"
+                },
+            )
+        absence = receipt["journalAbsenceTarget"]
+        absence_value = absence["value"]
+        for entry in absence_value["entries"]:
+            entry["parentDevice"] += delta
+        absence_value["proofFingerprint"] = domain_fingerprint(
+            "codex-smart/absence-proof/v2",
+            {
+                key: value
+                for key, value in absence_value.items()
+                if key != "proofFingerprint"
+            },
+        )
+        absence["valueFingerprint"] = domain_fingerprint(
+            "codex-smart/absence-proof-projection/v2",
+            {
+                key: value
+                for key, value in absence.items()
+                if key != "valueFingerprint"
+            },
+        )
+        receipt["receiptFingerprint"] = domain_fingerprint(
+            "codex-smart/activation-commit-receipt/v2",
+            {
+                key: value
+                for key, value in receipt.items()
+                if key != "receiptFingerprint"
+            },
+        )
+        receipt_path.write_text(
+            json.dumps(receipt, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+
     def stage(self, proof, operation_id: str):
         return stage_upgrade_activation_v2(
             proof=proof,
@@ -373,6 +433,49 @@ class ActivationTransitionV2Tests(unittest.TestCase):
         )
         self.assertTrue(proof.complete)
         self.assertFalse(self.layout.journal_path.exists())
+
+    def test_capture_and_reverify_accept_device_drift_after_reboot(self) -> None:
+        self.shift_commit_receipt_devices(1)
+
+        proof = self.capture()
+        operation_id = "op2_" + "f" * 32
+        self.create_gate_journal(operation_id)
+        reverified = reverify_activation_transition_proof_v2(
+            proof,
+            operation_id=operation_id,
+            require_journal=True,
+        )
+
+        self.assertEqual(proof.proof_fingerprint, reverified.proof_fingerprint)
+
+    def test_reverify_keeps_same_operation_device_check_strict(self) -> None:
+        proof = self.capture()
+        operation_id = "op2_" + "e" * 32
+        self.create_gate_journal(operation_id)
+        original_file_projection = transition_v2._file_projection
+
+        def changed_file_projection(path: Path):
+            projection = original_file_projection(path)
+            if path == self.layout.manifest_path:
+                projection = dict(projection)
+                projection["device"] += 1
+            return projection
+
+        with (
+            mock.patch.object(
+                transition_v2,
+                "_file_projection",
+                side_effect=changed_file_projection,
+            ),
+            self.assertRaises(ActivationTransitionV2Error) as captured,
+        ):
+            reverify_activation_transition_proof_v2(
+                proof,
+                operation_id=operation_id,
+                require_journal=True,
+            )
+
+        self.assertEqual("MANIFEST_CHANGED", captured.exception.code)
 
     def test_capture_refuses_missing_or_foreign_installer_ownership_receipt(
         self,
@@ -589,9 +692,10 @@ class ActivationTransitionV2Tests(unittest.TestCase):
         self.assertEqual("CONTROLLER_PROOF_INVALID", captured.exception.code)
         self.assertEqual(["maintenance_begin"], [name for name, _ in port.calls])
 
-    def test_link_and_manifest_handlers_record_exact_three_way_projections(
+    def test_link_and_manifest_handlers_survive_durable_device_drift(
         self,
     ) -> None:
+        self.shift_commit_receipt_devices(1)
         proof = self.capture()
         operation_id = "op2_" + "8" * 32
         self.create_gate_journal(operation_id)
@@ -711,6 +815,86 @@ class ActivationTransitionV2Tests(unittest.TestCase):
         self.assertEqual(proof.active_pointer, committed["previousActivation"])
         self.assertEqual(proof.installation_id, committed["installationId"])
         self.assertEqual(operation_id, committed["lastCommittedOperation"])
+
+    def test_manifest_commit_rejects_device_normalized_bad_value_fingerprint(
+        self,
+    ) -> None:
+        proof = self.capture()
+        operation_id = "op2_" + "7" * 32
+        self.create_gate_journal(operation_id)
+        staged = self.stage(proof, operation_id)
+        prepared_manifest = prepare_manifest_file_v2(
+            proof=proof,
+            staged=staged,
+            activation_tree_sha256=_tree_sha256(staged.activation_dir),
+        )
+        link_plan = build_activation_link_plan_v2(proof=proof, staged=staged)
+        manifest_plan = build_manifest_commit_plan_v2(
+            proof=proof,
+            staged=staged,
+            prepared=prepared_manifest,
+        )
+        port = _ControllerPort(control_epoch=int(proof.controller_row["control_epoch"]))
+        shutdown = shutdown_current_activation_v2(
+            proof=proof,
+            operation_id=operation_id,
+            controller_port=port,
+        )
+        link = authorize_activation_link_plan_v2(
+            plan=link_plan,
+            proof=proof,
+            staged=staged,
+            shutdown=shutdown,
+        )
+        apply_activation_link_primitive_v2(link, shutdown=shutdown)
+        accepted = accept_upgrade_candidate_v2(
+            proof=proof,
+            staged=staged,
+            shutdown=shutdown,
+            controller_port=port,
+            pid=os.getpid(),
+            process_start_marker="test-process-start",
+            process_group_id=os.getpgrp(),
+        )
+        manifest = authorize_manifest_commit_plan_v2(
+            plan=manifest_plan,
+            proof=proof,
+            staged=staged,
+            acceptance=accepted,
+        )
+        apply_manifest_commit_primitive_v2(manifest, acceptance=accepted)
+        recovered_manifest = authorize_manifest_commit_plan_v2(
+            plan=manifest_plan,
+            proof=proof,
+            staged=staged,
+            acceptance=accepted,
+        )
+        bad_expected_after = replace(
+            recovered_manifest.expected_after,
+            value_fingerprint="1" * 64,
+        )
+        self.assertEqual(
+            recovered_manifest.expected_after.value,
+            bad_expected_after.value,
+        )
+        self.assertNotEqual(
+            recovered_manifest.expected_after.value_fingerprint,
+            bad_expected_after.value_fingerprint,
+        )
+        corrupted = replace(
+            recovered_manifest,
+            expected_after=bad_expected_after,
+            primitive_fingerprint="0" * 64,
+        )
+        corrupted = transition_v2._replace_primitive_fingerprint(
+            corrupted,
+            transition_v2._primitive_fingerprint(corrupted),
+        )
+
+        with self.assertRaises(ActivationTransitionV2Error) as captured:
+            apply_manifest_commit_primitive_v2(corrupted, acceptance=accepted)
+
+        self.assertEqual("MANIFEST_CHANGED", captured.exception.code)
 
 
 if __name__ == "__main__":

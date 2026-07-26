@@ -1054,8 +1054,10 @@ def verify_prepared_manifest_file_v2(
     if (
         raw != prepared.prepared_raw
         or document != dict(prepared.manifest_document)
-        or _file_projection(prepared.prepared_path)
-        != dict(prepared.prepared_file_projection)
+        or not _durable_filesystem_projection_matches(
+            prepared.prepared_file_projection,
+            _file_projection(prepared.prepared_path),
+        )
         or prepared.prepared_file.value
         != dict(prepared.prepared_file_projection)
     ):
@@ -1129,7 +1131,7 @@ def observe_prepared_manifest_transition_v2(
         or stat.S_ISLNK(parent.st_mode)
         or parent.st_uid != os.getuid()
         or stat.S_IMODE(parent.st_mode) != 0o700
-        or parent.st_dev != prepared.prepared_parent_device
+        or not _captured_device_is_valid(prepared.prepared_parent_device)
         or parent.st_ino != prepared.prepared_parent_inode
     ):
         _fail(
@@ -1145,8 +1147,10 @@ def observe_prepared_manifest_transition_v2(
     if (
         target_raw == proof.manifest_raw
         and target_document == dict(proof.manifest_document)
-        and _manifest_projection(prepared.target_path, target_document)
-        == proof.manifest_projection
+        and _durable_manifest_projection_matches(
+            proof.manifest_projection,
+            _manifest_projection(prepared.target_path, target_document),
+        )
     ):
         if not _lexists(prepared.prepared_path):
             _fail(
@@ -1163,8 +1167,10 @@ def observe_prepared_manifest_transition_v2(
     if (
         target_raw == prepared.prepared_raw
         and target_document == dict(prepared.manifest_document)
-        and _manifest_projection(prepared.target_path, target_document)
-        == prepared.expected_after
+        and _durable_manifest_projection_matches(
+            prepared.expected_after,
+            _manifest_projection(prepared.target_path, target_document),
+        )
     ):
         if _lexists(prepared.prepared_path):
             _fail(
@@ -1339,9 +1345,9 @@ def apply_manifest_commit_primitive_v2(
         require_canonical=True,
     )
     observed = _manifest_projection(primitive.target_path, live_document)
-    if observed == primitive.expected_after:
-        return _mutation_result(primitive, observed)
-    if observed != primitive.before:
+    if _durable_manifest_projection_matches(primitive.expected_after, observed):
+        return _mutation_result(primitive, primitive.expected_after)
+    if not _durable_manifest_projection_matches(primitive.before, observed):
         _fail("MANIFEST_CHANGED", "живой манифест не совпадает с before")
     if (
         primitive.prepared_path is None
@@ -1357,16 +1363,21 @@ def apply_manifest_commit_primitive_v2(
     if (
         raw != primitive.prepared_raw
         or document != dict(primitive.manifest_document)
-        or _file_projection(primitive.prepared_path)
-        != dict(primitive.prepared_file_projection)
+        or not _durable_filesystem_projection_matches(
+            primitive.prepared_file_projection,
+            _file_projection(primitive.prepared_path),
+        )
     ):
         _fail("MANIFEST_PREPARED_CHANGED", "подготовленный inode заменён")
     os.replace(primitive.prepared_path, primitive.target_path)
     _fsync_directory(primitive.target_path.parent)
     observed = _manifest_projection(primitive.target_path, primitive.manifest_document)
-    if observed != primitive.expected_after:
+    if not _durable_manifest_projection_matches(
+        primitive.expected_after,
+        observed,
+    ):
         _fail("MANIFEST_COMMIT_FAILED", "observedAfter отличается от expectedAfter")
-    return _mutation_result(primitive, observed)
+    return _mutation_result(primitive, primitive.expected_after)
 
 
 def capture_activation_transition_proof_v2(
@@ -1487,8 +1498,14 @@ def capture_activation_transition_proof_v2(
     except Exception as exc:
         _fail("COMMIT_RECEIPT_CHANGED", f"проекции квитанции неполны: {exc}")
     if (
-        manifest_projection.value.get("file") != _file_projection(layout.manifest_path)
-        or activation_projection.value.get("directory") != activation_tree.value
+        not _durable_filesystem_projection_matches(
+            manifest_projection.value.get("file"),
+            _file_projection(layout.manifest_path),
+        )
+        or not _durable_filesystem_projection_matches(
+            activation_projection.value.get("directory"),
+            activation_tree.value,
+        )
         or database_binding.to_document() != commit["databaseBinding"]
         or database_binding.value.get("path") != str(binding.database_path)
         or database_binding.value.get("activationIdentity", {}).get("activationId")
@@ -2661,7 +2678,6 @@ def _validate_database_file_identity(binding: ProjectionV2) -> None:
     except OSError as exc:
         _fail("DATABASE_BINDING_CHANGED", str(exc))
     expected = (
-        value.get("device"),
         value.get("inode"),
         value.get("ownerUid"),
         value.get("ownerGid"),
@@ -2669,15 +2685,77 @@ def _validate_database_file_identity(binding: ProjectionV2) -> None:
         value.get("linkCount"),
     )
     observed = (
-        info.st_dev,
         info.st_ino,
         info.st_uid,
         info.st_gid,
         f"0{stat.S_IMODE(info.st_mode):03o}",
         info.st_nlink,
     )
-    if not stat.S_ISREG(info.st_mode) or expected != observed:
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or not _captured_device_is_valid(value.get("device"))
+        or expected != observed
+    ):
         _fail("DATABASE_BINDING_CHANGED", "файл базы больше не принадлежит снимку")
+
+
+def _captured_device_is_valid(value: object) -> bool:
+    return type(value) is int and 0 <= value <= 9_007_199_254_740_991
+
+
+def _durable_filesystem_projection_matches(
+    captured: object,
+    observed: Mapping[str, Any],
+) -> bool:
+    if not isinstance(captured, Mapping) or set(captured) != set(observed):
+        return False
+    if not _captured_device_is_valid(captured.get("device")):
+        return False
+    return all(
+        key == "device" or captured[key] == observed[key]
+        for key in observed
+    )
+
+
+def _durable_manifest_projection_matches(
+    captured: ProjectionV2,
+    observed: ProjectionV2,
+) -> bool:
+    if (
+        captured.schema_id != observed.schema_id
+        or captured.schema_sha256 != observed.schema_sha256
+        or not _projection_value_fingerprint_matches(
+            captured,
+            "codex-smart/journal-state/v2",
+        )
+        or set(captured.value) != set(observed.value)
+    ):
+        return False
+    captured_file = captured.value.get("file")
+    observed_file = observed.value.get("file")
+    if not isinstance(observed_file, Mapping):
+        return False
+    if not _durable_filesystem_projection_matches(
+        captured_file,
+        observed_file,
+    ):
+        return False
+    return all(
+        key == "file" or captured.value[key] == observed.value[key]
+        for key in observed.value
+    )
+
+
+def _projection_value_fingerprint_matches(
+    projection: ProjectionV2,
+    domain: str,
+) -> bool:
+    envelope = {
+        "schemaId": projection.schema_id,
+        "schemaSha256": projection.schema_sha256,
+        "value": copy.deepcopy(dict(projection.value)),
+    }
+    return projection.value_fingerprint == domain_fingerprint(domain, envelope)
 
 
 def _observe_link(path: Path) -> tuple[ProjectionV2, os.stat_result, str]:

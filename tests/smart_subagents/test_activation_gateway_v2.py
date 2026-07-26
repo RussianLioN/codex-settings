@@ -37,6 +37,8 @@ from codex_smart_subagents.activation_gateway_v2 import (  # noqa: E402
     _refresh_absence_proof,
     _validate_original_backup,
     clean_ordinary_environment,
+    refresh_activation_journal_absence_v2,
+    require_pinned_controller_health_v2,
     run_permanent_gateway,
     v2_gateway_state_present,
 )
@@ -1213,6 +1215,88 @@ class ActivationResolverTests(unittest.TestCase):
             self.fixture.controller_identity,
             binding.controller_row["controller_identity"],
         )
+
+    def test_fast_pinned_health_check_reuses_the_proven_controller_protocol(
+        self,
+    ) -> None:
+        observed: list[tuple[Path, dict[str, object]]] = []
+
+        def probe(
+            socket_path: Path,
+            request: dict[str, object],
+        ) -> dict[str, object]:
+            observed.append((socket_path, copy.deepcopy(request)))
+            return self.fixture.controller_probe(socket_path, request)
+
+        require_pinned_controller_health_v2(
+            codex_home=self.fixture.codex_home,
+            state_home=self.fixture.state_home,
+            activation_id=self.fixture.activation_id,
+            controller_probe=probe,
+        )
+
+        self.assertEqual(1, len(observed))
+        self.assertEqual(self.fixture.socket_path, observed[0][0])
+        self.assertEqual("health", observed[0][1]["method"])
+        self.assertEqual(
+            self.fixture.receipt["journalAbsenceTarget"],
+            refresh_activation_journal_absence_v2(
+                self.fixture.receipt["journalAbsenceTarget"],
+                expected_journal=self.fixture.layout.journal_path,
+            ),
+        )
+
+    def test_fast_pinned_health_check_rejects_another_activation(self) -> None:
+        def mismatched(
+            socket_path: Path,
+            request: dict[str, object],
+        ) -> dict[str, object]:
+            response = self.fixture.controller_probe(socket_path, request)
+            response["payload"]["activationFingerprint"] = "f" * 64
+            response["responseFingerprint"] = domain_fingerprint(
+                "codex-smart/controller-response/v2",
+                {
+                    key: value
+                    for key, value in response.items()
+                    if key not in {"responseFingerprint", "extensions"}
+                },
+            )
+            return response
+
+        with self.assertRaisesRegex(_ProofError, "activation"):
+            require_pinned_controller_health_v2(
+                codex_home=self.fixture.codex_home,
+                state_home=self.fixture.state_home,
+                activation_id=self.fixture.activation_id,
+                controller_probe=mismatched,
+            )
+
+    def test_fast_pinned_health_check_rejects_maintenance(self) -> None:
+        def maintenance(
+            socket_path: Path,
+            request: dict[str, object],
+        ) -> dict[str, object]:
+            response = self.fixture.controller_probe(socket_path, request)
+            response["payload"]["state"] = "MAINTENANCE"
+            response["payload"]["maintenanceMode"] = "PREPARE"
+            response["payload"]["acceptingNewRoutes"] = False
+            response["responseFingerprint"] = domain_fingerprint(
+                "codex-smart/controller-response/v2",
+                {
+                    key: value
+                    for key, value in response.items()
+                    if key not in {"responseFingerprint", "extensions"}
+                },
+            )
+            return response
+
+        with self.assertRaisesRegex(_ProofError, "accepting"):
+            require_pinned_controller_health_v2(
+                codex_home=self.fixture.codex_home,
+                state_home=self.fixture.state_home,
+                activation_id=self.fixture.activation_id,
+                controller_probe=maintenance,
+            )
 
     def test_snapshot_device_drift_after_reboot_is_accepted(self) -> None:
         original_verify = gateway_module._verify_private_file

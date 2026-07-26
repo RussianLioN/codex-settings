@@ -226,7 +226,8 @@ def _profile(profile: Mapping[str, Any]) -> dict[str, Any]:
                 *_PERMISSION_ARGUMENT_SLOTS,
             }
             or type(item["prefix"]) is not str
-            or item["encoding"] not in {"raw", "json-string", "canonical-json"}
+            or item["encoding"]
+            not in {"raw", "json-string", "toml-inline-table"}
         ):
             _fail("PROFILE_INVALID", "неверная привязка аргумента")
     permission_items = [
@@ -380,9 +381,9 @@ def _materialize_argv(
             continue
         slot = item["slot"]
         if slot == "shellEnvironmentSet":
-            if item["encoding"] != "canonical-json":
+            if item["encoding"] != "toml-inline-table":
                 _fail("PROFILE_INVALID", "неверная кодировка среды в аргументах")
-            value = canonical_json_v1(dict(non_secret_environment))
+            value = _toml_inline_string_map(non_secret_environment)
         else:
             value = arguments[slot]
             if item["encoding"] == "json-string":
@@ -398,6 +399,16 @@ def _materialize_argv(
     if len(argv) > _MAX_ARGV_ITEMS:
         _fail("ARGV_INVALID", "слишком много аргументов")
     return argv
+
+
+def _toml_inline_string_map(value: Mapping[str, str]) -> str:
+    """Кодирует строковую карту как детерминированную встроенную таблицу TOML."""
+
+    entries = ",".join(
+        canonical_json_v1(name) + "=" + canonical_json_v1(item)
+        for name, item in sorted(value.items())
+    )
+    return "{" + entries + "}"
 
 
 def _otel_exporter_config(endpoint: str) -> str:

@@ -35,7 +35,7 @@ from codex_smart_subagents.activation_gateway_v2 import (  # noqa: E402
     v2_gateway_state_present,
 )
 from codex_smart_subagents.activation_materializer_v2 import (  # noqa: E402
-    _POLICY_VECTOR_FILES,
+    _CONFIG_CONTRACT_VECTOR_FILES,
     _RUNTIME_SCHEMA_FILES,
     _RUNTIME_VECTOR_FILES,
     cleanup_accepted_activation_v2,
@@ -233,7 +233,7 @@ class InstallLayout:
     @property
     def policy_source_paths(self) -> tuple[Path, ...]:
         root = self.source_root / "docs" / "contracts" / "vectors"
-        return tuple(root / name for name in _POLICY_VECTOR_FILES)
+        return tuple(root / name for name in _CONFIG_CONTRACT_VECTOR_FILES)
 
     @property
     def runtime_schema_paths(self) -> tuple[Path, ...]:
@@ -1037,6 +1037,10 @@ def _upgrade_install(
             return reconciled
         previous_receipt = _load_installer_receipt(layout.installer_receipt_path)
 
+    _supervise_existing(
+        layout,
+        extra_environment=extra_environment,
+    )
     proof = capture_activation_transition_proof_v2(
         codex_home=layout.codex_home,
         wrapper=layout.launcher_path,

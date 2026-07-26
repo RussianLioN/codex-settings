@@ -180,6 +180,72 @@ for line in sys.stdin:
                 )
         self.assertEqual([], calls)
 
+    def test_accepts_owned_non_writable_account_home_with_group_access(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            executable = root / "codex-snapshot"
+            executable.write_text(
+                """#!/usr/bin/env python3
+import json
+import os
+import sys
+
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if method == "initialize":
+        result = {
+            "userAgent": "fake-codex",
+            "codexHome": os.environ["CODEX_HOME"],
+            "platformFamily": "unix",
+            "platformOs": "test",
+        }
+    elif method == "initialized":
+        continue
+    elif method == "configRequirements/read":
+        result = {"requirements": None}
+    else:
+        raise SystemExit(7)
+    print(json.dumps({"id": request["id"], "result": result}), flush=True)
+""",
+                encoding="utf-8",
+            )
+            executable.chmod(0o700)
+            environment = self._environment(root)
+            Path(environment["HOME"]).chmod(0o750)
+
+            observed = AppServerAccountEvidenceExecutorV2().execute(
+                "requirements-a",
+                executable_path=str(executable),
+                argv=ACCOUNT_ARGV,
+                environment=environment,
+                timeout_seconds=30,
+            )
+
+            self.assertIsNone(observed)
+
+    def test_rejects_group_writable_account_home(self) -> None:
+        for mode in (0o770, 0o777):
+            with self.subTest(mode=oct(mode)), tempfile.TemporaryDirectory() as raw:
+                root = Path(raw).resolve()
+                executable = root / "codex-snapshot"
+                executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                executable.chmod(0o700)
+                environment = self._environment(root)
+                Path(environment["HOME"]).chmod(mode)
+
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "owned non-writable directory",
+                ):
+                    AppServerAccountEvidenceExecutorV2().execute(
+                        "requirements-a",
+                        executable_path=str(executable),
+                        argv=ACCOUNT_ARGV,
+                        environment=environment,
+                        timeout_seconds=30,
+                    )
+
     def test_rejects_oversized_or_too_deep_raw_requirements_envelope(self) -> None:
         class Client:
             def __init__(self, result: object) -> None:

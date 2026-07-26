@@ -33,7 +33,53 @@ description: Use when an adaptive Codex turn is active and the task may benefit 
   `roleTemplateId`. В `taskFacts.delegation` передавай только проверяемость и
   число независимых единиц; разрешение делегирования и остальные служебные
   поля добавляет контроллер.
-- Формируй `q`, `p`, `v`, `o` по нормативным описаниям в `tools/list`.
+- Не перепечатывай нормативный объект вручную. Возьми абсолютный путь этого
+  `SKILL.md`, от каталога навыка поднимись на два уровня к корню подключаемого
+  модуля, прочитай `config/contracts/routing-input-v2.json` и программно
+  скопируй `baseInput`.
+  Например:
+
+  ```javascript
+  const vector = JSON.parse(vectorRead.output);
+  const baseInput = JSON.parse(JSON.stringify(vector.baseInput));
+  const taskFacts = JSON.parse(JSON.stringify(baseInput.taskFacts));
+  delete taskFacts.schemaVersion;
+  delete taskFacts.contractVersion;
+  delete taskFacts.delegation.permission;
+  const routingInput = {
+    taskFacts,
+    contextBundle: JSON.parse(JSON.stringify(baseInput.contextBundle)),
+    roleTemplateId: baseInput.roleTemplateId,
+  };
+  ```
+
+  Меняй в копии только доказанные значения задачи. Не меняй имена полей.
+- Выбери смысловую роль по самой подзадаче, а не по роли корневого диалога:
+  - `researcher-v1` — чтение, поиск и извлечение фактов; обязательные виды
+    контекста: `task-request`, `source-excerpt`;
+  - `diagnostician-v1` — поиск причины сбоя; обязательные виды:
+    `task-request`, `source-excerpt`, `validation-result`;
+  - `validator-v1` — независимая проверка результата; обязательные виды:
+    `task-request`, `dependency-summary`, `validation-result`;
+  - `risk_auditor-v1` — независимая проверка рисков; обязательные виды:
+    `task-request`, `policy-excerpt`, `dependency-summary`;
+  - `implementer-v1` — только изменение файлов; обязательные виды:
+    `task-request`, `repository-instruction`, `dependency-summary`.
+
+  Запиши выбранный идентификатор в `roleTemplateId` и приведи виды записей
+  `contextBundle.entries` к обязательному набору этой роли. Лишняя запись
+  допустима, недостающая — нет. Роль задаёт характер работы и профиль прав;
+  модель и глубину рассуждений по-прежнему выбирает контроллер.
+- До единственного вызова `smart_plan` программно проверь весь изменённый
+  объект. Для каждого изменённого текста пересчитай SHA-256 и точный
+  `byteLength` в байтах UTF-8, обнови связанные `evidenceSha256`, затем
+  пересчитай `contextBundle.totalBytes` и проверь, что
+  `contextBundle.maxBytes` не меньше итога. Не угадывай длину текста и не
+  вызывай `smart_plan`, пока локальная сверка не прошла.
+- Оценки `q`, `p`, `v`, `o` определяй по нормативным описаниям в `tools/list`;
+  `factorClaims` для `q`, `v`, `o` сохраняй из образца и меняй только при
+  наличии соответствующего доказательства. Значение `p` выводит контроллер
+  из формы работы и правил делегирования.
   Неизвестное значение не считай нулём: маршрутизатор выбирает
   консервативную верхнюю границу.
 - Для простой, непроверяемой либо запрещённой к делегированию работы предложи
@@ -42,11 +88,32 @@ description: Use when an adaptive Codex turn is active and the task may benefit 
 
 ## Выполнение
 
-1. Вызови `smart_plan` с закрытым публичным смысловым `routingInput`.
+1. Сначала создай полный `planInput`, затем передай именно его в `smart_plan`.
+   Не передавай `routingInput` непосредственно в корне параметров. Для одного
+   узла точная оболочка такая:
+
+   ```javascript
+   const planInput = {
+     nodes: [{
+       clientNodeId: "stable-semantic-node-id",
+       dependencyIds: [],
+       routingInput,
+     }],
+   };
+   const plan =
+     await tools.mcp__codex_smart_subagents__smart_plan(planInput);
+   ```
+
+   Если подготовленный или сохранённый объект уже содержит `nodes` на верхнем
+   уровне, это готовый `planInput`: никогда не присваивай его переменной
+   `routingInput` и не оборачивай повторно в новый `nodes`.
+   Для нескольких узлов задай каждому уникальный `clientNodeId`, а в
+   `dependencyIds` перечисли только идентификаторы его предшественников.
 2. При `direct` выполни задачу в корневом диалоге.
 3. При `delegate` вызови `route_start` отдельно для указанного узла.
-4. Вызывай `smart_wait` с `startRequestId` и последним курсором, пока состояние
-   не станет конечным.
+4. Первый `smart_wait` вызывай с `startRequestId` и `cursor: null`. В следующие
+   вызовы передавай в `cursor` только непустой `nextCursor`, возвращённый
+   предыдущим ответом. Повторяй, пока состояние не станет конечным.
 5. Если маршрут устарел или больше не нужен, вызови `smart_cancel` с
    подходящим кодом причины.
 

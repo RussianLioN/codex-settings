@@ -857,6 +857,54 @@ class Task1Cycle6RegressionTests(unittest.TestCase):
             )
         )
 
+    def test_child_result_schema_literals_have_explicit_json_types(self) -> None:
+        for relative_path in (
+            "docs/contracts/schemas/boundary-result-v1.schema.json",
+            "docs/contracts/schemas/reader-result-v1.schema.json",
+            "docs/contracts/schemas/writer-result-v1.schema.json",
+        ):
+            schema = load_json(relative_path)
+            pending = [schema]
+            while pending:
+                value = pending.pop()
+                if isinstance(value, dict):
+                    self.assertNotIn("oneOf", value, relative_path)
+                    self.assertNotIn("uniqueItems", value, relative_path)
+                    if "const" in value or "enum" in value:
+                        self.assertIn("type", value, relative_path)
+                    pending.extend(value.values())
+                elif isinstance(value, list):
+                    pending.extend(value)
+
+    def test_boundary_policy_rejects_duplicate_hard_floor_reasons(self) -> None:
+        from scripts import validate_task1_contract_vectors as oracle
+
+        vectors = load_json("docs/contracts/vectors/routing-policy-v2.json")
+        policy = vectors["policy"]
+        value = json.loads(
+            json.dumps(
+                next(
+                    case["value"]
+                    for case in vectors["boundaryCases"]
+                    if case["name"] == "hard-floor-does-not-match-reasons"
+                )
+            )
+        )
+        value["hardFloorReasons"] = ["public-contract", "public-contract"]
+        value["hardFloor"] = "terra"
+
+        schema_validator = oracle._jsonschema_validator(
+            ROOT / "docs/contracts/schemas/boundary-result-v1.schema.json"
+        )
+        self.assertTrue(schema_validator.is_valid(value))
+        self.assertFalse(
+            oracle._boundary_policy_valid(
+                value,
+                policy,
+                policy["factorDefinitions"],
+            )
+        )
+
     def test_trusted_launch_contract_names_both_closed_environment_objects(
         self,
     ) -> None:
