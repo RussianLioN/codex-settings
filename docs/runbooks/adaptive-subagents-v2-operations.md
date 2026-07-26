@@ -6,9 +6,8 @@
 `codex-smart-subagents 0.2.0` и охватывает установщик, постоянную оболочку
 `codex-smart`, полный контроллер версии 2, четыре инструмента умного хода,
 дочерний `codex exec`, возврат результата и карантин пишущего
-субагента. Она не является отчётом о прохождении живых проверок. Актуальный
-отчёт ещё не опубликован; зарезервированный путь —
-`docs/analysis/2026-07-20-adaptive-subagents-v2-validation.md`.
+субагента. Живые проверки и точные наблюдаемые идентификаторы опубликованы в
+[итоговом отчёте](../analysis/2026-07-20-adaptive-subagents-v2-validation.md).
 
 Краткое объяснение находится в [README расширения](../../plugins/codex-smart-subagents/README.md#быстрый-старт),
 а последовательности действий показаны в
@@ -752,9 +751,7 @@ python3 scripts/install_adaptive_subagents.py --recover --preview --json
 
 - [README расширения](../../plugins/codex-smart-subagents/README.md);
 - [диаграммы работы](../analysis/adaptive-subagents-v2-flow.md);
+- [итоговый отчёт живой проверки](../analysis/2026-07-20-adaptive-subagents-v2-validation.md);
 - [договор жизненного цикла](../contracts/adaptive-subagents-lifecycle-v2.md);
 - [договор состояния SQLite](../contracts/adaptive-subagents-state-v2.md);
 - [совместимость интерфейса Codex](../contracts/codex-interface-v1.md).
-
-Путь будущего актуального отчёта живой проверки, пока без ссылки:
-`docs/analysis/2026-07-20-adaptive-subagents-v2-validation.md`.

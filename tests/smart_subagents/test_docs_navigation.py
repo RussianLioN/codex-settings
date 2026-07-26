@@ -85,6 +85,45 @@ class DocsNavigationValidatorTests(unittest.TestCase):
             self.validator.validate_repository(REPO),
         )
 
+    def test_live_validation_report_is_published_and_linked(self) -> None:
+        report = (
+            REPO
+            / "docs/analysis/2026-07-20-adaptive-subagents-v2-validation.md"
+        )
+        self.assertTrue(report.is_file(), report)
+        report_text = report.read_text(encoding="utf-8")
+        self.assertIn("route2_", report_text)
+        self.assertIn("gpt-5.6-luna", report_text)
+        self.assertIn("reasoningEffort", report_text)
+        self.assertIn("`SUCCEEDED`", report_text)
+
+        links = {
+            REPO / "README.md": (
+                "docs/analysis/"
+                "2026-07-20-adaptive-subagents-v2-validation.md"
+            ),
+            REPO / "plugins/codex-smart-subagents/README.md": (
+                "../../docs/analysis/"
+                "2026-07-20-adaptive-subagents-v2-validation.md"
+            ),
+            REPO / "docs/analysis/adaptive-subagents-v2-flow.md": (
+                "2026-07-20-adaptive-subagents-v2-validation.md"
+            ),
+            REPO / "docs/runbooks/adaptive-subagents-v2-operations.md": (
+                "../analysis/"
+                "2026-07-20-adaptive-subagents-v2-validation.md"
+            ),
+        }
+        for path, link in links.items():
+            document = path.read_text(encoding="utf-8")
+            with self.subTest(path=path.relative_to(REPO)):
+                self.assertIn(f"]({link})", document)
+                self.assertNotIn("отчёт ещё не опубликован", document.lower())
+                self.assertNotIn(
+                    "путь будущего актуального отчёта",
+                    document.lower(),
+                )
+
     def test_root_exposes_all_five_v2_flow_diagrams(self) -> None:
         root = (REPO / "README.md").read_text(encoding="utf-8")
         flow_path = REPO / "docs/analysis/adaptive-subagents-v2-flow.md"
