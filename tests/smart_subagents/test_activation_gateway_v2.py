@@ -32,6 +32,7 @@ from codex_smart_subagents.activation_gateway_v2 import (  # noqa: E402
     GatewayLayout,
     GatewayState,
     GatewayUnavailable,
+    ManagedLaunchUnavailable,
     _ProofError,
     _read_owned_json,
     _refresh_absence_proof,
@@ -256,6 +257,8 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
         decision: GatewayDecision,
         arguments: Sequence[str],
         environment: Mapping[str, str],
+        *,
+        managed_required: bool | None = None,
     ) -> tuple[str, tuple[str, ...], dict[str, str]]:
         observed: list[tuple[str, tuple[str, ...], dict[str, str]]] = []
 
@@ -269,6 +272,9 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
 
         source_environment = dict(environment)
         source_environment.setdefault("CODEX_HOME", str(self.root))
+        gateway_options: dict[str, object] = {}
+        if managed_required is not None:
+            gateway_options["managed_required"] = managed_required
         with self.assertRaisesRegex(RuntimeError, "expected exec"):
             run_permanent_gateway(
                 arguments,
@@ -276,6 +282,7 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
                 wrapper=self.wrapper,
                 environment=source_environment,
                 execve=expected_exec,
+                **gateway_options,
             )
         self.assertEqual(1, len(observed))
         return observed[0]
@@ -295,6 +302,7 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
                 "CODEX_HOME": str(self.root),
                 "CODEX_ADAPTIVE_SESSION_ID": "old",
                 "CODEX_SMART_GATE_FINGERPRINT": "bad",
+                "CODEX_SMART_REQUIRED": "1",
                 "CODEX_REAL_BIN": "/wrong/codex",
                 "CODEX_COORDINATOR_MODEL": "wrong",
             },
@@ -313,6 +321,56 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
                 for name in environment
             )
         )
+
+    def test_required_managed_ordinary_decision_fails_without_exec(self) -> None:
+        decision = GatewayDecision(
+            state=GatewayState.ORDINARY,
+            reason_code="MANIFEST_INVALID",
+            executable=self.real,
+        )
+        executions: list[object] = []
+
+        with self.assertRaisesRegex(RuntimeError, "MANIFEST_INVALID"):
+            run_permanent_gateway(
+                ["проверь"],
+                resolver=_StaticResolver(decision),
+                wrapper=self.wrapper,
+                environment={
+                    "PATH": "/usr/bin",
+                    "CODEX_HOME": str(self.root),
+                    "CODEX_SMART_REQUIRED": "1",
+                },
+                managed_required=True,
+                execve=lambda *_arguments: executions.append(object()),
+            )
+
+        self.assertEqual([], executions)
+
+    def test_required_resolver_failure_becomes_managed_unavailable(self) -> None:
+        class UnavailableResolver:
+            def resolve(self):
+                raise GatewayUnavailable(
+                    "FALLBACK_UNAVAILABLE",
+                    "private resolver details",
+                )
+
+        executions: list[object] = []
+        with self.assertRaises(ManagedLaunchUnavailable) as raised:
+            run_permanent_gateway(
+                ["проверь"],
+                resolver=UnavailableResolver(),
+                wrapper=self.wrapper,
+                environment={
+                    "PATH": "/usr/bin",
+                    "CODEX_HOME": str(self.root),
+                    "CODEX_SMART_REQUIRED": "1",
+                },
+                managed_required=True,
+                execve=lambda *_arguments: executions.append(object()),
+            )
+
+        self.assertEqual("FALLBACK_UNAVAILABLE", raised.exception.code)
+        self.assertEqual([], executions)
 
     def test_ready_adds_atomic_coordinator_pair_only_without_explicit_choice(self) -> None:
         decision = GatewayDecision(
@@ -403,11 +461,15 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
                     explicit_argv,
                 )
                 self.assertEqual(
+                    tuple(original),
+                    explicit_argv[1 : 1 + len(original)],
+                )
+                self.assertEqual(
                     decision.gate_fingerprint,
                     explicit_environment["CODEX_SMART_GATE_FINGERPRINT"],
                 )
 
-    def test_adaptive_disable_flags_are_last_even_after_user_enable(self) -> None:
+    def test_user_agent_feature_controls_bypass_managed_rewrite(self) -> None:
         decision = GatewayDecision(
             state=GatewayState.READY,
             reason_code="READY",
@@ -427,28 +489,20 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
             catalog_path=self.root / "adaptive-subagents.toml",
         )
 
-        _path, argv, _environment = self._execute(
+        _path, argv, environment = self._execute(
             decision,
             ["--enable", "multi_agent", "проверь"],
-            {"PATH": "/usr/bin"},
+            {
+                "PATH": "/usr/bin",
+                "CODEX_SMART_GATE_FINGERPRINT": "stale",
+            },
         )
 
         self.assertEqual(
-            (
-                *self.ADAPTIVE_DIRECT_TOOL_ARGUMENTS,
-                *self.ADAPTIVE_DISABLED_FEATURE_ARGUMENTS,
-            ),
-            argv[
-                -len(
-                    self.ADAPTIVE_DIRECT_TOOL_ARGUMENTS
-                    + self.ADAPTIVE_DISABLED_FEATURE_ARGUMENTS
-                ) :
-            ],
+            (str(self.real), "--enable", "multi_agent", "проверь"),
+            argv,
         )
-        self.assertEqual(
-            ("--enable", "multi_agent", "проверь"),
-            argv[1:4],
-        )
+        self.assertNotIn("CODEX_SMART_GATE_FINGERPRINT", environment)
 
     def test_unproved_user_mcp_policy_falls_back_without_smart_environment(
         self,
@@ -484,6 +538,41 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
         self.assertFalse(
             any(name.startswith("CODEX_SMART_") for name in environment)
         )
+
+    def test_required_policy_proof_failure_fails_without_exec(self) -> None:
+        self.config_path.write_text(
+            '[plugins."codex-smart-subagents@codex-settings-adaptive"]\n'
+            "enabled = false\n",
+            encoding="utf-8",
+        )
+        self.config_path.chmod(0o600)
+        decision = GatewayDecision(
+            state=GatewayState.READY,
+            reason_code="READY",
+            executable=self.real,
+            coordinator={"model": "gpt-5.6-terra", "reasoning_effort": "medium"},
+            activation_id="act2_" + "a" * 64,
+            gate_fingerprint="b" * 64,
+            activation_gate={"gateFingerprint": "b" * 64},
+            catalog_path=self.root / "adaptive-subagents.toml",
+        )
+        executions: list[object] = []
+
+        with self.assertRaisesRegex(RuntimeError, "USER_MCP_POLICY_UNPROVED"):
+            run_permanent_gateway(
+                ["проверь"],
+                resolver=_StaticResolver(decision),
+                wrapper=self.wrapper,
+                environment={
+                    "PATH": "/usr/bin",
+                    "CODEX_HOME": str(self.root),
+                    "CODEX_SMART_REQUIRED": "1",
+                },
+                managed_required=True,
+                execve=lambda *_arguments: executions.append(object()),
+            )
+
+        self.assertEqual([], executions)
 
     def test_user_profile_or_arbitrary_config_never_exports_proofs(self) -> None:
         decision = GatewayDecision(

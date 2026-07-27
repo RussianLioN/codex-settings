@@ -22,13 +22,17 @@ from codex_smart_subagents.activation_gateway_v2 import (  # noqa: E402
     GatewayDecision,
     GatewayLayout,
     GatewayState,
+    ManagedLaunchUnavailable,
     run_permanent_gateway,
     v2_gateway_state_present,
 )
 from codex_smart_subagents.controller_supervisor_v2 import (  # noqa: E402
     ControllerSupervisorV2,
 )
-from codex_smart_subagents.launcher import run_launcher  # noqa: E402
+from codex_smart_subagents.launcher import (  # noqa: E402
+    classify_managed_invocation,
+    run_launcher,
+)
 
 
 class _PreparedDecisionResolver:
@@ -86,18 +90,62 @@ def main() -> int:
     environment.setdefault("CODEX_HOME", str(Path.home() / ".codex"))
     codex_home = Path(environment["CODEX_HOME"]).expanduser().absolute()
     gateway_layout = GatewayLayout.for_codex_home(codex_home)
-    if v2_gateway_state_present(gateway_layout):
-        decision = _prepare_v2_decision(
-            gateway_layout=gateway_layout,
-            codex_home=codex_home,
-            environment=environment,
+    arguments = sys.argv[1:]
+    invocation = classify_managed_invocation(arguments)
+    required_value = environment.get("CODEX_SMART_REQUIRED", "0")
+    if invocation.adaptive and required_value not in {"0", "1"}:
+        print(
+            "codex-smart: CODEX_SMART_REQUIRED_INVALID; "
+            "используйте codex-native",
+            file=sys.stderr,
         )
-        return run_permanent_gateway(
-            sys.argv[1:],
-            resolver=_PreparedDecisionResolver(decision),
-            wrapper=Path(__file__),
-            environment=environment,
+        return 69
+    managed_required = required_value == "1" and invocation.adaptive
+    try:
+        if v2_gateway_state_present(gateway_layout):
+            if not invocation.adaptive:
+                resolver = ActivationResolver(
+                    layout=gateway_layout,
+                    wrapper=Path(__file__),
+                )
+                return run_permanent_gateway(
+                    arguments,
+                    resolver=resolver,
+                    wrapper=Path(__file__),
+                    environment=environment,
+                    managed_required=False,
+                )
+            try:
+                decision = _prepare_v2_decision(
+                    gateway_layout=gateway_layout,
+                    codex_home=codex_home,
+                    environment=environment,
+                )
+            except Exception as exc:
+                if managed_required:
+                    raise ManagedLaunchUnavailable(
+                        "MANAGED_PREPARATION_FAILED",
+                        "managed activation preparation failed",
+                    ) from exc
+                raise
+            return run_permanent_gateway(
+                arguments,
+                resolver=_PreparedDecisionResolver(decision),
+                wrapper=Path(__file__),
+                environment=environment,
+                managed_required=managed_required,
+            )
+        if managed_required:
+            raise ManagedLaunchUnavailable(
+                "V2_GATEWAY_UNAVAILABLE",
+                "managed activation state is absent",
+            )
+    except ManagedLaunchUnavailable as exc:
+        print(
+            f"codex-smart: {exc.code}; используйте codex-native",
+            file=sys.stderr,
         )
+        return 69
     environment.setdefault(
         "CODEX_ADAPTIVE_CATALOG",
         str(PLUGIN_ROOT / "config" / "adaptive-subagents.toml"),
@@ -115,7 +163,7 @@ def main() -> int:
         )
 
     return run_launcher(
-        sys.argv[1:],
+        arguments,
         real_binary=config.real_codex,
         wrapper=Path(__file__),
         environment=environment,

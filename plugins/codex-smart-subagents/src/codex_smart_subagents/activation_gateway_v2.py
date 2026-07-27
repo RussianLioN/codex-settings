@@ -27,7 +27,7 @@ from .canonical_json import CanonicalJsonError, canonical_json_bytes, domain_fin
 from .catalog import Catalog, CatalogError
 from .codex_binary_snapshot import CODE_SIGNATURE_REQUIREMENT
 from .evidence import EvidenceError, verify_interface_evidence
-from .launcher import apply_coordinator_defaults, classify_invocation
+from .launcher import apply_coordinator_defaults, classify_managed_invocation
 from .mcp_runtime_proof_v2 import (
     MCP_SESSION_NONCE_ENV_V2,
     USER_MCP_POLICY_PROOF_ENV_V2,
@@ -90,6 +90,15 @@ _MANIFEST_KEYS = {
 
 @dataclass
 class GatewayUnavailable(RuntimeError):
+    code: str
+    message: str
+
+    def __str__(self) -> str:
+        return f"{self.code}: {self.message}"
+
+
+@dataclass
+class ManagedLaunchUnavailable(RuntimeError):
     code: str
     message: str
 
@@ -1392,6 +1401,20 @@ def clean_ordinary_environment(source: Mapping[str, str]) -> dict[str, str]:
     return result
 
 
+def _managed_failure_code(error: Exception, default: str) -> str:
+    code = getattr(error, "code", default)
+    if (
+        not isinstance(code, str)
+        or not code
+        or any(
+            character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+            for character in code
+        )
+    ):
+        return default
+    return code
+
+
 def _coordinator_control(arguments: Sequence[str]) -> bool:
     index = 0
     while index < len(arguments):
@@ -1429,79 +1452,38 @@ def _coordinator_control(arguments: Sequence[str]) -> bool:
     return False
 
 
-def _adaptive_invocation(arguments: Sequence[str]) -> bool:
-    """Classify after removing only explicit coordinator model settings."""
-
-    remaining: list[str] = []
-    index = 0
-    while index < len(arguments):
-        token = arguments[index]
-        if token in {"--enable", "--disable"}:
-            if index + 1 >= len(arguments):
-                return False
-            if arguments[index + 1] in _ADAPTIVE_AGENT_FEATURES:
-                index += 2
-                continue
-        if token.startswith("--enable=") or token.startswith("--disable="):
-            if token.split("=", 1)[1] in _ADAPTIVE_AGENT_FEATURES:
-                index += 1
-                continue
-        if token in {"--model", "-m"}:
-            if index + 1 >= len(arguments) or not arguments[index + 1]:
-                return False
-            index += 2
-            continue
-        if token.startswith("--model="):
-            if not token.split("=", 1)[1]:
-                return False
-            index += 1
-            continue
-        if token.startswith("-m") and token != "-m":
-            if not token[2:]:
-                return False
-            index += 1
-            continue
-        if token == "-c":
-            if index + 1 >= len(arguments):
-                return False
-            assignment = arguments[index + 1].lstrip()
-            if assignment.startswith("model=") or assignment.startswith(
-                "model_reasoning_effort="
-            ):
-                index += 2
-                continue
-            remaining.extend((token, arguments[index + 1]))
-            index += 2
-            continue
-        if token.startswith("-c") and token != "-c":
-            assignment = token[2:].lstrip()
-            if assignment.startswith("model=") or assignment.startswith(
-                "model_reasoning_effort="
-            ):
-                index += 1
-                continue
-        remaining.append(token)
-        index += 1
-    return classify_invocation(remaining).adaptive
-
-
 def run_permanent_gateway(
     arguments: Sequence[str],
     *,
     resolver: GatewayResolver,
     wrapper: Path,
     environment: Mapping[str, str] | None = None,
+    managed_required: bool = False,
     execve=os.execve,
 ) -> int:
     """Resolve once and replace the permanent wrapper with selected Codex."""
 
     source_environment = dict(os.environ if environment is None else environment)
-    decision = resolver.resolve()
+    invocation = classify_managed_invocation(arguments)
+    try:
+        decision = resolver.resolve()
+    except Exception as exc:
+        if managed_required and invocation.adaptive:
+            raise ManagedLaunchUnavailable(
+                _managed_failure_code(exc, "MANAGED_RESOLUTION_FAILED"),
+                "managed activation resolution failed",
+            ) from exc
+        raise
     executable = decision.executable
     if executable.resolve() == wrapper.expanduser().resolve():
         raise RuntimeError("LAUNCHER_RECURSION: selected Codex is the gateway")
 
-    if decision.state is GatewayState.ORDINARY or not _adaptive_invocation(arguments):
+    if decision.state is GatewayState.ORDINARY or not invocation.adaptive:
+        if managed_required and invocation.adaptive:
+            raise ManagedLaunchUnavailable(
+                decision.reason_code,
+                "managed activation is unavailable",
+            )
         ordinary_environment = clean_ordinary_environment(source_environment)
         execve(
             str(executable),
@@ -1515,7 +1497,15 @@ def run_permanent_gateway(
         policy_proof = build_user_mcp_policy_proof_v2(
             Path(source_environment.get("CODEX_HOME", ""))
         )
-    except Exception:
+    except Exception as exc:
+        if managed_required:
+            raise ManagedLaunchUnavailable(
+                _managed_failure_code(
+                    exc,
+                    "MANAGED_POLICY_PROOF_UNAVAILABLE",
+                ),
+                "managed policy proof is unavailable",
+            ) from exc
         ordinary_environment = clean_ordinary_environment(source_environment)
         execve(
             str(executable),

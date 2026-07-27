@@ -36,6 +36,7 @@ _SUBCOMMANDS = frozenset(
         "execpolicy",
         "features",
         "fork",
+        "help",
         "login",
         "logout",
         "mcp",
@@ -46,6 +47,7 @@ _SUBCOMMANDS = frozenset(
         "review",
         "sandbox",
         "unarchive",
+        "update",
     }
 )
 _SUPPORTED_VALUE_OPTIONS = frozenset({"-C", "--cd", "-i", "--image"})
@@ -160,6 +162,52 @@ def classify_invocation(arguments: Sequence[str]) -> InvocationDecision:
     if positional and not after_separator and positional[0] in _SUBCOMMANDS:
         return InvocationDecision(False, f"subcommand {positional[0]}")
     return InvocationDecision(True, "supported interactive invocation")
+
+
+def classify_managed_invocation(arguments: Sequence[str]) -> InvocationDecision:
+    """Classify a managed launch without treating root model controls as bypasses."""
+
+    remaining: list[str] = []
+    index = 0
+    while index < len(arguments):
+        token = arguments[index]
+        if token in {"--model", "-m"}:
+            if index + 1 >= len(arguments) or not arguments[index + 1]:
+                return InvocationDecision(False, f"missing value for {token}")
+            index += 2
+            continue
+        if token.startswith("--model="):
+            if not token.split("=", 1)[1]:
+                return InvocationDecision(False, "missing value for --model")
+            index += 1
+            continue
+        if token.startswith("-m") and token != "-m":
+            if not token[2:]:
+                return InvocationDecision(False, "missing value for -m")
+            index += 1
+            continue
+        if token == "-c":
+            if index + 1 >= len(arguments):
+                return InvocationDecision(False, "missing value for -c")
+            assignment = arguments[index + 1].lstrip()
+            if assignment.startswith("model=") or assignment.startswith(
+                "model_reasoning_effort="
+            ):
+                index += 2
+                continue
+            remaining.extend((token, arguments[index + 1]))
+            index += 2
+            continue
+        if token.startswith("-c") and token != "-c":
+            assignment = token[2:].lstrip()
+            if assignment.startswith("model=") or assignment.startswith(
+                "model_reasoning_effort="
+            ):
+                index += 1
+                continue
+        remaining.append(token)
+        index += 1
+    return classify_invocation(remaining)
 
 
 def parse_codex_version(output: str) -> str:

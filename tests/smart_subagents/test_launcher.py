@@ -4,6 +4,8 @@ import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
 from typing import Mapping, Sequence
 from unittest import mock
@@ -18,6 +20,7 @@ from codex_smart_subagents.launcher import (  # noqa: E402
     apply_coordinator_defaults,
     build_adaptive_environment,
     classify_invocation,
+    classify_managed_invocation,
     parse_codex_version,
     run_launcher,
     validate_real_binary,
@@ -76,6 +79,25 @@ class InvocationClassificationTests(unittest.TestCase):
         for arguments in (["-C"], ["--cd"], ["-i"], ["--image"]):
             with self.subTest(arguments=arguments):
                 self.assertFalse(classify_invocation(arguments).adaptive)
+
+    def test_managed_classifier_bypasses_service_subcommands(self) -> None:
+        for arguments in (["help"], ["update"], ["update", "--help"]):
+            with self.subTest(arguments=arguments):
+                self.assertFalse(classify_managed_invocation(arguments).adaptive)
+
+    def test_managed_classifier_preserves_explicit_coordinator_controls(self) -> None:
+        for arguments in (
+            ["--model", "gpt-user"],
+            ["-m", "gpt-user"],
+            ["-c", 'model="gpt-user"'],
+            ["-c", 'model_reasoning_effort="high"'],
+        ):
+            with self.subTest(arguments=arguments):
+                self.assertTrue(classify_managed_invocation(arguments).adaptive)
+
+    def test_separator_keeps_service_words_as_managed_prompt_text(self) -> None:
+        self.assertTrue(classify_managed_invocation(["--", "help"]).adaptive)
+        self.assertTrue(classify_managed_invocation(["--", "update"]).adaptive)
 
 
 class LauncherSafetyTests(unittest.TestCase):
@@ -189,10 +211,15 @@ class LauncherSafetyTests(unittest.TestCase):
                 executions.append((tuple(arguments), dict(environment)))
                 raise RuntimeError("expected exec")
 
-            with mock.patch(
-                "codex_smart_subagents.launcher.probe_codex_version",
-                return_value="0.144.6",
-            ), self.assertRaisesRegex(RuntimeError, "expected exec"):
+            error = StringIO()
+            with (
+                mock.patch(
+                    "codex_smart_subagents.launcher.probe_codex_version",
+                    return_value="0.144.6",
+                ),
+                self.assertRaisesRegex(RuntimeError, "expected exec"),
+                redirect_stderr(error),
+            ):
                 run_launcher(
                     ["проверь"],
                     real_binary=real,
@@ -205,6 +232,7 @@ class LauncherSafetyTests(unittest.TestCase):
 
             self.assertEqual((str(real.resolve()), "проверь"), executions[0][0])
             self.assertEqual({"PATH": "/usr/bin"}, executions[0][1])
+            self.assertIn("контроллер недоступен", error.getvalue())
 
     def test_ready_launch_uses_catalog_coordinator_pair(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
