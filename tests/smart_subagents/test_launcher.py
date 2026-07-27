@@ -266,6 +266,67 @@ class LauncherSafetyTests(unittest.TestCase):
             self.assertEqual({"PATH": "/usr/bin"}, executions[0][1])
             self.assertIn("контроллер недоступен", error.getvalue())
 
+    def test_recursive_native_launch_cleans_smart_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            wrapper = root / "codex-smart"
+            wrapper.write_text("#!/bin/sh\n", encoding="utf-8")
+            wrapper.chmod(0o700)
+            real = root / "codex"
+            real.write_text("#!/bin/sh\n", encoding="utf-8")
+            real.chmod(0o700)
+            arguments = ["--", "исходный запрос"]
+            executions: list[tuple[tuple[str, ...], dict[str, str]]] = []
+
+            def expected_exec(
+                _path: str,
+                executed_arguments: Sequence[str],
+                executed_environment: Mapping[str, str],
+            ) -> object:
+                executions.append(
+                    (
+                        tuple(executed_arguments),
+                        dict(executed_environment),
+                    )
+                )
+                raise RuntimeError("expected exec")
+
+            probe = mock.Mock()
+            ensure_controller = mock.Mock()
+            with (
+                mock.patch(
+                    "codex_smart_subagents.launcher.probe_codex_version",
+                    probe,
+                ),
+                self.assertRaisesRegex(RuntimeError, "expected exec"),
+            ):
+                run_launcher(
+                    arguments,
+                    real_binary=real,
+                    wrapper=wrapper,
+                    environment={
+                        "PATH": "/usr/local/bin:/usr/bin",
+                        "CODEX_SMART_LAUNCHER_ACTIVE": "1",
+                        "CODEX_SMART_REQUIRED": "invalid",
+                        "CODEX_ADAPTIVE_SESSION_ID": "stale",
+                        "CODEX_COORDINATOR_MODEL": "stale",
+                        "CODEX_REAL_BIN": "/stale/codex",
+                    },
+                    ensure_controller=ensure_controller,
+                    execve=expected_exec,
+                )
+
+            probe.assert_not_called()
+            ensure_controller.assert_not_called()
+            self.assertEqual(
+                (str(real.resolve()), *arguments),
+                executions[0][0],
+            )
+            self.assertEqual(
+                {"PATH": "/usr/local/bin:/usr/bin"},
+                executions[0][1],
+            )
+
     def test_every_intentional_ordinary_launch_cleans_smart_environment(
         self,
     ) -> None:

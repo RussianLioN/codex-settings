@@ -406,7 +406,7 @@ def run_launcher(
     real = validate_real_binary(real_binary, wrapper)
     command = [str(real), *arguments]
     if source_environment.get("CODEX_SMART_LAUNCHER_ACTIVE") == "1":
-        execve(str(real), command, source_environment)
+        execve(str(real), command, clean_ordinary_environment(source_environment))
         raise AssertionError("execve unexpectedly returned")
 
     try:
