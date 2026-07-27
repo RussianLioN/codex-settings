@@ -94,16 +94,23 @@ class InvocationDecision:
     reason: str
 
 
+@dataclass(frozen=True)
+class ManagedInvocation:
+    decision: InvocationDecision
+    separator_index: int | None
+    coordinator_control: bool
+
+
 def classify_invocation(arguments: Sequence[str]) -> InvocationDecision:
     """Enable only an unambiguous new local interactive session."""
 
     positional: list[str] = []
+    root_positional: list[str] = []
     index = 0
     after_separator = False
     while index < len(arguments):
         token = arguments[index]
         if after_separator:
-            positional.append(token)
             index += 1
             continue
         if token == "--":
@@ -155,44 +162,71 @@ def classify_invocation(arguments: Sequence[str]) -> InvocationDecision:
         if token.startswith("-") and token != "-":
             return InvocationDecision(False, f"unknown option {token}")
         positional.append(token)
+        root_positional.append(token)
         index += 1
 
     if len(positional) > 1:
         return InvocationDecision(False, "multiple positional arguments")
-    if positional and not after_separator and positional[0] in _SUBCOMMANDS:
-        return InvocationDecision(False, f"subcommand {positional[0]}")
+    if root_positional and root_positional[0] in _SUBCOMMANDS:
+        return InvocationDecision(False, f"subcommand {root_positional[0]}")
     return InvocationDecision(True, "supported interactive invocation")
 
 
-def classify_managed_invocation(arguments: Sequence[str]) -> InvocationDecision:
-    """Classify a managed launch without treating root model controls as bypasses."""
+def parse_managed_invocation(arguments: Sequence[str]) -> ManagedInvocation:
+    """Parse root controls once and preserve the first ``--`` boundary."""
 
+    separator_index = next(
+        (index for index, token in enumerate(arguments) if token == "--"),
+        None,
+    )
+    root_end = len(arguments) if separator_index is None else separator_index
     remaining: list[str] = []
+    coordinator_control = False
     index = 0
-    while index < len(arguments):
+    while index < root_end:
         token = arguments[index]
         if token in {"--model", "-m"}:
-            if index + 1 >= len(arguments) or not arguments[index + 1]:
-                return InvocationDecision(False, f"missing value for {token}")
+            if index + 1 >= root_end or not arguments[index + 1]:
+                return ManagedInvocation(
+                    InvocationDecision(False, f"missing value for {token}"),
+                    separator_index,
+                    coordinator_control,
+                )
+            coordinator_control = True
             index += 2
             continue
         if token.startswith("--model="):
             if not token.split("=", 1)[1]:
-                return InvocationDecision(False, "missing value for --model")
+                return ManagedInvocation(
+                    InvocationDecision(False, "missing value for --model"),
+                    separator_index,
+                    coordinator_control,
+                )
+            coordinator_control = True
             index += 1
             continue
         if token.startswith("-m") and token != "-m":
             if not token[2:]:
-                return InvocationDecision(False, "missing value for -m")
+                return ManagedInvocation(
+                    InvocationDecision(False, "missing value for -m"),
+                    separator_index,
+                    coordinator_control,
+                )
+            coordinator_control = True
             index += 1
             continue
         if token == "-c":
-            if index + 1 >= len(arguments):
-                return InvocationDecision(False, "missing value for -c")
+            if index + 1 >= root_end:
+                return ManagedInvocation(
+                    InvocationDecision(False, "missing value for -c"),
+                    separator_index,
+                    coordinator_control,
+                )
             assignment = arguments[index + 1].lstrip()
             if assignment.startswith("model=") or assignment.startswith(
                 "model_reasoning_effort="
             ):
+                coordinator_control = True
                 index += 2
                 continue
             remaining.extend((token, arguments[index + 1]))
@@ -203,11 +237,24 @@ def classify_managed_invocation(arguments: Sequence[str]) -> InvocationDecision:
             if assignment.startswith("model=") or assignment.startswith(
                 "model_reasoning_effort="
             ):
+                coordinator_control = True
                 index += 1
                 continue
         remaining.append(token)
         index += 1
-    return classify_invocation(remaining)
+    if separator_index is not None:
+        remaining.extend(arguments[separator_index:])
+    return ManagedInvocation(
+        classify_invocation(remaining),
+        separator_index,
+        coordinator_control,
+    )
+
+
+def classify_managed_invocation(arguments: Sequence[str]) -> InvocationDecision:
+    """Classify without treating root model controls as native bypasses."""
+
+    return parse_managed_invocation(arguments).decision
 
 
 def parse_codex_version(output: str) -> str:
@@ -256,6 +303,22 @@ def build_adaptive_environment(
     return environment
 
 
+def clean_ordinary_environment(source: Mapping[str, str]) -> dict[str, str]:
+    """Remove every launcher-owned value before an ordinary execution."""
+
+    result: dict[str, str] = {}
+    for name, value in source.items():
+        if (
+            name.startswith("CODEX_SMART_")
+            or name.startswith("CODEX_ADAPTIVE_")
+            or name.startswith("CODEX_COORDINATOR_")
+            or name == "CODEX_REAL_BIN"
+        ):
+            continue
+        result[name] = value
+    return result
+
+
 def apply_coordinator_defaults(
     arguments: Sequence[str],
     coordinator: Mapping[str, str],
@@ -282,12 +345,17 @@ def apply_coordinator_defaults(
                 "COORDINATOR_PAIR_INVALID",
                 f"coordinator {name} is invalid",
             )
+    separator_index = next(
+        (index for index, token in enumerate(arguments) if token == "--"),
+        len(arguments),
+    )
     return [
-        *arguments,
+        *arguments[:separator_index],
         "--model",
         model,
         "-c",
         f"model_reasoning_effort={json.dumps(effort)}",
+        *arguments[separator_index:],
     ]
 
 
@@ -345,7 +413,11 @@ def run_launcher(
         version = probe_codex_version(real)
     except LauncherError as exc:
         print(f"codex-smart: {exc}", file=sys.stderr)
-        execve(str(real), command, source_environment)
+        execve(
+            str(real),
+            command,
+            clean_ordinary_environment(source_environment),
+        )
         raise AssertionError("execve unexpectedly returned")
 
     decision = classify_invocation(arguments)
@@ -355,10 +427,18 @@ def run_launcher(
             f"версии Codex {version}",
             file=sys.stderr,
         )
-        execve(str(real), command, source_environment)
+        execve(
+            str(real),
+            command,
+            clean_ordinary_environment(source_environment),
+        )
         raise AssertionError("execve unexpectedly returned")
     if not decision.adaptive:
-        execve(str(real), command, source_environment)
+        execve(
+            str(real),
+            command,
+            clean_ordinary_environment(source_environment),
+        )
         raise AssertionError("execve unexpectedly returned")
 
     adaptive_environment = build_adaptive_environment(source_environment)
@@ -370,7 +450,11 @@ def run_launcher(
                 "codex-smart: контроллер недоступен, запускается обычный Codex",
                 file=sys.stderr,
             )
-            execve(str(real), command, source_environment)
+            execve(
+                str(real),
+                command,
+                clean_ordinary_environment(source_environment),
+            )
             raise AssertionError("execve unexpectedly returned")
     if coordinator is not None:
         command = [

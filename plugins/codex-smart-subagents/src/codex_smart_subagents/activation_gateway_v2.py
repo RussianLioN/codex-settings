@@ -27,7 +27,11 @@ from .canonical_json import CanonicalJsonError, canonical_json_bytes, domain_fin
 from .catalog import Catalog, CatalogError
 from .codex_binary_snapshot import CODE_SIGNATURE_REQUIREMENT
 from .evidence import EvidenceError, verify_interface_evidence
-from .launcher import apply_coordinator_defaults, classify_managed_invocation
+from .launcher import (
+    apply_coordinator_defaults,
+    clean_ordinary_environment,
+    parse_managed_invocation,
+)
 from .mcp_runtime_proof_v2 import (
     MCP_SESSION_NONCE_ENV_V2,
     USER_MCP_POLICY_PROOF_ENV_V2,
@@ -57,9 +61,6 @@ _ADAPTIVE_DISABLED_FEATURE_ARGUMENTS = (
 _ADAPTIVE_DIRECT_TOOL_ARGUMENTS = (
     "-c",
     'code_mode.direct_only_tool_namespaces=["mcp__codex_smart_subagents"]',
-)
-_ADAPTIVE_AGENT_FEATURES = frozenset(
-    {"multi_agent", "multi_agent_v2", "enable_fanout"}
 )
 _RELEASE = "0.2.0"
 _NAMESPACE = "codex-smart-subagents-v2"
@@ -1385,24 +1386,7 @@ class ActivationResolver:
             ) from exc
 
 
-def clean_ordinary_environment(source: Mapping[str, str]) -> dict[str, str]:
-    """Remove every launcher-owned value before an ordinary fallback."""
-
-    result: dict[str, str] = {}
-    for name, value in source.items():
-        if (
-            name.startswith("CODEX_SMART_")
-            or name.startswith("CODEX_ADAPTIVE_")
-            or name.startswith("CODEX_COORDINATOR_")
-            or name == "CODEX_REAL_BIN"
-        ):
-            continue
-        result[name] = value
-    return result
-
-
-def _managed_failure_code(error: Exception, default: str) -> str:
-    code = getattr(error, "code", default)
+def _normalize_failure_code(code: object, default: str) -> str:
     if (
         not isinstance(code, str)
         or not code
@@ -1415,41 +1399,8 @@ def _managed_failure_code(error: Exception, default: str) -> str:
     return code
 
 
-def _coordinator_control(arguments: Sequence[str]) -> bool:
-    index = 0
-    while index < len(arguments):
-        token = arguments[index]
-        if token in {"--enable", "--disable"}:
-            if index + 1 >= len(arguments):
-                return False
-            if arguments[index + 1] in _ADAPTIVE_AGENT_FEATURES:
-                index += 2
-                continue
-        if token.startswith("--enable=") or token.startswith("--disable="):
-            if token.split("=", 1)[1] in _ADAPTIVE_AGENT_FEATURES:
-                index += 1
-                continue
-        if token in {"--model", "-m"}:
-            return True
-        if token.startswith("--model=") or (token.startswith("-m") and token != "-m"):
-            return True
-        if token == "-c":
-            if index + 1 < len(arguments):
-                assignment = arguments[index + 1].lstrip()
-                if assignment.startswith("model=") or assignment.startswith(
-                    "model_reasoning_effort="
-                ):
-                    return True
-            index += 2
-            continue
-        if token.startswith("-c") and token != "-c":
-            assignment = token[2:].lstrip()
-            if assignment.startswith("model=") or assignment.startswith(
-                "model_reasoning_effort="
-            ):
-                return True
-        index += 1
-    return False
+def _managed_failure_code(error: Exception, default: str) -> str:
+    return _normalize_failure_code(getattr(error, "code", default), default)
 
 
 def run_permanent_gateway(
@@ -1464,7 +1415,8 @@ def run_permanent_gateway(
     """Resolve once and replace the permanent wrapper with selected Codex."""
 
     source_environment = dict(os.environ if environment is None else environment)
-    invocation = classify_managed_invocation(arguments)
+    parsed_invocation = parse_managed_invocation(arguments)
+    invocation = parsed_invocation.decision
     try:
         decision = resolver.resolve()
     except Exception as exc:
@@ -1481,7 +1433,10 @@ def run_permanent_gateway(
     if decision.state is GatewayState.ORDINARY or not invocation.adaptive:
         if managed_required and invocation.adaptive:
             raise ManagedLaunchUnavailable(
-                decision.reason_code,
+                _normalize_failure_code(
+                    decision.reason_code,
+                    "MANAGED_ACTIVATION_UNAVAILABLE",
+                ),
                 "managed activation is unavailable",
             )
         ordinary_environment = clean_ordinary_environment(source_environment)
@@ -1542,20 +1497,26 @@ def run_permanent_gateway(
         adaptive_environment["CODEX_SMART_STATE_HOME"] = str(
             decision.runtime_binding.state_home
         )
-    rewritten = list(arguments)
-    if not _coordinator_control(arguments):
-        rewritten = apply_coordinator_defaults(
-            rewritten,
+    separator_index = parsed_invocation.separator_index
+    root_end = len(arguments) if separator_index is None else separator_index
+    rewritten_root = list(arguments[:root_end])
+    if not parsed_invocation.coordinator_control:
+        rewritten_root = apply_coordinator_defaults(
+            rewritten_root,
             dict(decision.coordinator or {}),
         )
     # Codex 0.145.0 откладывает MCP-команды, но координатор Terra не получает
     # средство их поиска. Оставляем напрямую видимым только проверенное
     # пространство четырёх команд управляемого маршрута.
-    rewritten.extend(_ADAPTIVE_DIRECT_TOOL_ARGUMENTS)
+    rewritten_root.extend(_ADAPTIVE_DIRECT_TOOL_ARGUMENTS)
     # Эти параметры намеренно завершают argv: пользовательский ``--enable``
     # не должен открыть параллельный путь субагентов мимо доказуемого
     # контроллера выбранной пары модели и уровня рассуждения.
-    rewritten.extend(_ADAPTIVE_DISABLED_FEATURE_ARGUMENTS)
+    rewritten_root.extend(_ADAPTIVE_DISABLED_FEATURE_ARGUMENTS)
+    rewritten = [
+        *rewritten_root,
+        *arguments[root_end:],
+    ]
     execve(
         str(executable),
         [str(executable), *rewritten],

@@ -23,6 +23,7 @@ from codex_smart_subagents.activation_gateway_v2 import (  # noqa: E402
 )
 from codex_smart_subagents.launcher import (  # noqa: E402
     classify_managed_invocation,
+    run_launcher,
 )
 
 
@@ -110,6 +111,8 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
             ["help"],
             ["update"],
             ["update", "--help"],
+            ["help", "--"],
+            ["update", "--"],
             ["--profile", "custom"],
             ["-c", 'approval_policy="never"'],
         ):
@@ -171,6 +174,78 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
 
                 self.assertEqual([], supervisor_calls)
                 self.assertFalse(gateway_arguments["managed_required"])
+
+    def test_legacy_service_path_cleans_added_catalog_and_smart_environment(
+        self,
+    ) -> None:
+        executions: list[tuple[tuple[str, ...], dict[str, str]]] = []
+
+        def expected_exec(
+            _path: str,
+            arguments,
+            environment,
+        ) -> object:
+            executions.append((tuple(arguments), dict(environment)))
+            raise RuntimeError("expected exec")
+
+        def legacy_launcher(arguments, **kwargs):
+            return run_launcher(
+                arguments,
+                **kwargs,
+                execve=expected_exec,
+            )
+
+        config_factory = SimpleNamespace(
+            from_environ=lambda _environment, **_kwargs: SimpleNamespace(
+                real_codex=self.fallback
+            )
+        )
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "PATH": "/usr/bin",
+                    "CODEX_HOME": str(self.codex_home),
+                    "CODEX_SMART_REQUIRED": "invalid",
+                    "CODEX_SMART_GATE_FINGERPRINT": "stale",
+                    "CODEX_ADAPTIVE_SESSION_ID": "stale",
+                    "CODEX_COORDINATOR_MODEL": "stale",
+                    "CODEX_REAL_BIN": "/stale/codex",
+                },
+                clear=True,
+            ),
+            mock.patch.object(sys, "argv", [str(WRAPPER), "help"]),
+            mock.patch(
+                "codex_smart_subagents.launcher.probe_codex_version",
+                return_value="0.145.0",
+            ),
+            mock.patch.dict(
+                self.globals,
+                {
+                    "v2_gateway_state_present": lambda _layout: False,
+                    "ControllerProcessConfig": config_factory,
+                    "run_launcher": legacy_launcher,
+                },
+            ),
+            self.assertRaisesRegex(RuntimeError, "expected exec"),
+        ):
+            self.globals["main"]()
+
+        self.assertEqual(
+            (str(self.fallback.resolve()), "help"),
+            executions[0][0],
+        )
+        self.assertEqual("/usr/bin", executions[0][1]["PATH"])
+        self.assertEqual(str(self.codex_home), executions[0][1]["CODEX_HOME"])
+        self.assertFalse(
+            any(
+                key.startswith("CODEX_SMART_")
+                or key.startswith("CODEX_ADAPTIVE_")
+                or key.startswith("CODEX_COORDINATOR_")
+                or key == "CODEX_REAL_BIN"
+                for key in executions[0][1]
+            )
+        )
 
     def test_required_managed_failure_returns_69_with_safe_escape_hint(self) -> None:
         decision = _ordinary(self.fallback, reason="MANIFEST_INVALID")

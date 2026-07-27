@@ -346,6 +346,32 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
 
         self.assertEqual([], executions)
 
+    def test_required_ordinary_reason_code_is_normalized(self) -> None:
+        decision = GatewayDecision(
+            state=GatewayState.ORDINARY,
+            reason_code="invalid\nprivate diagnostic",
+            executable=self.real,
+        )
+
+        with self.assertRaises(ManagedLaunchUnavailable) as raised:
+            run_permanent_gateway(
+                ["проверь"],
+                resolver=_StaticResolver(decision),
+                wrapper=self.wrapper,
+                environment={
+                    "PATH": "/usr/bin",
+                    "CODEX_HOME": str(self.root),
+                },
+                managed_required=True,
+                execve=lambda *_arguments: self.fail("ordinary Codex executed"),
+            )
+
+        self.assertEqual(
+            "MANAGED_ACTIVATION_UNAVAILABLE",
+            raised.exception.code,
+        )
+        self.assertNotIn("private diagnostic", str(raised.exception))
+
     def test_required_resolver_failure_becomes_managed_unavailable(self) -> None:
         class UnavailableResolver:
             def resolve(self):
@@ -467,6 +493,81 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
                 self.assertEqual(
                     decision.gate_fingerprint,
                     explicit_environment["CODEX_SMART_GATE_FINGERPRINT"],
+                )
+
+    def test_managed_controls_are_inserted_before_separator(self) -> None:
+        decision = GatewayDecision(
+            state=GatewayState.READY,
+            reason_code="READY",
+            executable=self.real,
+            coordinator={
+                "model": "gpt-5.6-terra",
+                "reasoning_effort": "medium",
+            },
+            activation_id="act2_" + "a" * 64,
+            gate_fingerprint="b" * 64,
+            activation_gate={
+                "manifestSemanticFingerprint": "c" * 64,
+                "activationReceiptFingerprint": "d" * 64,
+                "journalAbsenceProof": {},
+                "gateFingerprint": "b" * 64,
+            },
+            catalog_path=self.root / "adaptive-subagents.toml",
+        )
+        defaults = (
+            "--model",
+            "gpt-5.6-terra",
+            "-c",
+            'model_reasoning_effort="medium"',
+            *self.ADAPTIVE_DIRECT_TOOL_ARGUMENTS,
+            *self.ADAPTIVE_DISABLED_FEATURE_ARGUMENTS,
+        )
+        cases = (
+            (
+                ["--", "help"],
+                (*defaults, "--", "help"),
+            ),
+            (
+                ["--", "--model"],
+                (*defaults, "--", "--model"),
+            ),
+            (
+                ["--", "-c", 'model="prompt text"'],
+                (*defaults, "--", "-c", 'model="prompt text"'),
+            ),
+            (
+                [
+                    "--model",
+                    "gpt-user",
+                    "-c",
+                    'model_reasoning_effort="high"',
+                    "--",
+                    "help",
+                ],
+                (
+                    "--model",
+                    "gpt-user",
+                    "-c",
+                    'model_reasoning_effort="high"',
+                    *self.ADAPTIVE_DIRECT_TOOL_ARGUMENTS,
+                    *self.ADAPTIVE_DISABLED_FEATURE_ARGUMENTS,
+                    "--",
+                    "help",
+                ),
+            ),
+        )
+        for original, expected in cases:
+            with self.subTest(original=original):
+                _path, argv, _environment = self._execute(
+                    decision,
+                    original,
+                    {"PATH": "/usr/bin"},
+                )
+                self.assertEqual((str(self.real), *expected), argv)
+                separator = argv.index("--")
+                self.assertEqual(
+                    tuple(original[original.index("--") :]),
+                    argv[separator:],
                 )
 
     def test_user_agent_feature_controls_bypass_managed_rewrite(self) -> None:
