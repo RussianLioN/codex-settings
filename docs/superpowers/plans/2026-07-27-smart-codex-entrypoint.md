@@ -150,7 +150,7 @@ git commit -m "feat(subagents): make managed launch strict"
 - Create: `scripts/reconcile_codex_entrypoint.py`
 - Create: `tests/smart_subagents/test_codex_entrypoint_reconciler.py`
 - Modify: `scripts/validate_autonomous_workflow.py`
-- Modify: `tests/smart_subagents/test_autonomous_workflow.py`
+- Create: `tests/smart_subagents/test_autonomous_workflow.py`
 
 **Interfaces:**
 - Produces commands:
@@ -164,6 +164,7 @@ git commit -m "feat(subagents): make managed launch strict"
   - `$HOME/.codex/codex-autonomous-aliases.zsh`
   - `$HOME/.codex/install-manifests/codex-entrypoint-v1.json`
   - `$HOME/.codex/install-manifests/codex-entrypoint-v1.journal.json`
+  - `$HOME/.codex/install-manifests/codex-entrypoint-v1.lock`
 
 - [ ] **Step 1: Write failing `codex-highfd` tests**
 
@@ -207,6 +208,8 @@ alias codexfd='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 $HOME/.local/bin/cod
 8. a journal left after the first replacement is recovered deterministically;
 9. an existing `$HOME/.local/bin/codex` and the supplied `PATH` remain unchanged;
 10. doctor reports `READY`, `DRIFT`, or `RECOVERY_REQUIRED` without writes.
+
+`preview` and `doctor` must not create even a parent directory or lock file.
 
 - [ ] **Step 4: Verify reconciler RED**
 
@@ -401,4 +404,3 @@ Read every exit code and output before claiming completion.
 - [ ] **Step 3: Push the existing feature branch**
 
 Push `codex/implement-adaptive-subagents-v2` without force. Confirm the remote head equals local `HEAD`.
-
