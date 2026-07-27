@@ -249,10 +249,10 @@ Run:
 uv run --locked python -m unittest \
   tests.smart_subagents.test_codex_entrypoint_reconciler \
   tests.smart_subagents.test_autonomous_workflow
-uv run --locked python scripts/validate_autonomous_workflow.py
 ```
 
-Expected: all focused tests and the validator pass.
+Expected: all focused reconciler and validator contract tests pass without
+depending on the not-yet-migrated real home.
 
 - [ ] **Step 8: Commit Task 2**
 
@@ -344,9 +344,11 @@ python3 scripts/reconcile_codex_entrypoint.py --preview --json
 python3 scripts/reconcile_codex_entrypoint.py --apply --json
 python3 scripts/reconcile_codex_entrypoint.py --apply --json
 python3 scripts/reconcile_codex_entrypoint.py --doctor --json
+uv run --locked python scripts/validate_autonomous_workflow.py
 ```
 
-Require no foreign conflict, then `applied`, `unchanged`, and `READY`.
+Require no foreign conflict, then `applied`, `unchanged`, `READY`, and a
+successful live autonomous-workflow validation.
 
 - [ ] **Step 6: Verify a fresh shell**
 
