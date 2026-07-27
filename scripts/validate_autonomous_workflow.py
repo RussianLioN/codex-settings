@@ -31,11 +31,31 @@ DOCS_NAVIGATION_VALIDATOR = REPO / "scripts/validate_docs_navigation.py"
 DOCS_NAVIGATION_CONTRACTS = REPO / "scripts/docs_navigation_contracts.py"
 HIGHFD_WRAPPER = HOME / ".local/bin/codex-highfd"
 INSTALLED_FD_DOCTOR = HOME / ".local/libexec/codex_fd_doctor.sh"
+ENTRYPOINT_JOURNAL = (
+    CODEX_HOME
+    / "install-manifests"
+    / "codex-entrypoint-v1.journal.json"
+)
 CHATGPT_RESOURCES = Path("/Applications/ChatGPT.app/Contents/Resources")
 DEFAULT_WAVE_SIZE = 6
 MAX_BASE_THREADS = 20
 HIGH_FD_LIMIT = 4096
-LEGACY_HIGHFD_SHA256 = "bb5dd276d00cad26f418825bd4d2bd869dc68943f3e26a0c255d3335c7ef14e4"
+ENTRYPOINT_ALIASES_BYTES = (
+    b"alias codex='CODEX_SMART_ENABLED=1 CODEX_SMART_REQUIRED=1 "
+    b"$HOME/.local/bin/codex-highfd'\n"
+    b"alias codex-native='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd'\n"
+    b"alias codexs='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --profile standard'\n"
+    b"alias codexro='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --profile safe-readonly'\n"
+    b"alias codexwide='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --profile wide-readers'\n"
+    b"alias codexfa='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --profile full-access'\n"
+    b"alias codexfd='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --fd-doctor'\n"
+)
 EXPECTED_BASE_AGENT_LIMITS = {
     "max_threads": MAX_BASE_THREADS,
     "max_depth": 1,
@@ -598,15 +618,11 @@ def check_fd_guardrails() -> None:
     for path in (FD_DOCTOR, HIGHFD_TEMPLATE, HIGHFD_WRAPPER, INSTALLED_FD_DOCTOR):
         assert path.exists(), f"missing FD guardrail: {path}"
         assert os.access(path, os.X_OK), f"FD guardrail is not executable: {path}"
-    installed_highfd_digest = hashlib.sha256(HIGHFD_WRAPPER.read_bytes()).hexdigest()
-    allowed_highfd_digests = {
-        hashlib.sha256(HIGHFD_TEMPLATE.read_bytes()).hexdigest(),
-        LEGACY_HIGHFD_SHA256,
-    }
-    assert installed_highfd_digest in allowed_highfd_digests, (
-        "installed codex-highfd is neither the tracked guarded template "
-        "nor the exact supported legacy template"
+    highfd_failures = tracked_highfd_hash_failures(
+        installed_path=HIGHFD_WRAPPER,
+        tracked_path=HIGHFD_TEMPLATE,
     )
+    assert not highfd_failures, "; ".join(highfd_failures)
     assert FD_DOCTOR.read_bytes() == INSTALLED_FD_DOCTOR.read_bytes(), "installed FD doctor differs from tracked source"
 
     ok = run_fd_doctor(DEFAULT_WAVE_SIZE, soft_limit=HIGH_FD_LIMIT, fd_count=32)
@@ -645,12 +661,67 @@ def check_consilium_runtime() -> None:
 
 
 def check_aliases() -> None:
-    aliases = (CODEX_HOME / "codex-autonomous-aliases.zsh").read_text(encoding="utf-8")
+    alias_path = CODEX_HOME / "codex-autonomous-aliases.zsh"
+    failures = exact_entrypoint_alias_failures(alias_path)
+    failures.extend(reconciler_journal_failures(ENTRYPOINT_JOURNAL))
+    assert not failures, "; ".join(failures)
     zshrc = (HOME / ".zshrc").read_text(encoding="utf-8")
-    for alias in ("codex", "codexs", "codexro", "codexwide", "codexfa", "codexfd"):
-        assert f"alias {alias}=" in aliases, f"missing alias: {alias}"
-    assert "wide-readers-16" not in aliases, "wide-readers-16 must not have a shell alias"
     assert "codex-autonomous-aliases.zsh" in zshrc, "~/.zshrc does not source alias file"
+
+
+def exact_entrypoint_alias_failures(path: Path) -> list[str]:
+    if not path.is_file():
+        return [f"missing managed alias file: {path}"]
+    if path.read_bytes() != ENTRYPOINT_ALIASES_BYTES:
+        return [
+            f"{path} must contain the exact managed bytes for smart/native aliases"
+        ]
+    return []
+
+
+def tracked_highfd_hash_failures(
+    *,
+    installed_path: Path,
+    tracked_path: Path,
+) -> list[str]:
+    failures: list[str] = []
+    if not tracked_path.is_file():
+        failures.append(f"missing tracked codex-highfd: {tracked_path}")
+    if not installed_path.is_file():
+        failures.append(f"missing installed codex-highfd: {installed_path}")
+    if failures:
+        return failures
+    installed_digest = hashlib.sha256(installed_path.read_bytes()).hexdigest()
+    tracked_digest = hashlib.sha256(tracked_path.read_bytes()).hexdigest()
+    if installed_digest != tracked_digest:
+        failures.append(
+            f"{installed_path} does not match the current tracked codex-highfd hash"
+        )
+    return failures
+
+
+def reconciler_journal_failures(path: Path) -> list[str]:
+    if os.path.lexists(path):
+        return [f"pending reconciler journal must be absent: {path}"]
+    return []
+
+
+def entrypoint_contract_failures(
+    *,
+    aliases_path: Path,
+    installed_highfd_path: Path,
+    tracked_highfd_path: Path,
+    journal_path: Path,
+) -> list[str]:
+    failures = exact_entrypoint_alias_failures(aliases_path)
+    failures.extend(
+        tracked_highfd_hash_failures(
+            installed_path=installed_highfd_path,
+            tracked_path=tracked_highfd_path,
+        )
+    )
+    failures.extend(reconciler_journal_failures(journal_path))
+    return failures
 
 
 def check_rollback() -> None:
@@ -748,6 +819,7 @@ def check_repo_scripts() -> None:
         HOOK_POLICY,
         DOCS_NAVIGATION_CONTRACTS,
         DOCS_NAVIGATION_VALIDATOR,
+        REPO / "scripts/reconcile_codex_entrypoint.py",
         REPO / "scripts/validate_autonomous_workflow.py",
     ):
         assert path.exists(), f"missing script: {path}"
