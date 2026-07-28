@@ -36,6 +36,15 @@
           "routingPolicyFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
           "bundledCatalogFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
           "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "databaseSchemaVersion": 2,
+          "coordinatorSelection": {
+            "selection": "first-verified-available",
+            "status": "SELECTED",
+            "reasonCode": "COORDINATOR_PAIR_SELECTED",
+            "selectedPair": {"model": "gpt-5.6-sol", "reasoningEffort": "medium"},
+            "candidateIndex": 0,
+            "accountCatalogFingerprint": "5555555555555555555555555555555555555555555555555555555555555555",
+            "accountContextFingerprint": "6666666666666666666666666666666666666666666666666666666666666666"
+          },
           "workCounts": {
             "nonterminalRoutes": 1, "nonterminalNodes": 1, "activeAttempts": 0,
             "activeLeases": 0, "openIntents": 1, "inflightLaunchPermits": 0,
@@ -334,6 +343,7 @@
   ],
   "negativeCases": [
     {"name": "health-live-fence-rejected", "method": "health", "direction": "request", "baseCase": "health-request", "mutation": {"operation": "replace", "pointer": "/controllerIdentity", "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, "expectedViolation": "SCHEMA_REJECT"},
+    {"name": "health-without-coordinator-selection-rejected", "method": "health", "direction": "response", "baseCase": "health-response", "mutation": {"operation": "remove", "pointer": "/payload/coordinatorSelection"}, "expectedViolation": "SCHEMA_REJECT"},
     {"name": "maintenance-begin-without-command-rejected", "method": "maintenance_begin", "direction": "request", "baseCase": "maintenance-begin-request", "mutation": {"operation": "replace", "pointer": "/commandId", "value": null}, "expectedViolation": "IDEMPOTENCY_REJECT"},
     {"name": "maintenance-strengthen-drain-rejected", "method": "maintenance_strengthen", "direction": "request", "baseCase": "maintenance-strengthen-request", "mutation": {"operation": "replace", "pointer": "/params/mode", "value": "drain"}, "expectedViolation": "STATE_ORDER_REJECT"},
     {"name": "maintenance-status-command-rejected", "method": "maintenance_status", "direction": "request", "baseCase": "maintenance-status-request", "mutation": {"operation": "replace", "pointer": "/commandId", "value": "cc2_cccccccccccccccccccccccccccccccc"}, "expectedViolation": "SCHEMA_REJECT"},

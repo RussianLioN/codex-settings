@@ -4,6 +4,7 @@ import os
 import copy
 import fcntl
 import hashlib
+import io
 import json
 import shutil
 import socket
@@ -14,7 +15,7 @@ import tempfile
 import threading
 import time
 import unittest
-from contextlib import closing
+from contextlib import closing, redirect_stderr
 from pathlib import Path
 from typing import Mapping, Sequence
 from unittest.mock import patch
@@ -49,6 +50,10 @@ from codex_smart_subagents import (  # noqa: E402
 from codex_smart_subagents.canonical_json import (  # noqa: E402
     canonical_json_bytes,
     domain_fingerprint,
+)
+from codex_smart_subagents.coordinator_selection_v2 import (  # noqa: E402
+    CoordinatorSelectionV2,
+    collect_coordinator_selection_v2,
 )
 from codex_smart_subagents.evidence import build_interface_evidence  # noqa: E402
 from codex_smart_subagents.schema_projection import (  # noqa: E402
@@ -289,6 +294,130 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
         self._last_resolver_calls = resolver.calls
         self.assertEqual(1, len(observed))
         return observed[0]
+
+    def _v2_decision(
+        self,
+        selection: CoordinatorSelectionV2,
+    ) -> GatewayDecision:
+        return GatewayDecision(
+            state=GatewayState.READY,
+            reason_code="READY",
+            executable=self.real,
+            coordinator=(
+                None
+                if selection.selected_pair is None
+                else {
+                    "model": selection.selected_pair["model"],
+                    "reasoning_effort": selection.selected_pair[
+                        "reasoningEffort"
+                    ],
+                }
+            ),
+            coordinator_selection=selection.to_document(),
+            catalog_schema_version=2,
+            activation_id="act2_" + "a" * 64,
+            gate_fingerprint="b" * 64,
+            activation_gate={"gateFingerprint": "b" * 64},
+            catalog_path=self.root / "adaptive-subagents.toml",
+        )
+
+    def test_automatic_unavailable_pair_is_always_managed_unavailable(self) -> None:
+        decision = self._v2_decision(
+            CoordinatorSelectionV2(
+                selection="first-verified-available",
+                status="UNAVAILABLE",
+                reason_code="COORDINATOR_PAIR_UNAVAILABLE",
+                selected_pair=None,
+                candidate_index=None,
+                account_catalog_fingerprint="5" * 64,
+                account_context_fingerprint="6" * 64,
+            )
+        )
+        executions: list[object] = []
+
+        with self.assertRaises(ManagedLaunchUnavailable) as caught:
+            run_permanent_gateway(
+                ["проверь"],
+                resolver=_StaticResolver(decision),
+                wrapper=self.wrapper,
+                environment={
+                    "PATH": "/usr/bin",
+                    "CODEX_HOME": str(self.root),
+                },
+                execve=lambda *_arguments: executions.append(object()),
+            )
+
+        self.assertEqual("COORDINATOR_PAIR_UNAVAILABLE", caught.exception.code)
+        self.assertEqual([], executions)
+
+    def test_explicit_root_controls_bypass_unavailable_automatic_pair(self) -> None:
+        decision = self._v2_decision(
+            CoordinatorSelectionV2(
+                selection="first-verified-available",
+                status="UNAVAILABLE",
+                reason_code="COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+                selected_pair=None,
+                candidate_index=None,
+                account_catalog_fingerprint=None,
+                account_context_fingerprint="6" * 64,
+            )
+        )
+        original = [
+            "--model",
+            "gpt-user",
+            "-c",
+            'model_reasoning_effort="high"',
+            "проверь",
+        ]
+
+        _path, argv, _environment = self._execute(
+            decision,
+            original,
+            {"PATH": "/usr/bin"},
+        )
+
+        self.assertEqual(
+            (
+                str(self.real),
+                *original,
+                *self.ADAPTIVE_DIRECT_TOOL_ARGUMENTS,
+                *self.ADAPTIVE_DISABLED_FEATURE_ARGUMENTS,
+            ),
+            argv,
+        )
+
+    def test_terra_fallback_warning_is_exact_and_printed_once_before_exec(
+        self,
+    ) -> None:
+        decision = self._v2_decision(
+            CoordinatorSelectionV2(
+                selection="first-verified-available",
+                status="SELECTED",
+                reason_code="COORDINATOR_PAIR_SELECTED",
+                selected_pair={
+                    "model": "gpt-5.6-terra",
+                    "reasoningEffort": "medium",
+                },
+                candidate_index=1,
+                account_catalog_fingerprint="5" * 64,
+                account_context_fingerprint="6" * 64,
+            )
+        )
+        error = io.StringIO()
+
+        with redirect_stderr(error):
+            _path, _argv, _environment = self._execute(
+                decision,
+                ["проверь"],
+                {"PATH": "/usr/bin"},
+            )
+
+        self.assertEqual(
+            "codex-smart: COORDINATOR_PAIR_FALLBACK; "
+            "gpt-5.6-sol+medium недоступен, "
+            "используется gpt-5.6-terra+medium\n",
+            error.getvalue(),
+        )
 
     def test_ordinary_fallback_preserves_argv_and_removes_service_environment(self) -> None:
         decision = GatewayDecision(
@@ -1411,6 +1540,29 @@ class _ActivationFixture:
             "activeEvidenceJobs": 0,
             "queuedEvidenceJobs": 0,
         }
+        coordinator_selection = collect_coordinator_selection_v2(
+            selection="first-verified-available",
+            candidates=(
+                {
+                    "model": "gpt-5.6-sol",
+                    "reasoningEffort": "medium",
+                },
+                {
+                    "model": "gpt-5.6-terra",
+                    "reasoningEffort": "medium",
+                },
+            ),
+            inspector=type(
+                "_CoordinatorInspector",
+                (),
+                {
+                    "inspect": lambda _self: {
+                        "gpt-5.6-terra": frozenset({"medium"})
+                    }
+                },
+            )(),
+            active_context_fingerprint=self.activation_fingerprint,
+        )
         self.health_payload = {
             "namespace": "codex-smart-subagents-v2",
             "controllerIdentity": self.controller_identity,
@@ -1430,6 +1582,7 @@ class _ActivationFixture:
             ],
             "routingPolicyFingerprint": self.routing_fingerprint,
             "bundledCatalogFingerprint": self.catalog_fingerprint,
+            "coordinatorSelection": coordinator_selection.to_document(),
             "databaseId": self.database_id,
             "databaseSchemaVersion": 2,
             "workCounts": zero_counts,

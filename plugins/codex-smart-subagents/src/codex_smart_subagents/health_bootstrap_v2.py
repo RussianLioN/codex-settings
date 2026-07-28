@@ -44,6 +44,8 @@ from .controller_health_v2 import (
     ControllerHealthServerV2,
     ControllerRegistrationReceiptV2,
 )
+from .coordinator_selection_v2 import inspect_coordinator_selection_v2
+from .model_catalog import AppServerModelCatalogInspector
 from .policy_bundle_v2 import PolicyBundleV2
 from .installer_upgrade_v2 import (
     build_initial_activation_preparation_v2,
@@ -189,6 +191,9 @@ def bootstrap_health_activation_v2(
     control_epoch: int = 1,
     first_install_operation_id: str | None = None,
     first_installation_id: str | None = None,
+    coordinator_inspector_factory: Callable[..., object] = (
+        AppServerModelCatalogInspector
+    ),
 ) -> HealthBootstrapRuntimeV2:
     """Выполняет stage → bind/register → serve → настоящий gateway READY."""
 
@@ -285,6 +290,7 @@ def bootstrap_health_activation_v2(
                 snapshot_verifier=snapshot_verifier,
                 request_fingerprint=request_fingerprint,
                 registry_key=registry_key,
+                coordinator_inspector_factory=coordinator_inspector_factory,
             )
 
         staged: StagedActivationV2 | None = None
@@ -329,6 +335,15 @@ def bootstrap_health_activation_v2(
                 if first_install_operation_id is None
                 else _inspect_initial_finalization_database_v2(staged)
             )
+            coordinator_selection = inspect_coordinator_selection_v2(
+                codex_executable=staged.snapshot_path,
+                codex_home=staged.codex_home,
+                runtime_parent=staged.state_home,
+                selection=policy_bundle.coordinator_selection,
+                candidates=policy_bundle.coordinator_candidates,
+                active_context_fingerprint=staged.activation_fingerprint,
+                inspector_factory=coordinator_inspector_factory,
+            )
 
             def registrar(
                 accepting_controller: AcceptingControllerV2,
@@ -366,6 +381,7 @@ def bootstrap_health_activation_v2(
                 compatibility_fingerprint=staged.compatibility_fingerprint,
                 routing_policy_fingerprint=staged.routing_policy_fingerprint,
                 bundled_catalog_fingerprint=staged.bundled_catalog_fingerprint,
+                coordinator_selection=coordinator_selection,
                 instance_id="ci2_" + secrets.token_hex(16),
                 controller_start_id="cs2_" + secrets.token_hex(16),
                 control_epoch=(
@@ -627,6 +643,7 @@ def _recover_persisted_activation_v2(
     snapshot_verifier: Callable[[object], None],
     request_fingerprint: str,
     registry_key: str,
+    coordinator_inspector_factory: Callable[..., object],
 ) -> HealthBootstrapRuntimeV2:
     resolver = ActivationResolver(
         layout=layout,
@@ -683,6 +700,17 @@ def _recover_persisted_activation_v2(
     server: ControllerHealthServerV2 | None = None
     thread: threading.Thread | None = None
     try:
+        coordinator_selection = inspect_coordinator_selection_v2(
+            codex_executable=Path(
+                str(binding.activation_identity["codexSnapshot"]["absolutePath"])
+            ),
+            codex_home=layout.codex_home,
+            runtime_parent=binding.state_home,
+            selection=policy_bundle.coordinator_selection,
+            candidates=policy_bundle.coordinator_candidates,
+            active_context_fingerprint=binding.activation_fingerprint,
+            inspector_factory=coordinator_inspector_factory,
+        )
 
         def registrar(
             accepting_controller: AcceptingControllerV2,
@@ -713,6 +741,7 @@ def _recover_persisted_activation_v2(
             bundled_catalog_fingerprint=str(
                 binding.activation_identity["bundledCatalogFingerprint"]
             ),
+            coordinator_selection=coordinator_selection,
             instance_id="ci2_" + secrets.token_hex(16),
             controller_start_id="cs2_" + secrets.token_hex(16),
             control_epoch=previous_epoch + 1,

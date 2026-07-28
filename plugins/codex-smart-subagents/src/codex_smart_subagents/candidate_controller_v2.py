@@ -32,7 +32,9 @@ from .controller_entrypoint_v2 import (
     start_full_controller_v2,
 )
 from .controller_health_v2 import ControllerHealthServerV2
+from .coordinator_selection_v2 import inspect_coordinator_selection_v2
 from .lifecycle_controller_protocol_v2 import LifecycleControllerProtocolV2
+from .model_catalog import AppServerModelCatalogInspector
 
 
 _RELEASE = "0.2.0"
@@ -332,6 +334,9 @@ def serve_candidate_controller_v2(
     full_controller_starter: Callable[..., Any] = start_full_controller_v2,
     dispatcher_factory_builder: Callable[..., Any] | None = None,
     signal_installer: Callable[[Any], None] = lambda _application: None,
+    coordinator_inspector_factory: Callable[..., Any] = (
+        AppServerModelCatalogInspector
+    ),
     ready_timeout_seconds: float = 30.0,
     gateway_timeout_seconds: float = 30.0,
 ) -> Any:
@@ -346,6 +351,15 @@ def serve_candidate_controller_v2(
     policy_bundle = policy_loader(
         source_root=config.entrypoint_config.source_root,
         plugin_root=config.plugin_root,
+    )
+    coordinator_selection = inspect_coordinator_selection_v2(
+        codex_executable=config.codex_binary,
+        codex_home=config.codex_home,
+        runtime_parent=config.state_home,
+        selection=policy_bundle.coordinator_selection,
+        candidates=policy_bundle.coordinator_candidates,
+        active_context_fingerprint=config.activation_fingerprint,
+        inspector_factory=coordinator_inspector_factory,
     )
     protocol = protocol_factory(
         database_path=config.database_path,
@@ -364,6 +378,7 @@ def serve_candidate_controller_v2(
         compatibility_fingerprint=config.compatibility_fingerprint,
         routing_policy_fingerprint=config.routing_policy_fingerprint,
         bundled_catalog_fingerprint=config.bundled_catalog_fingerprint,
+        coordinator_selection=coordinator_selection,
         instance_id="ci2_" + secrets.token_hex(16),
         controller_start_id=config.controller_start_id,
         control_epoch=1,

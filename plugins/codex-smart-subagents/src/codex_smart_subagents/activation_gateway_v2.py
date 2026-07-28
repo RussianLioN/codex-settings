@@ -16,6 +16,7 @@ import secrets
 import socket
 import sqlite3
 import stat
+import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -26,6 +27,10 @@ from urllib.parse import quote
 from .canonical_json import CanonicalJsonError, canonical_json_bytes, domain_fingerprint
 from .catalog import Catalog, CatalogError
 from .codex_binary_snapshot import CODE_SIGNATURE_REQUIREMENT
+from .coordinator_selection_v2 import (
+    coordinator_selection_from_health_v2,
+    validate_coordinator_selection_document_v2,
+)
 from .evidence import EvidenceError, verify_interface_evidence
 from .launcher import (
     apply_coordinator_defaults,
@@ -207,6 +212,9 @@ class GatewayDecision:
     reason_code: str
     executable: Path
     coordinator: Mapping[str, str] | None = None
+    coordinator_selection: Mapping[str, object] | None = None
+    catalog_schema_version: int = 1
+    controller_health_verified: bool = True
     activation_id: str | None = None
     gate_fingerprint: str | None = None
     activation_gate: Mapping[str, object] | None = None
@@ -216,10 +224,13 @@ class GatewayDecision:
     def __post_init__(self) -> None:
         if not self.executable.is_absolute():
             raise ValueError("gateway executable must be absolute")
+        if self.catalog_schema_version not in {1, 2}:
+            raise ValueError("gateway catalog schema version is invalid")
+        if type(self.controller_health_verified) is not bool:
+            raise TypeError("controller_health_verified must be boolean")
         if self.state is GatewayState.READY:
             if (
-                self.coordinator is None
-                or self.activation_id is None
+                self.activation_id is None
                 or self.gate_fingerprint is None
                 or self.activation_gate is None
                 or self.catalog_path is None
@@ -227,10 +238,32 @@ class GatewayDecision:
                 raise ValueError("READY gateway decision is incomplete")
             if self.activation_gate.get("gateFingerprint") != self.gate_fingerprint:
                 raise ValueError("READY activation gate fingerprint diverges")
+            if self.catalog_schema_version == 2 and self.controller_health_verified:
+                if self.coordinator_selection is None:
+                    raise ValueError(
+                        "catalog v2 READY decision has no coordinator selection"
+                    )
+                selection = validate_coordinator_selection_document_v2(
+                    self.coordinator_selection
+                )
+                selected_pair = selection["selectedPair"]
+                if selected_pair is None:
+                    if self.coordinator is not None:
+                        raise ValueError(
+                            "unavailable coordinator selection carries defaults"
+                        )
+                elif self.coordinator != {
+                    "model": selected_pair["model"],
+                    "reasoning_effort": selected_pair["reasoningEffort"],
+                }:
+                    raise ValueError("gateway coordinator differs from live selection")
+            elif self.coordinator is None:
+                raise ValueError("catalog v1 READY decision has no coordinator")
         elif any(
             value is not None
             for value in (
                 self.coordinator,
+                self.coordinator_selection,
                 self.activation_id,
                 self.gate_fingerprint,
                 self.activation_gate,
@@ -452,7 +485,11 @@ class ActivationResolver:
                     receipt["journalAbsenceTarget"],
                     expected_journal=self.layout.journal_path,
                 )
-                controller_identity = self._validate_controller(
+                (
+                    controller_identity,
+                    coordinator_selection,
+                    coordinator,
+                ) = self._validate_controller(
                     controller_row,
                     receipt=receipt,
                     identity=identity,
@@ -460,6 +497,7 @@ class ActivationResolver:
                     state_home=state_home,
                     absence=absence,
                     require_live_controller=require_live_controller,
+                    catalog=catalog,
                 )
                 if controller_identity != receipt["controllerIdentity"]:
                     raise _ProofError(
@@ -484,7 +522,10 @@ class ActivationResolver:
                     state=GatewayState.READY,
                     reason_code="READY",
                     executable=executable,
-                    coordinator=dict(catalog.coordinator),
+                    coordinator=coordinator,
+                    coordinator_selection=coordinator_selection,
+                    catalog_schema_version=catalog.schema_version,
+                    controller_health_verified=require_live_controller,
                     activation_id=activation_id,
                     gate_fingerprint=gate_fingerprint,
                     activation_gate=activation_gate,
@@ -1166,7 +1207,8 @@ class ActivationResolver:
         state_home: Path,
         absence: dict[str, object],
         require_live_controller: bool,
-    ) -> str:
+        catalog: Catalog,
+    ) -> tuple[str, dict[str, object] | None, dict[str, str] | None]:
         del absence
         codex_home_hash = hashlib.sha256(
             str(self.layout.codex_home.resolve()).encode("utf-8")
@@ -1213,7 +1255,7 @@ class ActivationResolver:
                 "CONTROLLER_BINDING_MISMATCH", "controller database row diverges"
             )
         if not require_live_controller:
-            return expected_identity
+            return expected_identity, None, dict(catalog.coordinator)
         socket_path = _absolute_path(
             row["socket_path"], "CONTROLLER_BINDING_MISMATCH"
         )
@@ -1297,7 +1339,26 @@ class ActivationResolver:
                 raise _ProofError(
                     "CONTROLLER_BINDING_MISMATCH", f"health {name} diverges"
                 )
-        return expected_identity
+        try:
+            coordinator_selection, coordinator = (
+                coordinator_selection_from_health_v2(
+                    payload,
+                    catalog_schema_version=catalog.schema_version,
+                    candidates=tuple(
+                        {
+                            "model": candidate["model"],
+                            "reasoningEffort": candidate["reasoning_effort"],
+                        }
+                        for candidate in catalog.coordinator_candidates
+                    ),
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            raise _ProofError(
+                "CONTROLLER_BINDING_MISMATCH",
+                "health coordinator selection diverges",
+            ) from exc
+        return expected_identity, coordinator_selection, coordinator
 
     def _resolve_fallback(self) -> Path:
         try:
@@ -1464,6 +1525,26 @@ def run_permanent_gateway(
         )
         raise AssertionError("execve unexpectedly returned")
 
+    coordinator_selection = (
+        None
+        if decision.coordinator_selection is None
+        else validate_coordinator_selection_document_v2(
+            decision.coordinator_selection
+        )
+    )
+    if (
+        not parsed_invocation.coordinator_control
+        and coordinator_selection is not None
+        and coordinator_selection["status"] == "UNAVAILABLE"
+    ):
+        raise ManagedLaunchUnavailable(
+            _normalize_failure_code(
+                coordinator_selection["reasonCode"],
+                "COORDINATOR_PAIR_UNAVAILABLE",
+            ),
+            "automatic coordinator pair is unavailable",
+        )
+
     try:
         require_bundled_mcp_manifest_v2(Path(__file__).resolve().parents[2])
         policy_proof = build_user_mcp_policy_proof_v2(
@@ -1534,6 +1615,18 @@ def run_permanent_gateway(
         *rewritten_root,
         *arguments[root_end:],
     ]
+    if (
+        not parsed_invocation.coordinator_control
+        and coordinator_selection is not None
+        and coordinator_selection["status"] == "SELECTED"
+        and coordinator_selection["candidateIndex"] == 1
+    ):
+        print(
+            "codex-smart: COORDINATOR_PAIR_FALLBACK; "
+            "gpt-5.6-sol+medium недоступен, "
+            "используется gpt-5.6-terra+medium",
+            file=sys.stderr,
+        )
     execve(
         str(executable),
         [str(executable), *rewritten],
@@ -2447,31 +2540,45 @@ def _validate_health_response(value, *, request: dict[str, object]) -> None:
             "CONTROLLER_BINDING_MISMATCH", "health response fingerprint differs"
         )
     payload = value["payload"]
-    _exact_keys(
-        payload,
-        {
-            "namespace",
-            "controllerIdentity",
-            "instanceId",
-            "controllerStartId",
-            "pid",
-            "processStartMarker",
-            "processGroupId",
-            "state",
-            "maintenanceMode",
-            "operationId",
-            "acceptingNewRoutes",
-            "quiescent",
-            "activationFingerprint",
-            "compatibilityFingerprint",
-            "routingPolicyFingerprint",
-            "bundledCatalogFingerprint",
-            "databaseId",
-            "databaseSchemaVersion",
-            "workCounts",
-        },
-        "CONTROLLER_BINDING_MISMATCH",
-    )
+    expected_payload_keys = {
+        "namespace",
+        "controllerIdentity",
+        "instanceId",
+        "controllerStartId",
+        "pid",
+        "processStartMarker",
+        "processGroupId",
+        "state",
+        "maintenanceMode",
+        "operationId",
+        "acceptingNewRoutes",
+        "quiescent",
+        "activationFingerprint",
+        "compatibilityFingerprint",
+        "routingPolicyFingerprint",
+        "bundledCatalogFingerprint",
+        "databaseId",
+        "databaseSchemaVersion",
+        "workCounts",
+    }
+    if type(payload) is not dict or frozenset(payload) not in {
+        frozenset(expected_payload_keys),
+        frozenset(expected_payload_keys | {"coordinatorSelection"}),
+    }:
+        raise _ProofError(
+            "CONTROLLER_BINDING_MISMATCH",
+            "health payload fields do not match the closed contract",
+        )
+    if "coordinatorSelection" in payload:
+        try:
+            validate_coordinator_selection_document_v2(
+                payload["coordinatorSelection"]
+            )
+        except ValueError as exc:
+            raise _ProofError(
+                "CONTROLLER_BINDING_MISMATCH",
+                "health coordinator selection is invalid",
+            ) from exc
     counts = payload["workCounts"]
     expected_counts = {
         "nonterminalRoutes",

@@ -291,6 +291,55 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
         self.assertIn("codex-native", error.getvalue())
         self.assertNotIn("private resolver details", error.getvalue())
 
+    def test_automatic_coordinator_unavailable_returns_69_without_marker(
+        self,
+    ) -> None:
+        decision = _ordinary(self.fallback)
+        gateway_arguments: dict[str, object] = {}
+
+        class CoordinatorUnavailable(RuntimeError):
+            def __init__(self, code: str, message: str) -> None:
+                super().__init__(f"{code}: {message}")
+                self.code = code
+                self.message = message
+
+        def gateway(_arguments, **kwargs):
+            gateway_arguments.update(kwargs)
+            raise CoordinatorUnavailable(
+                "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+                "private model/list details",
+            )
+
+        error = StringIO()
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"CODEX_HOME": str(self.codex_home)},
+                clear=True,
+            ),
+            mock.patch.object(sys, "argv", [str(WRAPPER), "проверь"]),
+            mock.patch.dict(
+                self.globals,
+                {
+                    "ManagedLaunchUnavailable": CoordinatorUnavailable,
+                    "classify_managed_invocation": classify_managed_invocation,
+                    "v2_gateway_state_present": lambda _layout: True,
+                    "_prepare_v2_decision": lambda **_kwargs: decision,
+                    "run_permanent_gateway": gateway,
+                },
+            ),
+            redirect_stderr(error),
+        ):
+            self.assertEqual(69, self.globals["main"]())
+
+        self.assertFalse(gateway_arguments["managed_required"])
+        self.assertIn(
+            "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            error.getvalue(),
+        )
+        self.assertIn("codex-native", error.getvalue())
+        self.assertNotIn("model/list", error.getvalue())
+
     def test_required_preparation_exception_returns_69_without_details(self) -> None:
         def unavailable(**_kwargs):
             raise RuntimeError("private preparation details")

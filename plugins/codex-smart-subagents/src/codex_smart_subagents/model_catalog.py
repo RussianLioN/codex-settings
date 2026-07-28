@@ -80,10 +80,7 @@ class AppServerModelCatalogInspector:
                 timeout_seconds=self._timeout_seconds,
                 max_output_bytes=self._max_output_bytes,
             )
-            return self._read_pages(client)
-
-    def _read_pages(self, client: Any) -> dict[str, frozenset[str]]:
-        return read_account_model_pages(client.call)
+            return client.run_session(read_account_model_pages)
 
 
 def read_account_model_pages(

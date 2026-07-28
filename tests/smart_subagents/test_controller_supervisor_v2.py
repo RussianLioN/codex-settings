@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import os
 import sqlite3
 import subprocess
@@ -29,6 +30,9 @@ from codex_smart_subagents.controller_supervisor_v2 import (  # noqa: E402
 )
 from codex_smart_subagents.controller_command_v2 import (  # noqa: E402
     ControllerCommandServerV2,
+)
+from codex_smart_subagents.model_catalog import (  # noqa: E402
+    AppServerModelCatalogInspector,
 )
 
 
@@ -244,6 +248,17 @@ class ControllerSupervisorV2Tests(unittest.TestCase):
         result = supervisor.ensure()
 
         self.assertIs(SupervisorStateV2.READY, result.state)
+
+    def test_default_wait_exceeds_the_five_second_catalog_inspection(self) -> None:
+        supervisor_default = inspect.signature(
+            ControllerSupervisorV2.__init__
+        ).parameters["wait_timeout_seconds"].default
+        inspector_default = inspect.signature(
+            AppServerModelCatalogInspector.__init__
+        ).parameters["timeout_seconds"].default
+
+        self.assertEqual(5.0, inspector_default)
+        self.assertGreater(supervisor_default, inspector_default)
 
     def test_absent_or_unsafe_manifest_never_spawns(self) -> None:
         for mutation in ("absent", "unsafe-mode"):

@@ -161,6 +161,18 @@ class _RejectingInterfaceExecutor:
         raise RuntimeError("forced interface probe rejection")
 
 
+class _CoordinatorInspector:
+    def __init__(self, observed=None) -> None:
+        self.observed = observed or {
+            "gpt-5.6-sol": frozenset({"medium"}),
+        }
+        self.calls = 0
+
+    def inspect(self):
+        self.calls += 1
+        return self.observed
+
+
 class HealthBootstrapV2Tests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(dir="/tmp", prefix="cshb2-")
@@ -366,6 +378,49 @@ os._exit(0)
             row,
         )
         self.assertFalse((self.codex_home / "config.toml").exists())
+
+    def test_initial_controller_collects_coordinator_selection_once(self) -> None:
+        inspector = _CoordinatorInspector()
+        factories: list[dict[str, object]] = []
+
+        def factory(**arguments):
+            factories.append(arguments)
+            return inspector
+
+        runtime = self._bootstrap(coordinator_inspector_factory=factory)
+
+        self.assertEqual(1, len(factories))
+        self.assertEqual(1, inspector.calls)
+        self.assertEqual(
+            {
+                "model": "gpt-5.6-sol",
+                "reasoning_effort": "medium",
+            },
+            runtime.gateway_decision.coordinator,
+        )
+
+    def test_recovery_collects_a_new_selection_once(self) -> None:
+        self._create_dead_persisted_activation()
+        inspector = _CoordinatorInspector(
+            {"gpt-5.6-terra": frozenset({"medium"})}
+        )
+        factories: list[dict[str, object]] = []
+
+        def factory(**arguments):
+            factories.append(arguments)
+            return inspector
+
+        runtime = self._bootstrap(coordinator_inspector_factory=factory)
+
+        self.assertEqual(1, len(factories))
+        self.assertEqual(1, inspector.calls)
+        self.assertEqual(
+            {
+                "model": "gpt-5.6-terra",
+                "reasoning_effort": "medium",
+            },
+            runtime.gateway_decision.coordinator,
+        )
 
     def test_explicit_state_home_binds_health_database_and_manifest(self) -> None:
         state_home = self.root / "s"

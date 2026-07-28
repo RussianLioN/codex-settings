@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -38,6 +39,9 @@ from codex_smart_subagents.controller_health_v2 import (  # noqa: E402
     ControllerHealthServerV2,
     ControllerHealthV2Error,
     ControllerRegistrationReceiptV2,
+)
+from codex_smart_subagents.coordinator_selection_v2 import (  # noqa: E402
+    collect_coordinator_selection_v2,
 )
 from codex_smart_subagents.lifecycle_controller_protocol_v2 import (  # noqa: E402
     LifecycleControllerProtocolV2,
@@ -110,6 +114,25 @@ class ControllerHealthServerV2Tests(unittest.TestCase):
         self.compatibility_fingerprint = "2" * 64
         self.routing_policy_fingerprint = "3" * 64
         self.bundled_catalog_fingerprint = "4" * 64
+        self.coordinator_selection = collect_coordinator_selection_v2(
+            selection="first-verified-available",
+            candidates=(
+                {
+                    "model": "gpt-5.6-sol",
+                    "reasoningEffort": "medium",
+                },
+            ),
+            inspector=type(
+                "_CoordinatorInspector",
+                (),
+                {
+                    "inspect": lambda _self: {
+                        "gpt-5.6-sol": frozenset({"medium"})
+                    }
+                },
+            )(),
+            active_context_fingerprint=self.database_identity.activation_fingerprint,
+        )
         self.store: SmartStoreV2 | None = None
         self.server: ControllerHealthServerV2 | None = None
         self.thread: threading.Thread | None = None
@@ -155,6 +178,7 @@ class ControllerHealthServerV2Tests(unittest.TestCase):
             compatibility_fingerprint=self.compatibility_fingerprint,
             routing_policy_fingerprint=self.routing_policy_fingerprint,
             bundled_catalog_fingerprint=self.bundled_catalog_fingerprint,
+            coordinator_selection=self.coordinator_selection,
             instance_id=self.instance_id,
             controller_start_id=self.controller_start_id,
             control_epoch=control_epoch,
@@ -257,6 +281,18 @@ class ControllerHealthServerV2Tests(unittest.TestCase):
             },
             payload["workCounts"],
         )
+        self.assertEqual(
+            self.coordinator_selection.to_document(),
+            payload["coordinatorSelection"],
+        )
+
+        tampered = copy.deepcopy(response)
+        tampered["payload"]["coordinatorSelection"]["candidateIndex"] = 1
+        with self.assertRaisesRegex(
+            ValueError,
+            "health response fingerprint differs",
+        ):
+            _validate_health_response(tampered, request=request)
 
     def test_owned_codex_home_mode_0755_is_accepted(self) -> None:
         self.codex_home.chmod(0o755)

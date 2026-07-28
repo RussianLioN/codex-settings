@@ -5868,6 +5868,15 @@
         "bundledCatalogFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "databaseSchemaVersion": 2,
+        "coordinatorSelection": {
+          "selection": "first-verified-available",
+          "status": "SELECTED",
+          "reasonCode": "COORDINATOR_PAIR_SELECTED",
+          "selectedPair": {"model": "gpt-5.6-sol", "reasoningEffort": "medium"},
+          "candidateIndex": 0,
+          "accountCatalogFingerprint": "5555555555555555555555555555555555555555555555555555555555555555",
+          "accountContextFingerprint": "6666666666666666666666666666666666666666666666666666666666666666"
+        },
         "workCounts": {
           "nonterminalRoutes": 0,
           "nonterminalNodes": 0,

@@ -153,7 +153,7 @@ class ControllerSupervisorV2:
         sleep: Callable[[float], None] = time.sleep,
         source_environment: Mapping[str, str] | None = None,
         python_executable: Path = Path(sys.executable),
-        wait_timeout_seconds: float = 3.0,
+        wait_timeout_seconds: float = 7.0,
         poll_interval_seconds: float = 0.05,
     ) -> None:
         if not callable(getattr(resolver, "resolve", None)):

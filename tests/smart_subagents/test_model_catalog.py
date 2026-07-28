@@ -46,6 +46,11 @@ class FakeAppServerClient:
     def __init__(self, responses: list[dict[str, object]]) -> None:
         self.responses = list(responses)
         self.calls: list[tuple[str, dict[str, object]]] = []
+        self.sessions = 0
+
+    def run_session(self, operation):
+        self.sessions += 1
+        return operation(self.call)
 
     def call(
         self,
@@ -298,6 +303,7 @@ class AccountModelInspectorTests(unittest.TestCase):
             ],
             client.calls,
         )
+        self.assertEqual(1, client.sessions)
 
     def test_rejects_duplicate_or_malformed_account_records(self) -> None:
         with tempfile.TemporaryDirectory() as raw:

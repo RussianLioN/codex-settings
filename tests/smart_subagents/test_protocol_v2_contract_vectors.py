@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -79,6 +80,81 @@ class ProtocolV2ContractTests(unittest.TestCase):
         self.assertIn("startRequestId", route_started["required"])
         self.assertIn("evidenceJob", route_started["required"])
         self.assertEqual({"type": "null"}, route_started["properties"]["admissionId"])
+
+    def test_coordinator_generator_owns_health_selection_schema_and_vector(
+        self,
+    ) -> None:
+        generator_path = ROOT / "scripts" / "update_coordinator_contract_cascade.py"
+        spec = importlib.util.spec_from_file_location(
+            "coordinator_contract_generator",
+            generator_path,
+        )
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        generated = module.generate()
+        schema_path = Path("docs/contracts/schemas/controller-protocol-v2.schema.json")
+        vector_path = Path("docs/contracts/vectors/controller-protocol-v2.json")
+        lifecycle_path = Path("docs/contracts/vectors/lifecycle-v2.json")
+        self.assertIn(schema_path, generated)
+        self.assertIn(vector_path, generated)
+        self.assertIn(lifecycle_path, generated)
+        schema = json.loads(generated[schema_path])
+        vectors = json.loads(generated[vector_path])
+        lifecycle = json.loads(generated[lifecycle_path])
+        health = schema["$defs"]["healthPayload"]
+        self.assertIn("coordinatorSelection", health["required"])
+        self.assertEqual(
+            "first-verified-available",
+            schema["$defs"]["coordinatorSelection"]["properties"][
+                "selection"
+            ]["const"],
+        )
+        health_response = next(
+            case["message"]
+            for case in vectors["positiveCases"]
+            if case["name"] == "health-response"
+        )
+        self.assertEqual(
+            "SELECTED",
+            health_response["payload"]["coordinatorSelection"]["status"],
+        )
+        self.assertEqual(
+            "SELECTED",
+            lifecycle["fixtures"]["healthResponse"]["payload"][
+                "coordinatorSelection"
+            ]["status"],
+        )
+
+    def test_coordinator_generator_rejects_semantic_schema_drift(self) -> None:
+        generator_path = ROOT / "scripts" / "update_coordinator_contract_cascade.py"
+        spec = importlib.util.spec_from_file_location(
+            "coordinator_contract_drift_generator",
+            generator_path,
+        )
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        with tempfile.TemporaryDirectory() as raw_root:
+            temporary_root = Path(raw_root)
+            schema_path = temporary_root / module.CONTROLLER_SCHEMA
+            vector_path = temporary_root / module.CONTROLLER_VECTOR
+            schema_path.parent.mkdir(parents=True)
+            vector_path.parent.mkdir(parents=True)
+            schema = load_json(ROOT / module.CONTROLLER_SCHEMA)
+            schema["$defs"]["coordinatorSelection"]["properties"][
+                "selection"
+            ]["const"] = "last-candidate"
+            schema_path.write_text(json.dumps(schema), encoding="utf-8")
+            vector_path.write_bytes((ROOT / module.CONTROLLER_VECTOR).read_bytes())
+            module.ROOT = temporary_root
+
+            with self.assertRaisesRegex(RuntimeError, "семантика"):
+                module._update_controller_protocol()
 
     def test_wait_cancel_and_attestation_are_closed(self) -> None:
         smart_turn = load_json(SCHEMA_ROOT / "smart-turn-protocol-v2.schema.json")

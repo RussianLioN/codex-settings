@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -250,6 +251,28 @@ class CandidateControllerV2Tests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    def _policy(self):
+        return SimpleNamespace(
+            coordinator_selection="first-verified-available",
+            coordinator_candidates=(
+                {
+                    "model": "gpt-5.6-sol",
+                    "reasoningEffort": "medium",
+                },
+                {
+                    "model": "gpt-5.6-terra",
+                    "reasoningEffort": "medium",
+                },
+            ),
+        )
+
+    def _coordinator_inspector_factory(self, **_arguments):
+        return SimpleNamespace(
+            inspect=lambda: {
+                "gpt-5.6-sol": frozenset({"medium"}),
+            }
+        )
+
     def test_loader_binds_candidate_to_its_activation_and_prepared_database(
         self,
     ) -> None:
@@ -324,6 +347,18 @@ class CandidateControllerV2Tests(unittest.TestCase):
         )
         captured = {}
         server = _FakeServer()
+        inspector = type(
+            "Inspector",
+            (),
+            {
+                "calls": 0,
+                "inspect": lambda self: (
+                    setattr(self, "calls", self.calls + 1)
+                    or {"gpt-5.6-sol": frozenset({"medium"})}
+                ),
+            },
+        )()
+        factories = []
         decision = type(
             "Decision",
             (),
@@ -352,7 +387,10 @@ class CandidateControllerV2Tests(unittest.TestCase):
 
         application = serve_candidate_controller_v2(
             config,
-            policy_loader=lambda **_arguments: object(),
+            policy_loader=lambda **_arguments: self._policy(),
+            coordinator_inspector_factory=lambda **arguments: (
+                factories.append(arguments) or inspector
+            ),
             server_factory=lambda **arguments: (
                 server.arguments.update(arguments) or server
             ),
@@ -369,6 +407,17 @@ class CandidateControllerV2Tests(unittest.TestCase):
         self.assertEqual(self.database_path, server.database_path)
         self.assertEqual(
             self.controller_start_id, server.arguments["controller_start_id"]
+        )
+        self.assertEqual(1, len(factories))
+        self.assertEqual(1, inspector.calls)
+        self.assertEqual(
+            {
+                "model": "gpt-5.6-sol",
+                "reasoningEffort": "medium",
+            },
+            server.arguments[
+                "coordinator_selection"
+            ].to_document()["selectedPair"],
         )
         self.assertEqual(self.state_home, captured["entrypoint_config"].state_home)
 
@@ -424,7 +473,8 @@ class CandidateControllerV2Tests(unittest.TestCase):
             config,
             ready_bootstrap=bootstrap,
             ready_channel_starter=ready_starter,
-            policy_loader=lambda **_arguments: object(),
+            policy_loader=lambda **_arguments: self._policy(),
+            coordinator_inspector_factory=self._coordinator_inspector_factory,
             server_factory=lambda **arguments: (
                 server.arguments.update(arguments) or server
             ),
@@ -466,7 +516,8 @@ class CandidateControllerV2Tests(unittest.TestCase):
                 config,
                 ready_bootstrap=self._ready_bootstrap(config),
                 ready_channel_starter=lambda **_arguments: ready,
-                policy_loader=lambda **_arguments: object(),
+                policy_loader=lambda **_arguments: self._policy(),
+                coordinator_inspector_factory=self._coordinator_inspector_factory,
                 server_factory=lambda **arguments: (
                     server.arguments.update(arguments) or server
                 ),
@@ -498,7 +549,8 @@ class CandidateControllerV2Tests(unittest.TestCase):
                 config,
                 ready_bootstrap=self._ready_bootstrap(config),
                 ready_channel_starter=lambda **_arguments: ready,
-                policy_loader=lambda **_arguments: object(),
+                policy_loader=lambda **_arguments: self._policy(),
+                coordinator_inspector_factory=self._coordinator_inspector_factory,
                 server_factory=lambda **arguments: (
                     server.arguments.update(arguments) or server
                 ),

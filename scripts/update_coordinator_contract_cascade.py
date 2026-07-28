@@ -52,6 +52,13 @@ ROUTING_SCHEMA = Path("docs/contracts/schemas/routing-policy-v2.schema.json")
 INTERFACE_VECTOR = Path("docs/contracts/vectors/interface-evidence-v1.json")
 ACCOUNT_VECTOR = Path("docs/contracts/vectors/account-evidence-v1.json")
 CHILD_VECTOR = Path("docs/contracts/vectors/child-profile-v1.json")
+CONTROLLER_SCHEMA = Path(
+    "docs/contracts/schemas/controller-protocol-v2.schema.json"
+)
+CONTROLLER_VECTOR = Path(
+    "docs/contracts/vectors/controller-protocol-v2.json"
+)
+LIFECYCLE_VECTOR = Path("docs/contracts/vectors/lifecycle-v2.json")
 
 
 def _serialized(value: dict[str, Any]) -> bytes:
@@ -75,6 +82,242 @@ def _schema_hashes(
     return hashes
 
 
+def _replace_once(value: str, old: str, new: str, *, label: str) -> str:
+    count = value.count(old)
+    if count != 1:
+        raise RuntimeError(
+            f"{label}: ожидалось одно вхождение, найдено {count}"
+        )
+    return value.replace(old, new, 1)
+
+
+def _update_controller_protocol() -> tuple[bytes, bytes]:
+    """Расширяет компактные артефакты без переформатирования соседних строк."""
+
+    schema = (ROOT / CONTROLLER_SCHEMA).read_text(encoding="utf-8")
+    definitions = """    "coordinatorPair": {
+      "type": "object", "additionalProperties": false,
+      "required": ["model", "reasoningEffort"],
+      "properties": {"model": {"type": "string", "minLength": 1, "maxLength": 128}, "reasoningEffort": {"type": "string", "minLength": 1, "maxLength": 32}}
+    },
+    "coordinatorSelection": {
+      "type": "object", "additionalProperties": false,
+      "required": ["selection", "status", "reasonCode", "selectedPair", "candidateIndex", "accountCatalogFingerprint", "accountContextFingerprint"],
+      "properties": {
+        "selection": {"const": "first-verified-available"},
+        "status": {"enum": ["SELECTED", "UNAVAILABLE"]},
+        "reasonCode": {"enum": ["COORDINATOR_PAIR_SELECTED", "COORDINATOR_PAIR_UNAVAILABLE", "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE", "COORDINATOR_ACCOUNT_CATALOG_INVALID"]},
+        "selectedPair": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/coordinatorPair"}]},
+        "candidateIndex": {"oneOf": [{"type": "null"}, {"type": "integer", "minimum": 0, "maximum": 7}]},
+        "accountCatalogFingerprint": {"$ref": "#/$defs/nullableSha256"},
+        "accountContextFingerprint": {"$ref": "#/$defs/nullableSha256"}
+      },
+      "oneOf": [
+        {"properties": {"status": {"const": "SELECTED"}, "reasonCode": {"const": "COORDINATOR_PAIR_SELECTED"}, "selectedPair": {"$ref": "#/$defs/coordinatorPair"}, "candidateIndex": {"type": "integer", "minimum": 0, "maximum": 7}, "accountCatalogFingerprint": {"$ref": "#/$defs/sha256"}, "accountContextFingerprint": {"$ref": "#/$defs/sha256"}}},
+        {"properties": {"status": {"const": "UNAVAILABLE"}, "reasonCode": {"const": "COORDINATOR_PAIR_UNAVAILABLE"}, "selectedPair": {"type": "null"}, "candidateIndex": {"type": "null"}, "accountCatalogFingerprint": {"$ref": "#/$defs/sha256"}, "accountContextFingerprint": {"$ref": "#/$defs/sha256"}}},
+        {"properties": {"status": {"const": "UNAVAILABLE"}, "reasonCode": {"enum": ["COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE", "COORDINATOR_ACCOUNT_CATALOG_INVALID"]}, "selectedPair": {"type": "null"}, "candidateIndex": {"type": "null"}, "accountCatalogFingerprint": {"type": "null"}, "accountContextFingerprint": {"$ref": "#/$defs/sha256"}}}
+      ]
+    },
+"""
+    if '"coordinatorSelection": {' not in schema:
+        schema = _replace_once(
+            schema,
+            '    "workCounts": {\n',
+            definitions + '    "workCounts": {\n',
+            label="определения выбора координатора",
+        )
+        schema = _replace_once(
+            schema,
+            '"databaseSchemaVersion", "workCounts"]',
+            '"databaseSchemaVersion", "coordinatorSelection", "workCounts"]',
+            label="обязательное поле выбора координатора",
+        )
+        schema = _replace_once(
+            schema,
+            '"databaseSchemaVersion": {"const": 2}, "workCounts"',
+            '"databaseSchemaVersion": {"const": 2}, '
+            '"coordinatorSelection": {"$ref": "#/$defs/coordinatorSelection"}, '
+            '"workCounts"',
+            label="схема поля выбора координатора",
+        )
+    failed_context_null = (
+        '"reasonCode": {"enum": '
+        '["COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE", '
+        '"COORDINATOR_ACCOUNT_CATALOG_INVALID"]}, '
+        '"selectedPair": {"type": "null"}, '
+        '"candidateIndex": {"type": "null"}, '
+        '"accountCatalogFingerprint": {"type": "null"}, '
+        '"accountContextFingerprint": {"type": "null"}'
+    )
+    if failed_context_null in schema:
+        schema = _replace_once(
+            schema,
+            failed_context_null,
+            failed_context_null.replace(
+                '"accountContextFingerprint": {"type": "null"}',
+                '"accountContextFingerprint": {"$ref": "#/$defs/sha256"}',
+            ),
+            label="контекстный отпечаток отказа координатора",
+        )
+    expected_definitions = json.loads(
+        "{\n" + definitions + '    "__end": null\n}'
+    )
+    expected_definitions.pop("__end")
+    parsed_schema = json.loads(schema)
+    actual_definitions = parsed_schema.get("$defs")
+    if not isinstance(actual_definitions, dict) or any(
+        actual_definitions.get(name) != expected
+        for name, expected in expected_definitions.items()
+    ):
+        raise RuntimeError("семантика схемы выбора координатора отличается")
+    health = actual_definitions.get("healthPayload")
+    if (
+        not isinstance(health, dict)
+        or health.get("required", []).count("coordinatorSelection") != 1
+        or health.get("properties", {}).get("coordinatorSelection")
+        != {"$ref": "#/$defs/coordinatorSelection"}
+    ):
+        raise RuntimeError("семантика health выбора координатора отличается")
+
+    vector = (ROOT / CONTROLLER_VECTOR).read_text(encoding="utf-8")
+    if '"accountContextFingerprint": "6666666666666666' not in vector:
+        selection = """          "coordinatorSelection": {
+            "selection": "first-verified-available",
+            "status": "SELECTED",
+            "reasonCode": "COORDINATOR_PAIR_SELECTED",
+            "selectedPair": {"model": "gpt-5.6-sol", "reasoningEffort": "medium"},
+            "candidateIndex": 0,
+            "accountCatalogFingerprint": "5555555555555555555555555555555555555555555555555555555555555555",
+            "accountContextFingerprint": "6666666666666666666666666666666666666666666666666666666666666666"
+          },
+"""
+        vector = _replace_once(
+            vector,
+            '          "workCounts": {\n',
+            selection + '          "workCounts": {\n',
+            label="положительный вектор выбора координатора",
+        )
+    negative_name = "health-without-coordinator-selection-rejected"
+    if negative_name not in vector:
+        anchor = (
+            '    {"name": "health-live-fence-rejected", "method": "health", '
+            '"direction": "request", "baseCase": "health-request", '
+            '"mutation": {"operation": "replace", '
+            '"pointer": "/controllerIdentity", '
+            '"value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, '
+            '"expectedViolation": "SCHEMA_REJECT"},\n'
+        )
+        negative = (
+            '    {"name": "health-without-coordinator-selection-rejected", '
+            '"method": "health", "direction": "response", '
+            '"baseCase": "health-response", "mutation": {"operation": "remove", '
+            '"pointer": "/payload/coordinatorSelection"}, '
+            '"expectedViolation": "SCHEMA_REJECT"},\n'
+        )
+        vector = _replace_once(
+            vector,
+            anchor,
+            anchor + negative,
+            label="отрицательный вектор выбора координатора",
+        )
+    expected_selection = {
+        "selection": "first-verified-available",
+        "status": "SELECTED",
+        "reasonCode": "COORDINATOR_PAIR_SELECTED",
+        "selectedPair": {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "medium",
+        },
+        "candidateIndex": 0,
+        "accountCatalogFingerprint": "5" * 64,
+        "accountContextFingerprint": "6" * 64,
+    }
+    expected_negative = {
+        "name": negative_name,
+        "method": "health",
+        "direction": "response",
+        "baseCase": "health-response",
+        "mutation": {
+            "operation": "remove",
+            "pointer": "/payload/coordinatorSelection",
+        },
+        "expectedViolation": "SCHEMA_REJECT",
+    }
+    parsed_vector = json.loads(vector)
+    health_cases = [
+        case
+        for case in parsed_vector.get("positiveCases", [])
+        if case.get("name") == "health-response"
+    ]
+    negative_cases = [
+        case
+        for case in parsed_vector.get("negativeCases", [])
+        if case.get("name") == negative_name
+    ]
+    if (
+        len(health_cases) != 1
+        or health_cases[0].get("message", {})
+        .get("payload", {})
+        .get("coordinatorSelection")
+        != expected_selection
+        or negative_cases != [expected_negative]
+    ):
+        raise RuntimeError("семантика вектора выбора координатора отличается")
+    return schema.encode("utf-8"), vector.encode("utf-8")
+
+
+def _update_lifecycle_health_vector() -> bytes:
+    """Синхронизирует зависимую health-фикстуру без переформатирования."""
+
+    vector = (ROOT / LIFECYCLE_VECTOR).read_text(encoding="utf-8")
+    if '"coordinatorSelection"' not in vector:
+        selection = """        "coordinatorSelection": {
+          "selection": "first-verified-available",
+          "status": "SELECTED",
+          "reasonCode": "COORDINATOR_PAIR_SELECTED",
+          "selectedPair": {"model": "gpt-5.6-sol", "reasoningEffort": "medium"},
+          "candidateIndex": 0,
+          "accountCatalogFingerprint": "5555555555555555555555555555555555555555555555555555555555555555",
+          "accountContextFingerprint": "6666666666666666666666666666666666666666666666666666666666666666"
+        },
+"""
+        anchor = (
+            '        "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",\n'
+            '        "databaseSchemaVersion": 2,\n'
+            '        "workCounts": {\n'
+        )
+        vector = _replace_once(
+            vector,
+            anchor,
+            anchor.replace(
+                '        "workCounts": {\n',
+                selection + '        "workCounts": {\n',
+            ),
+            label="зависимый health-вектор жизненного цикла",
+        )
+    parsed = json.loads(vector)
+    actual_selection = parsed.get("fixtures", {}).get(
+        "healthResponse", {}
+    ).get("payload", {}).get("coordinatorSelection")
+    expected_selection = {
+        "selection": "first-verified-available",
+        "status": "SELECTED",
+        "reasonCode": "COORDINATOR_PAIR_SELECTED",
+        "selectedPair": {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "medium",
+        },
+        "candidateIndex": 0,
+        "accountCatalogFingerprint": "5" * 64,
+        "accountContextFingerprint": "6" * 64,
+    }
+    if actual_selection != expected_selection:
+        raise RuntimeError(
+            "семантика health-вектора жизненного цикла отличается"
+        )
+    return vector.encode("utf-8")
+
+
 def generate() -> dict[Path, bytes]:
     routing = load(ROOT / ROUTING_VECTOR)
     old_policy_fingerprint = routing["fingerprint"]
@@ -92,9 +335,14 @@ def generate() -> dict[Path, bytes]:
 
     schema = load(ROOT / ROUTING_SCHEMA)
     schema["const"] = copy.deepcopy(policy)
+    controller_schema, controller_vector = _update_controller_protocol()
+    lifecycle_vector = _update_lifecycle_health_vector()
     generated = {
         ROUTING_VECTOR: _serialized(routing),
         ROUTING_SCHEMA: _serialized(schema),
+        CONTROLLER_SCHEMA: controller_schema,
+        CONTROLLER_VECTOR: controller_vector,
+        LIFECYCLE_VECTOR: lifecycle_vector,
     }
 
     child = load(ROOT / CHILD_VECTOR)

@@ -27,6 +27,10 @@ from .canonical_json import (
     domain_fingerprint,
 )
 from .child_guard_v2 import ChildGuardV2Error, system_process_start_marker_v2
+from .coordinator_selection_v2 import (
+    CoordinatorSelectionV2,
+    validate_coordinator_selection_document_v2,
+)
 from .lifecycle_controller_protocol_v2 import LifecycleControllerProtocolV2Error
 from .schema_projection import APPLICATION_ID
 from .state_store_v2 import (
@@ -143,6 +147,7 @@ class ControllerHealthServerV2:
         compatibility_fingerprint: str,
         routing_policy_fingerprint: str,
         bundled_catalog_fingerprint: str,
+        coordinator_selection: CoordinatorSelectionV2,
         instance_id: str,
         controller_start_id: str,
         control_epoch: int,
@@ -165,6 +170,11 @@ class ControllerHealthServerV2:
         _sha256(compatibility_fingerprint, "compatibility_fingerprint")
         _sha256(routing_policy_fingerprint, "routing_policy_fingerprint")
         _sha256(bundled_catalog_fingerprint, "bundled_catalog_fingerprint")
+        if not isinstance(coordinator_selection, CoordinatorSelectionV2):
+            _fail(
+                "INVALID_CONFIGURATION",
+                "coordinator_selection must be CoordinatorSelectionV2",
+            )
         _identifier(instance_id, "ci2_", 32, "instance_id")
         _identifier(controller_start_id, "cs2_", 32, "controller_start_id")
         if type(control_epoch) is not int or not 1 <= control_epoch <= MAX_SAFE_INTEGER:
@@ -189,6 +199,19 @@ class ControllerHealthServerV2:
         self.compatibility_fingerprint = compatibility_fingerprint
         self.routing_policy_fingerprint = routing_policy_fingerprint
         self.bundled_catalog_fingerprint = bundled_catalog_fingerprint
+        if (
+            coordinator_selection.recompute_account_context_fingerprint(
+                active_context_fingerprint=activation_fingerprint,
+            )
+            != coordinator_selection.account_context_fingerprint
+        ):
+            _fail(
+                "INVALID_CONFIGURATION",
+                "coordinator selection context differs from activation",
+            )
+        self.coordinator_selection = validate_coordinator_selection_document_v2(
+            coordinator_selection.to_document()
+        )
         self.instance_id = instance_id
         self.controller_start_id = controller_start_id
         self.control_epoch = control_epoch
@@ -789,6 +812,7 @@ class ControllerHealthServerV2:
             "compatibilityFingerprint": row["compatibility_fingerprint"],
             "routingPolicyFingerprint": row["routing_policy_fingerprint"],
             "bundledCatalogFingerprint": row["bundled_catalog_fingerprint"],
+            "coordinatorSelection": dict(self.coordinator_selection),
             "databaseId": row["database_id"],
             "databaseSchemaVersion": 2,
             "workCounts": counts,
