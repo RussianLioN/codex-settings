@@ -31,6 +31,7 @@ from .launcher import (
     apply_coordinator_defaults,
     clean_ordinary_environment,
     parse_managed_invocation,
+    validate_real_binary,
 )
 from .mcp_runtime_proof_v2 import (
     MCP_SESSION_NONCE_ENV_V2,
@@ -1417,6 +1418,22 @@ def run_permanent_gateway(
     source_environment = dict(os.environ if environment is None else environment)
     parsed_invocation = parse_managed_invocation(arguments)
     invocation = parsed_invocation.decision
+    if not invocation.adaptive:
+        executable = validate_real_binary(
+            Path(
+                source_environment.get(
+                    "CODEX_REAL_BIN",
+                    "/opt/homebrew/bin/codex",
+                )
+            ),
+            wrapper,
+        )
+        execve(
+            str(executable),
+            [str(executable), *arguments],
+            clean_ordinary_environment(source_environment),
+        )
+        raise AssertionError("execve unexpectedly returned")
     try:
         decision = resolver.resolve()
     except Exception as exc:
@@ -1430,8 +1447,8 @@ def run_permanent_gateway(
     if executable.resolve() == wrapper.expanduser().resolve():
         raise RuntimeError("LAUNCHER_RECURSION: selected Codex is the gateway")
 
-    if decision.state is GatewayState.ORDINARY or not invocation.adaptive:
-        if managed_required and invocation.adaptive:
+    if decision.state is GatewayState.ORDINARY:
+        if managed_required:
             raise ManagedLaunchUnavailable(
                 _normalize_failure_code(
                     decision.reason_code,

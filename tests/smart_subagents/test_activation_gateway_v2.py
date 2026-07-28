@@ -272,18 +272,21 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
 
         source_environment = dict(environment)
         source_environment.setdefault("CODEX_HOME", str(self.root))
+        source_environment.setdefault("CODEX_REAL_BIN", str(self.real))
         gateway_options: dict[str, object] = {}
         if managed_required is not None:
             gateway_options["managed_required"] = managed_required
+        resolver = _StaticResolver(decision)
         with self.assertRaisesRegex(RuntimeError, "expected exec"):
             run_permanent_gateway(
                 arguments,
-                resolver=_StaticResolver(decision),
+                resolver=resolver,
                 wrapper=self.wrapper,
                 environment=source_environment,
                 execve=expected_exec,
                 **gateway_options,
             )
+        self._last_resolver_calls = resolver.calls
         self.assertEqual(1, len(observed))
         return observed[0]
 
@@ -321,6 +324,119 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
                 for name in environment
             )
         )
+
+    def test_native_invocation_bypasses_damaged_gateway_state(self) -> None:
+        layout = GatewayLayout.for_codex_home(self.root)
+        layout.manifest_root.mkdir(mode=0o700)
+        layout.managed_root.mkdir(mode=0o700)
+        delegate = ActivationResolver(layout=layout, wrapper=self.wrapper)
+
+        class TrackingResolver:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def resolve(self) -> GatewayDecision:
+                self.calls += 1
+                return delegate.resolve()
+
+        resolver = TrackingResolver()
+        original = ["help", "--"]
+        observed: list[tuple[str, tuple[str, ...], dict[str, str]]] = []
+
+        def expected_exec(
+            path: str,
+            argv: Sequence[str],
+            environ: Mapping[str, str],
+        ) -> object:
+            observed.append((path, tuple(argv), dict(environ)))
+            raise RuntimeError("expected exec")
+
+        with self.assertRaisesRegex(RuntimeError, "expected exec"):
+            run_permanent_gateway(
+                original,
+                resolver=resolver,
+                wrapper=self.wrapper,
+                environment={
+                    "PATH": "/usr/bin",
+                    "CODEX_HOME": str(self.root),
+                    "CODEX_REAL_BIN": str(self.real),
+                    "CODEX_SMART_REQUIRED": "invalid",
+                    "CODEX_ADAPTIVE_SESSION_ID": "stale",
+                    "CODEX_COORDINATOR_MODEL": "stale",
+                },
+                execve=expected_exec,
+            )
+
+        self.assertEqual(0, resolver.calls)
+        self.assertEqual(
+            [
+                (
+                    str(self.real),
+                    (str(self.real), *original),
+                    {
+                        "PATH": "/usr/bin",
+                        "CODEX_HOME": str(self.root),
+                    },
+                )
+            ],
+            observed,
+        )
+
+        observed.clear()
+        with (
+            patch.object(
+                gateway_module,
+                "validate_real_binary",
+                return_value=self.real,
+            ) as validate,
+            self.assertRaisesRegex(RuntimeError, "expected exec"),
+        ):
+            run_permanent_gateway(
+                ["update"],
+                resolver=resolver,
+                wrapper=self.wrapper,
+                environment={
+                    "PATH": "/usr/bin",
+                    "CODEX_HOME": str(self.root),
+                    "CODEX_SMART_REQUIRED": "invalid",
+                },
+                execve=expected_exec,
+            )
+
+        validate.assert_called_once_with(
+            Path("/opt/homebrew/bin/codex"),
+            self.wrapper,
+        )
+        self.assertEqual(0, resolver.calls)
+        self.assertEqual(
+            [
+                (
+                    str(self.real),
+                    (str(self.real), "update"),
+                    {
+                        "PATH": "/usr/bin",
+                        "CODEX_HOME": str(self.root),
+                    },
+                )
+            ],
+            observed,
+        )
+
+        observed.clear()
+        with self.assertRaisesRegex(RuntimeError, "REAL_CODEX_NOT_ABSOLUTE"):
+            run_permanent_gateway(
+                ["help"],
+                resolver=resolver,
+                wrapper=self.wrapper,
+                environment={
+                    "PATH": "/usr/bin",
+                    "CODEX_HOME": str(self.root),
+                    "CODEX_REAL_BIN": "relative/codex",
+                },
+                execve=expected_exec,
+            )
+        self.assertEqual(0, resolver.calls)
+        self.assertEqual([], observed)
 
     def test_required_managed_ordinary_decision_fails_without_exec(self) -> None:
         decision = GatewayDecision(
@@ -423,6 +539,7 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
             ["проверь"],
             {"PATH": "/usr/bin", "CODEX_SMART_LAUNCHER_ACTIVE": "stale"},
         )
+        self.assertEqual(1, self._last_resolver_calls)
         self.assertEqual(
             (
                 str(self.real),
