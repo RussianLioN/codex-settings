@@ -334,7 +334,12 @@ class ChildLaunchCoordinatorV2Tests(unittest.TestCase):
         self.probes = 0
         self.process_probes = 0
 
-    def _coordinator(self, *, expected_control_epoch: int = 7) -> ChildLaunchCoordinatorV2:
+    def _coordinator(
+        self,
+        *,
+        expected_control_epoch: int = 7,
+        allowed_pairs: tuple[dict[str, str], ...] | None = None,
+    ) -> ChildLaunchCoordinatorV2:
         @contextmanager
         def launch_barrier():
             self.assertEqual(0, self.barrier_depth)
@@ -381,7 +386,9 @@ class ChildLaunchCoordinatorV2Tests(unittest.TestCase):
             store=self.store,
             guard_factory=self.guard_factory,
             launch_barrier=launch_barrier,
-            allowed_pairs=(
+            allowed_pairs=allowed_pairs
+            if allowed_pairs is not None
+            else (
                 {
                     "model": "catalog-model-a",
                     "reasoningEffort": "catalog-effort-b",
@@ -542,6 +549,32 @@ class ChildLaunchCoordinatorV2Tests(unittest.TestCase):
             )
 
         self.assertEqual([], self.store.calls)
+
+    def test_rejects_coordinator_only_sol_medium_before_reservation(self) -> None:
+        routing = json.loads(
+            (
+                ROOT / "docs/contracts/vectors/routing-policy-v2.json"
+            ).read_text(encoding="utf-8")
+        )
+        child_pairs = tuple(routing["policy"]["allowedPairs"])
+        with self.assertRaisesRegex(
+            ChildLaunchCoordinatorV2Error,
+            "PAIR_NOT_ALLOWED",
+        ):
+            self._coordinator(allowed_pairs=child_pairs).run(
+                admission_id="adm2_" + "0" * 32,
+                request_context=request_context(),
+                prepared=replace(
+                    prepared_launch(),
+                    model="gpt-5.6-sol",
+                    reasoning_effort="medium",
+                ),
+                timeout_seconds=30,
+                max_output_bytes=1024 * 1024,
+            )
+
+        self.assertEqual([], self.store.calls)
+        self.assertEqual([], self.barrier_trace)
 
     def test_rejects_tampered_argv_fingerprint_before_barrier_or_reservation(
         self,

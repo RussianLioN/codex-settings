@@ -58,7 +58,7 @@ def _read_catalog(
         _fail("CATALOG_INVALID", str(exc))
     if type(catalog) is not dict:
         _fail("CATALOG_INVALID")
-    if catalog.get("schema_version") != 1:
+    if catalog.get("schema_version") not in {1, 2}:
         _fail("CATALOG_VERSION_UNSUPPORTED")
 
     models = catalog.get("models")
@@ -91,25 +91,20 @@ def _read_catalog(
     if ranks != set(range(len(models))):
         _fail("CATALOG_MODEL_RANKS_NOT_CONTIGUOUS")
 
-    coordinator = catalog.get("coordinator")
-    _exact_keys(
-        coordinator,
-        {"model", "reasoning_effort"},
-        "CATALOG_COORDINATOR_INVALID",
-    )
-    model = coordinator["model"]
-    effort = coordinator["reasoning_effort"]
-    if (
-        type(model) is not str
-        or model not in normalized_models
-        or type(effort) is not str
-        or effort not in normalized_models[model]["reasoningEfforts"]
-    ):
-        _fail("CATALOG_COORDINATOR_PAIR_INVALID")
     try:
         verified_catalog = Catalog.load(path)
     except CatalogError as exc:
         _fail("CATALOG_INVALID", str(exc))
+    coordinator_contract = {
+        "selection": verified_catalog.coordinator_selection,
+        "candidates": [
+            {
+                "model": candidate["model"],
+                "reasoningEffort": candidate["reasoning_effort"],
+            }
+            for candidate in verified_catalog.coordinator_candidates
+        ],
+    }
     normalized = json.dumps(
         catalog,
         ensure_ascii=False,
@@ -123,7 +118,7 @@ def _read_catalog(
         _fail("CATALOG_CHANGED_DURING_LOAD")
     return (
         catalog,
-        {"model": model, "reasoningEffort": effort},
+        coordinator_contract,
         verified_catalog,
     )
 
@@ -135,6 +130,8 @@ class PolicyBundleV2:
     minimum_codex_version: str
     supported_platforms: tuple[str, ...]
     coordinator: Mapping[str, str]
+    coordinator_selection: str
+    coordinator_candidates: tuple[Mapping[str, str], ...]
     catalog_models: Mapping[str, Mapping[str, Any]]
     catalog_limits: Mapping[str, int]
     validation_commands: Mapping[str, tuple[tuple[str, ...], ...]]
@@ -164,7 +161,11 @@ def load_policy_bundle_v2(
 ) -> PolicyBundleV2:
     """Загружает, замыкает и отпечатывает все данные маршрутизации."""
 
-    catalog, coordinator, verified_catalog = _read_catalog(catalog_path)
+    catalog, coordinator_contract, verified_catalog = _read_catalog(catalog_path)
+    coordinator_candidates = tuple(
+        copy.deepcopy(coordinator_contract["candidates"])
+    )
+    coordinator = copy.deepcopy(coordinator_candidates[0])
     normalized_models: dict[str, dict[str, Any]] = {
         name: {
             "rank": raw["rank"],
@@ -195,7 +196,7 @@ def load_policy_bundle_v2(
     except ContractError as exc:
         _fail("ROUTING_POLICY_SNAPSHOT_INVALID", str(exc))
 
-    if policy["coordinator"] != coordinator:
+    if policy["coordinator"] != coordinator_contract:
         _fail("COORDINATOR_POLICY_DRIFT")
 
     catalog_pairs = {
@@ -395,6 +396,8 @@ def load_policy_bundle_v2(
         minimum_codex_version=verified_catalog.minimum_codex_version,
         supported_platforms=verified_catalog.supported_platforms,
         coordinator=copy.deepcopy(coordinator),
+        coordinator_selection=coordinator_contract["selection"],
+        coordinator_candidates=coordinator_candidates,
         catalog_models=copy.deepcopy(normalized_models),
         catalog_limits=copy.deepcopy(verified_catalog.limits),
         validation_commands=copy.deepcopy(validation_commands),

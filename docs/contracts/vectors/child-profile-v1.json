@@ -810,7 +810,7 @@
           "schemaVersion": 1,
           "contractVersion": "codex-trusted-launch-context-v1",
           "role": "classifier",
-          "compatibilityFingerprint": "34faaaff5f71c498383bb748a6db0459eb532b991cbd8783c5cf5d6d3ed91b97",
+          "compatibilityFingerprint": "dea943398aa809670a1026b01667e85a7c23846ebea61aaf87f68c2c182f64cd",
           "selectedPair": {
             "model": "gpt-5.6-luna",
             "reasoningEffort": "medium"
@@ -833,7 +833,7 @@
           "schemaVersion": 1,
           "contractVersion": "codex-child-launch-v1",
           "role": "classifier",
-          "compatibilityFingerprint": "34faaaff5f71c498383bb748a6db0459eb532b991cbd8783c5cf5d6d3ed91b97",
+          "compatibilityFingerprint": "dea943398aa809670a1026b01667e85a7c23846ebea61aaf87f68c2c182f64cd",
           "arguments": {
             "snapshotPath": "/private/codex",
             "model": "gpt-5.6-luna",
@@ -974,7 +974,7 @@
           "schemaVersion": 1,
           "contractVersion": "codex-trusted-launch-context-v1",
           "role": "reader",
-          "compatibilityFingerprint": "34faaaff5f71c498383bb748a6db0459eb532b991cbd8783c5cf5d6d3ed91b97",
+          "compatibilityFingerprint": "dea943398aa809670a1026b01667e85a7c23846ebea61aaf87f68c2c182f64cd",
           "selectedPair": {
             "model": "gpt-5.6-luna",
             "reasoningEffort": "medium"
@@ -997,7 +997,7 @@
           "schemaVersion": 1,
           "contractVersion": "codex-child-launch-v1",
           "role": "reader",
-          "compatibilityFingerprint": "34faaaff5f71c498383bb748a6db0459eb532b991cbd8783c5cf5d6d3ed91b97",
+          "compatibilityFingerprint": "dea943398aa809670a1026b01667e85a7c23846ebea61aaf87f68c2c182f64cd",
           "arguments": {
             "snapshotPath": "/private/codex",
             "model": "gpt-5.6-luna",
@@ -1120,7 +1120,7 @@
           "schemaVersion": 1,
           "contractVersion": "codex-trusted-launch-context-v1",
           "role": "writer",
-          "compatibilityFingerprint": "34faaaff5f71c498383bb748a6db0459eb532b991cbd8783c5cf5d6d3ed91b97",
+          "compatibilityFingerprint": "dea943398aa809670a1026b01667e85a7c23846ebea61aaf87f68c2c182f64cd",
           "selectedPair": {
             "model": "gpt-5.6-terra",
             "reasoningEffort": "high"
@@ -1144,7 +1144,7 @@
           "schemaVersion": 1,
           "contractVersion": "codex-child-launch-v1",
           "role": "writer",
-          "compatibilityFingerprint": "34faaaff5f71c498383bb748a6db0459eb532b991cbd8783c5cf5d6d3ed91b97",
+          "compatibilityFingerprint": "dea943398aa809670a1026b01667e85a7c23846ebea61aaf87f68c2c182f64cd",
           "arguments": {
             "snapshotPath": "/private/codex",
             "model": "gpt-5.6-terra",

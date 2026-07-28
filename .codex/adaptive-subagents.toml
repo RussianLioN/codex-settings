@@ -1,11 +1,14 @@
-schema_version = 1
+schema_version = 2
 algorithm_version = "route-v1"
 minimum_codex_version = "0.144.4"
 supported_platforms = ["darwin-arm64"]
 
 [coordinator]
-model = "gpt-5.6-terra"
-reasoning_effort = "medium"
+selection = "first-verified-available"
+candidates = [
+  { model = "gpt-5.6-sol", reasoning_effort = "medium" },
+  { model = "gpt-5.6-terra", reasoning_effort = "medium" },
+]
 
 [models."gpt-5.6-luna"]
 rank = 0
@@ -17,7 +20,7 @@ reasoning_efforts = ["medium", "high", "xhigh"]
 
 [models."gpt-5.6-sol"]
 rank = 2
-reasoning_efforts = ["high", "xhigh", "max"]
+reasoning_efforts = ["medium", "high", "xhigh", "max"]
 
 [limits]
 global_processes = 20

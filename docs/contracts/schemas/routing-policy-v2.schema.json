@@ -8,8 +8,17 @@
     "contractVersion": "codex-routing-policy-v2",
     "fingerprintDomain": "codex-smart/routing-policy/v2",
     "coordinator": {
-      "model": "gpt-5.6-terra",
-      "reasoningEffort": "medium"
+      "selection": "first-verified-available",
+      "candidates": [
+        {
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "medium"
+        },
+        {
+          "model": "gpt-5.6-terra",
+          "reasoningEffort": "medium"
+        }
+      ]
     },
     "factors": [
       "q",

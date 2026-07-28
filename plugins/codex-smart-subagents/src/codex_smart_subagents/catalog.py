@@ -26,7 +26,10 @@ ROOT_KEYS = {
     "validation",
 }
 MODEL_KEYS = {"reasoning_efforts", "rank"}
-COORDINATOR_KEYS = {"model", "reasoning_effort"}
+COORDINATOR_V1_KEYS = {"model", "reasoning_effort"}
+COORDINATOR_V2_KEYS = {"selection", "candidates"}
+COORDINATOR_CANDIDATE_KEYS = {"model", "reasoning_effort"}
+COORDINATOR_SELECTION = "first-verified-available"
 LIMIT_KEYS = {
     "global_processes",
     "root_processes",
@@ -58,10 +61,14 @@ LIMIT_KEYS = {
 PROFILE_KEYS = {"permission_profile", "writer", "network"}
 RETENTION_KEYS = {"success_days", "failure_days"}
 VALIDATION_KEYS = {"commands"}
-EXPECTED_MODELS = {
+EXPECTED_MODELS_V1 = {
     "gpt-5.6-luna": (0, ("low", "medium")),
     "gpt-5.6-terra": (1, ("medium", "high", "xhigh")),
     "gpt-5.6-sol": (2, ("high", "xhigh", "max")),
+}
+EXPECTED_MODELS_V2 = {
+    **EXPECTED_MODELS_V1,
+    "gpt-5.6-sol": (2, ("medium", "high", "xhigh", "max")),
 }
 
 
@@ -78,10 +85,13 @@ class Catalog:
     source: Path
     generation: str
     canonical_sha256: str
+    schema_version: int
     algorithm_version: str
     minimum_codex_version: str
     supported_platforms: tuple[str, ...]
     coordinator: dict[str, str]
+    coordinator_selection: str
+    coordinator_candidates: tuple[dict[str, str], ...]
     models: dict[str, dict[str, Any]]
     limits: dict[str, int]
     profiles: dict[str, dict[str, Any]]
@@ -95,7 +105,7 @@ class Catalog:
             data = tomllib.loads(source.read_text(encoding="utf-8"))
         except (OSError, tomllib.TOMLDecodeError) as exc:
             raise CatalogError(f"cannot load catalog {source}: {exc}") from exc
-        _validate_catalog(data)
+        coordinator_selection, coordinator_candidates = _validate_catalog(data)
         normalized = json.dumps(
             data,
             ensure_ascii=False,
@@ -107,10 +117,15 @@ class Catalog:
             source=source,
             generation=f"cg1_{digest[:16]}",
             canonical_sha256=digest,
+            schema_version=data["schema_version"],
             algorithm_version=data["algorithm_version"],
             minimum_codex_version=data["minimum_codex_version"],
             supported_platforms=tuple(data["supported_platforms"]),
-            coordinator=dict(data["coordinator"]),
+            coordinator=dict(coordinator_candidates[0]),
+            coordinator_selection=coordinator_selection,
+            coordinator_candidates=tuple(
+                dict(candidate) for candidate in coordinator_candidates
+            ),
             models={
                 name: dict(settings)
                 for name, settings in data["models"].items()
@@ -142,10 +157,13 @@ class Catalog:
         )
 
 
-def _validate_catalog(data: dict[str, Any]) -> None:
+def _validate_catalog(
+    data: dict[str, Any],
+) -> tuple[str, tuple[dict[str, str], ...]]:
     _exact_keys(data, ROOT_KEYS, "catalog")
-    if data["schema_version"] != 1:
-        raise CatalogError("schema_version must be 1")
+    schema_version = data["schema_version"]
+    if schema_version not in {1, 2}:
+        raise CatalogError("schema_version must be 1 or 2")
     if data["algorithm_version"] != "route-v1":
         raise CatalogError("algorithm_version must be route-v1")
     minimum = data["minimum_codex_version"]
@@ -156,9 +174,12 @@ def _validate_catalog(data: dict[str, Any]) -> None:
     _string_list(data["supported_platforms"], "supported_platforms")
 
     models = _mapping(data["models"], "models")
-    if set(models) != set(EXPECTED_MODELS):
+    expected_models = (
+        EXPECTED_MODELS_V1 if schema_version == 1 else EXPECTED_MODELS_V2
+    )
+    if set(models) != set(expected_models):
         raise CatalogError("models must define exactly Luna, Terra, and Sol")
-    for name, (rank, efforts) in EXPECTED_MODELS.items():
+    for name, (rank, efforts) in expected_models.items():
         settings = _mapping(models[name], f"models.{name}")
         _exact_keys(settings, MODEL_KEYS, f"models.{name}")
         if settings["rank"] != rank:
@@ -168,20 +189,11 @@ def _validate_catalog(data: dict[str, Any]) -> None:
                 f"models.{name}.reasoning_efforts must be {efforts}"
             )
 
-    coordinator = _mapping(data["coordinator"], "coordinator")
-    _exact_keys(coordinator, COORDINATOR_KEYS, "coordinator")
-    coordinator_model = coordinator["model"]
-    coordinator_effort = coordinator["reasoning_effort"]
-    if not isinstance(coordinator_model, str) or coordinator_model not in models:
-        raise CatalogError("coordinator.model must reference a configured model")
-    configured_efforts = models[coordinator_model]["reasoning_efforts"]
-    if (
-        not isinstance(coordinator_effort, str)
-        or coordinator_effort not in configured_efforts
-    ):
-        raise CatalogError(
-            "coordinator.reasoning_effort must be supported by coordinator.model"
-        )
+    coordinator_selection, coordinator_candidates = _validate_coordinator(
+        data["coordinator"],
+        schema_version=schema_version,
+        models=models,
+    )
 
     limits = _mapping(data["limits"], "limits")
     _exact_keys(limits, LIMIT_KEYS, "limits")
@@ -243,6 +255,63 @@ def _validate_catalog(data: dict[str, Any]) -> None:
                     f"validation.{name}.commands[{index}] "
                     "must be a safe absolute argv array"
                 )
+    return coordinator_selection, coordinator_candidates
+
+
+def _validate_coordinator(
+    raw: Any,
+    *,
+    schema_version: int,
+    models: dict[str, Any],
+) -> tuple[str, tuple[dict[str, str], ...]]:
+    coordinator = _mapping(raw, "coordinator")
+    if schema_version == 1:
+        _exact_keys(coordinator, COORDINATOR_V1_KEYS, "coordinator")
+        candidates = (dict(coordinator),)
+    else:
+        _exact_keys(coordinator, COORDINATOR_V2_KEYS, "coordinator")
+        if coordinator["selection"] != COORDINATOR_SELECTION:
+            raise CatalogError(
+                f"coordinator.selection must be {COORDINATOR_SELECTION}"
+            )
+        raw_candidates = coordinator["candidates"]
+        if (
+            type(raw_candidates) is not list
+            or not 1 <= len(raw_candidates) <= 8
+        ):
+            raise CatalogError("coordinator.candidates must contain 1 to 8 pairs")
+        candidates = tuple(
+            dict(_mapping(candidate, f"coordinator.candidates[{index}]"))
+            for index, candidate in enumerate(raw_candidates)
+        )
+        for index, candidate in enumerate(candidates):
+            _exact_keys(
+                candidate,
+                COORDINATOR_CANDIDATE_KEYS,
+                f"coordinator.candidates[{index}]",
+            )
+    for index, candidate in enumerate(candidates):
+        model = candidate["model"]
+        effort = candidate["reasoning_effort"]
+        if not isinstance(model, str) or model not in models:
+            raise CatalogError(
+                f"coordinator.candidates[{index}].model must reference "
+                "a configured model"
+            )
+        configured_efforts = models[model]["reasoning_efforts"]
+        if not isinstance(effort, str) or effort not in configured_efforts:
+            raise CatalogError(
+                f"coordinator.candidates[{index}].reasoning_effort must be "
+                "supported by its model"
+            )
+    if schema_version == 2:
+        identities = tuple(
+            (candidate["model"], candidate["reasoning_effort"])
+            for candidate in candidates
+        )
+        if len(identities) != len(set(identities)):
+            raise CatalogError("coordinator.candidates must be unique")
+    return COORDINATOR_SELECTION, candidates
 
 
 def _mapping(value: Any, path: str) -> dict[str, Any]:

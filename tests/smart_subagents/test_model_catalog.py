@@ -198,6 +198,20 @@ class CatalogCompatibilityTests(unittest.TestCase):
             ):
                 require_catalog_support(catalog, observed)
 
+    def test_sol_medium_is_required_by_catalog_capabilities(self) -> None:
+        catalog = Catalog.load(REPO / ".codex" / "adaptive-subagents.toml")
+        observed = {
+            "gpt-5.6-luna": frozenset({"low", "medium"}),
+            "gpt-5.6-terra": frozenset({"medium", "high", "xhigh"}),
+            "gpt-5.6-sol": frozenset({"high", "xhigh", "max"}),
+        }
+
+        with self.assertRaisesRegex(
+            ModelCatalogError,
+            "MODEL_EFFORT_UNAVAILABLE",
+        ):
+            require_catalog_support(catalog, observed)
+
     def test_account_policy_intersects_visibility_and_policy_efforts(
         self,
     ) -> None:

@@ -6,8 +6,17 @@
     "contractVersion": "codex-routing-policy-v2",
     "fingerprintDomain": "codex-smart/routing-policy/v2",
     "coordinator": {
-      "model": "gpt-5.6-terra",
-      "reasoningEffort": "medium"
+      "selection": "first-verified-available",
+      "candidates": [
+        {
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "medium"
+        },
+        {
+          "model": "gpt-5.6-terra",
+          "reasoningEffort": "medium"
+        }
+      ]
     },
     "factors": [
       "q",
@@ -328,8 +337,8 @@
       }
     ]
   },
-  "canonicalUtf8": "{\"allowedPairs\":[{\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"low\"},{\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"medium\"},{\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":\"medium\"},{\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":\"high\"},{\"model\":\"gpt-5.6-sol\",\"reasoningEffort\":\"high\"},{\"model\":\"gpt-5.6-sol\",\"reasoningEffort\":\"xhigh\"},{\"model\":\"gpt-5.6-sol\",\"reasoningEffort\":\"max\"}],\"contractVersion\":\"codex-routing-policy-v2\",\"coordinator\":{\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":\"medium\"},\"defaults\":{\"hardFloor\":\"none\",\"intervalPoint\":\"max\",\"reassessment\":\"promote-only\",\"unavailablePair\":\"reject\"},\"effortByScore\":[{\"reasoningEffort\":\"low\",\"score\":0},{\"reasoningEffort\":\"low\",\"score\":1},{\"reasoningEffort\":\"medium\",\"score\":2},{\"reasoningEffort\":\"medium\",\"score\":3},{\"reasoningEffort\":\"medium\",\"score\":4},{\"reasoningEffort\":\"high\",\"score\":5},{\"reasoningEffort\":\"high\",\"score\":6},{\"reasoningEffort\":\"xhigh\",\"score\":7},{\"reasoningEffort\":\"max\",\"score\":8}],\"effortOrder\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"],\"factorDefinitions\":{\"o\":{\"criteria\":[{\"id\":\"o1-discoverable-missing-fact\",\"level\":1,\"meaning\":\"недостающий факт можно получить безопасным чтением\"},{\"id\":\"o1-mutable-current-state\",\"level\":1,\"meaning\":\"решение зависит от изменяемого текущего состояния\"},{\"id\":\"o1-explicit-reversible-assumption\",\"level\":1,\"meaning\":\"нужна явно отмеченная обратимая гипотеза\"},{\"id\":\"o2-authority-conflict\",\"level\":2,\"meaning\":\"источники полномочий или требования конфликтуют\"},{\"id\":\"o2-undiscoverable-required-fact\",\"level\":2,\"meaning\":\"обязательный факт недоступен либо требует решения владельца\"},{\"id\":\"o2-unreproducible-conflict\",\"level\":2,\"meaning\":\"конфликт доказательств нельзя воспроизвести и разрешить чтением\"},{\"id\":\"o2-uncontracted-interface\",\"level\":2,\"meaning\":\"решение зависит от незафиксированного интерфейса\"}],\"level0Rule\":\"все обязательные факты подтверждены, воспроизводимы и согласованы\",\"meaning\":\"Неопределённость, изменчивость и согласованность доказательств\"},\"p\":{\"criteria\":[{\"id\":\"p1-scope-2-to-5\",\"level\":1,\"meaning\":\"max(scopeUnits,workUnits) от 2 до 5 при одной границе и одном потоке\"},{\"id\":\"p2-scope-6-plus\",\"level\":2,\"meaning\":\"scopeUnits или workUnits не менее 6\"},{\"id\":\"p2-boundaries-2-plus\",\"level\":2,\"meaning\":\"границ не менее 2\"},{\"id\":\"p2-workstreams-2-plus\",\"level\":2,\"meaning\":\"независимых потоков не менее 2\"}],\"level0Rule\":\"scopeUnits<=1 и workUnits<=1 и boundaries<=1 и workstreams<=1\",\"meaning\":\"Размер адресуемой работы, число границ и независимых потоков\",\"unitDefinitions\":{\"boundary\":\"репозиторий, независимо развёртываемый процесс, внешний сервис или учётная среда\",\"scopeUnit\":\"отдельно адресуемый файл, схема, страница, набор данных, результат команды или выход\",\"workUnit\":\"одно независимо проверяемое изменение или исследование\",\"workstream\":\"независимая ветвь работы до общего синтеза\"}},\"q\":{\"criteria\":[{\"id\":\"q1-dependent-chain\",\"level\":1,\"meaning\":\"требуются не менее двух зависимых выводов\"},{\"id\":\"q1-bounded-tradeoff\",\"level\":1,\"meaning\":\"сравниваются не менее двух вариантов по не менее чем двум ограничениям внутри одной границы\"},{\"id\":\"q2-cross-boundary-invariant\",\"level\":2,\"meaning\":\"нужно сохранить инвариант через две или более границы\"},{\"id\":\"q2-adversarial-concurrency\",\"level\":2,\"meaning\":\"нужен контрпример для безопасности, доверия, конкурентности, атомарности, восстановления или отката\"},{\"id\":\"q2-conflict-synthesis\",\"level\":2,\"meaning\":\"нужно разрешить конфликт доказательств или нормативных требований\"}],\"level0Rule\":\"ни один критерий уровня 1 или 2 не доказан\",\"meaning\":\"Сложность зависимых рассуждений и согласования ограничений\"},\"resolution\":{\"criterionStates\":[\"false\",\"true\",\"unknown\",\"conflict\"],\"identityValue\":0,\"lowerOperation\":\"maximum-criterion-level\",\"lowerStates\":[\"true\"],\"missingCriterionState\":\"unknown\",\"selectedBound\":\"max\",\"unknownCriterionId\":\"reject\",\"upperOperation\":\"maximum-of-lower-and-criterion-level\",\"upperStates\":[\"true\",\"unknown\",\"conflict\"]},\"v\":{\"criteria\":[{\"id\":\"v1-reversible-persistent\",\"level\":1,\"meaning\":\"изменяется сохраняемое состояние с доказанным откатом\"},{\"id\":\"v1-user-visible-isolated\",\"level\":1,\"meaning\":\"есть изолированное видимое пользователю изменение\"},{\"id\":\"v2-shared-or-production\",\"level\":2,\"meaning\":\"затрагивается совместное или производственное состояние\"},{\"id\":\"v2-destructive-or-unproven-rollback\",\"level\":2,\"meaning\":\"действие разрушительно либо откат не доказан\"},{\"id\":\"v2-trust-secret-permission\",\"level\":2,\"meaning\":\"затрагиваются доверие, секреты или разрешения\"},{\"id\":\"v2-high-stakes\",\"level\":2,\"meaning\":\"ошибка имеет медицинские, юридические, финансовые или иные критические последствия\"},{\"id\":\"v2-release-or-migration\",\"level\":2,\"meaning\":\"выполняется выпуск, публикация или миграция\"}],\"level0Rule\":\"только чтение, совет или удаляемый временный результат без внешнего последствия\",\"meaning\":\"Цена ошибки и сила требуемого доказательства отката\"}},\"factorRange\":{\"max\":2,\"min\":0},\"factors\":[\"q\",\"p\",\"v\",\"o\"],\"fingerprintDomain\":\"codex-smart/routing-policy/v2\",\"hardFloorDefinitions\":{\"levels\":[{\"minimumTier\":\"luna\",\"name\":\"none\",\"reasons\":[]},{\"minimumTier\":\"terra\",\"name\":\"terra\",\"reasons\":[\"architecture-decision\",\"public-contract\",\"risky-migration\",\"security-sensitive\"]},{\"minimumTier\":\"sol\",\"name\":\"sol\",\"reasons\":[\"critical-incident\",\"final-author-review-before-publish\",\"irreversible-action\",\"rollback-unproven\"]}],\"selection\":\"highest-triggered\",\"unknownReason\":\"reject\"},\"schemaVersion\":2,\"scoreRange\":{\"max\":8,\"min\":0},\"tiers\":[{\"minimumEffort\":\"low\",\"model\":\"gpt-5.6-luna\",\"name\":\"luna\",\"scoreMax\":2,\"scoreMin\":0},{\"minimumEffort\":\"medium\",\"model\":\"gpt-5.6-terra\",\"name\":\"terra\",\"scoreMax\":5,\"scoreMin\":3},{\"minimumEffort\":\"high\",\"model\":\"gpt-5.6-sol\",\"name\":\"sol\",\"scoreMax\":8,\"scoreMin\":6}]}",
-  "fingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+  "canonicalUtf8": "{\"allowedPairs\":[{\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"low\"},{\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"medium\"},{\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":\"medium\"},{\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":\"high\"},{\"model\":\"gpt-5.6-sol\",\"reasoningEffort\":\"high\"},{\"model\":\"gpt-5.6-sol\",\"reasoningEffort\":\"xhigh\"},{\"model\":\"gpt-5.6-sol\",\"reasoningEffort\":\"max\"}],\"contractVersion\":\"codex-routing-policy-v2\",\"coordinator\":{\"candidates\":[{\"model\":\"gpt-5.6-sol\",\"reasoningEffort\":\"medium\"},{\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":\"medium\"}],\"selection\":\"first-verified-available\"},\"defaults\":{\"hardFloor\":\"none\",\"intervalPoint\":\"max\",\"reassessment\":\"promote-only\",\"unavailablePair\":\"reject\"},\"effortByScore\":[{\"reasoningEffort\":\"low\",\"score\":0},{\"reasoningEffort\":\"low\",\"score\":1},{\"reasoningEffort\":\"medium\",\"score\":2},{\"reasoningEffort\":\"medium\",\"score\":3},{\"reasoningEffort\":\"medium\",\"score\":4},{\"reasoningEffort\":\"high\",\"score\":5},{\"reasoningEffort\":\"high\",\"score\":6},{\"reasoningEffort\":\"xhigh\",\"score\":7},{\"reasoningEffort\":\"max\",\"score\":8}],\"effortOrder\":[\"low\",\"medium\",\"high\",\"xhigh\",\"max\"],\"factorDefinitions\":{\"o\":{\"criteria\":[{\"id\":\"o1-discoverable-missing-fact\",\"level\":1,\"meaning\":\"недостающий факт можно получить безопасным чтением\"},{\"id\":\"o1-mutable-current-state\",\"level\":1,\"meaning\":\"решение зависит от изменяемого текущего состояния\"},{\"id\":\"o1-explicit-reversible-assumption\",\"level\":1,\"meaning\":\"нужна явно отмеченная обратимая гипотеза\"},{\"id\":\"o2-authority-conflict\",\"level\":2,\"meaning\":\"источники полномочий или требования конфликтуют\"},{\"id\":\"o2-undiscoverable-required-fact\",\"level\":2,\"meaning\":\"обязательный факт недоступен либо требует решения владельца\"},{\"id\":\"o2-unreproducible-conflict\",\"level\":2,\"meaning\":\"конфликт доказательств нельзя воспроизвести и разрешить чтением\"},{\"id\":\"o2-uncontracted-interface\",\"level\":2,\"meaning\":\"решение зависит от незафиксированного интерфейса\"}],\"level0Rule\":\"все обязательные факты подтверждены, воспроизводимы и согласованы\",\"meaning\":\"Неопределённость, изменчивость и согласованность доказательств\"},\"p\":{\"criteria\":[{\"id\":\"p1-scope-2-to-5\",\"level\":1,\"meaning\":\"max(scopeUnits,workUnits) от 2 до 5 при одной границе и одном потоке\"},{\"id\":\"p2-scope-6-plus\",\"level\":2,\"meaning\":\"scopeUnits или workUnits не менее 6\"},{\"id\":\"p2-boundaries-2-plus\",\"level\":2,\"meaning\":\"границ не менее 2\"},{\"id\":\"p2-workstreams-2-plus\",\"level\":2,\"meaning\":\"независимых потоков не менее 2\"}],\"level0Rule\":\"scopeUnits<=1 и workUnits<=1 и boundaries<=1 и workstreams<=1\",\"meaning\":\"Размер адресуемой работы, число границ и независимых потоков\",\"unitDefinitions\":{\"boundary\":\"репозиторий, независимо развёртываемый процесс, внешний сервис или учётная среда\",\"scopeUnit\":\"отдельно адресуемый файл, схема, страница, набор данных, результат команды или выход\",\"workUnit\":\"одно независимо проверяемое изменение или исследование\",\"workstream\":\"независимая ветвь работы до общего синтеза\"}},\"q\":{\"criteria\":[{\"id\":\"q1-dependent-chain\",\"level\":1,\"meaning\":\"требуются не менее двух зависимых выводов\"},{\"id\":\"q1-bounded-tradeoff\",\"level\":1,\"meaning\":\"сравниваются не менее двух вариантов по не менее чем двум ограничениям внутри одной границы\"},{\"id\":\"q2-cross-boundary-invariant\",\"level\":2,\"meaning\":\"нужно сохранить инвариант через две или более границы\"},{\"id\":\"q2-adversarial-concurrency\",\"level\":2,\"meaning\":\"нужен контрпример для безопасности, доверия, конкурентности, атомарности, восстановления или отката\"},{\"id\":\"q2-conflict-synthesis\",\"level\":2,\"meaning\":\"нужно разрешить конфликт доказательств или нормативных требований\"}],\"level0Rule\":\"ни один критерий уровня 1 или 2 не доказан\",\"meaning\":\"Сложность зависимых рассуждений и согласования ограничений\"},\"resolution\":{\"criterionStates\":[\"false\",\"true\",\"unknown\",\"conflict\"],\"identityValue\":0,\"lowerOperation\":\"maximum-criterion-level\",\"lowerStates\":[\"true\"],\"missingCriterionState\":\"unknown\",\"selectedBound\":\"max\",\"unknownCriterionId\":\"reject\",\"upperOperation\":\"maximum-of-lower-and-criterion-level\",\"upperStates\":[\"true\",\"unknown\",\"conflict\"]},\"v\":{\"criteria\":[{\"id\":\"v1-reversible-persistent\",\"level\":1,\"meaning\":\"изменяется сохраняемое состояние с доказанным откатом\"},{\"id\":\"v1-user-visible-isolated\",\"level\":1,\"meaning\":\"есть изолированное видимое пользователю изменение\"},{\"id\":\"v2-shared-or-production\",\"level\":2,\"meaning\":\"затрагивается совместное или производственное состояние\"},{\"id\":\"v2-destructive-or-unproven-rollback\",\"level\":2,\"meaning\":\"действие разрушительно либо откат не доказан\"},{\"id\":\"v2-trust-secret-permission\",\"level\":2,\"meaning\":\"затрагиваются доверие, секреты или разрешения\"},{\"id\":\"v2-high-stakes\",\"level\":2,\"meaning\":\"ошибка имеет медицинские, юридические, финансовые или иные критические последствия\"},{\"id\":\"v2-release-or-migration\",\"level\":2,\"meaning\":\"выполняется выпуск, публикация или миграция\"}],\"level0Rule\":\"только чтение, совет или удаляемый временный результат без внешнего последствия\",\"meaning\":\"Цена ошибки и сила требуемого доказательства отката\"}},\"factorRange\":{\"max\":2,\"min\":0},\"factors\":[\"q\",\"p\",\"v\",\"o\"],\"fingerprintDomain\":\"codex-smart/routing-policy/v2\",\"hardFloorDefinitions\":{\"levels\":[{\"minimumTier\":\"luna\",\"name\":\"none\",\"reasons\":[]},{\"minimumTier\":\"terra\",\"name\":\"terra\",\"reasons\":[\"architecture-decision\",\"public-contract\",\"risky-migration\",\"security-sensitive\"]},{\"minimumTier\":\"sol\",\"name\":\"sol\",\"reasons\":[\"critical-incident\",\"final-author-review-before-publish\",\"irreversible-action\",\"rollback-unproven\"]}],\"selection\":\"highest-triggered\",\"unknownReason\":\"reject\"},\"schemaVersion\":2,\"scoreRange\":{\"max\":8,\"min\":0},\"tiers\":[{\"minimumEffort\":\"low\",\"model\":\"gpt-5.6-luna\",\"name\":\"luna\",\"scoreMax\":2,\"scoreMin\":0},{\"minimumEffort\":\"medium\",\"model\":\"gpt-5.6-terra\",\"name\":\"terra\",\"scoreMax\":5,\"scoreMin\":3},{\"minimumEffort\":\"high\",\"model\":\"gpt-5.6-sol\",\"name\":\"sol\",\"scoreMax\":8,\"scoreMin\":6}]}",
+  "fingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
   "normalizationCases": [
     {
       "name": "defaults-are-materialized",
@@ -1624,12 +1633,12 @@
       },
       "catalogFingerprintCheck": {
         "before": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         },
         "after": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         }
@@ -1736,12 +1745,12 @@
       "expectedError": "ROUTING_PAIR_UNAVAILABLE",
       "catalogFingerprintCheck": {
         "before": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         },
         "after": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         }
@@ -1848,12 +1857,12 @@
       "expectedError": "ROUTING_PAIR_UNAVAILABLE",
       "catalogFingerprintCheck": {
         "before": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         },
         "after": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         }
@@ -1960,12 +1969,12 @@
       "expectedError": "ROUTING_PAIR_UNAVAILABLE",
       "catalogFingerprintCheck": {
         "before": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         },
         "after": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         }
@@ -2079,12 +2088,12 @@
       },
       "catalogFingerprintCheck": {
         "before": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         },
         "after": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         }
@@ -2191,12 +2200,12 @@
       "expectedError": "STALE",
       "catalogFingerprintCheck": {
         "before": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         },
         "after": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         }
@@ -2303,12 +2312,12 @@
       "expectedError": "STALE",
       "catalogFingerprintCheck": {
         "before": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         },
         "after": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         }
@@ -2418,7 +2427,7 @@
       },
       "catalogFingerprintCheck": {
         "before": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         },
@@ -2534,12 +2543,12 @@
       },
       "catalogFingerprintCheck": {
         "before": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         },
         "after": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         }
@@ -2651,12 +2660,12 @@
       "expectedError": "STALE",
       "catalogFingerprintCheck": {
         "before": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29"
         },
         "after": {
-          "policyFingerprint": "c78f2689138e3b4dd88cbc3e4957da1df3fd9d91f98029748ae0ea2c457eb0b6",
+          "policyFingerprint": "a3fc57a298be297ad42944f01497bf98d7f75790ee5748f087968f0a5a15a790",
           "bundledSnapshotFingerprint": "737e8a3a0c4a6198d732d031f692e2d7fa4098a12d218e4b7af8fb3eea2c1445",
           "accountFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
         }

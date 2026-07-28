@@ -68,7 +68,24 @@ class PolicyBundleV2Tests(unittest.TestCase):
         self.assertEqual("q+p+v+o-v2", bundle.algorithm_version)
         self.assertEqual(
             bundle.routing_policy_snapshot["policy"]["coordinator"],
-            bundle.coordinator,
+            {
+                "selection": bundle.coordinator_selection,
+                "candidates": list(bundle.coordinator_candidates),
+            },
+        )
+        self.assertEqual(
+            {
+                "model": "gpt-5.6-sol",
+                "reasoningEffort": "medium",
+            },
+            bundle.coordinator_candidates[0],
+        )
+        self.assertEqual(
+            {
+                "model": "gpt-5.6-terra",
+                "reasoningEffort": "medium",
+            },
+            bundle.coordinator_candidates[1],
         )
         self.assertEqual(
             bundle.routing_policy_snapshot["policy"]["allowedPairs"],
@@ -125,6 +142,35 @@ class PolicyBundleV2Tests(unittest.TestCase):
             bundle.router.policy_fingerprint,
         )
 
+    def test_coordinator_only_sol_medium_never_expands_child_pairs(self) -> None:
+        bundle = self._load()
+        coordinator_only = {
+            "model": "gpt-5.6-sol",
+            "reasoningEffort": "medium",
+        }
+
+        self.assertIn(coordinator_only, bundle.coordinator_candidates)
+        self.assertNotIn(
+            coordinator_only,
+            bundle.routing_policy_snapshot["policy"]["allowedPairs"],
+        )
+        self.assertNotIn(coordinator_only, bundle.policy_pairs)
+        self.assertEqual(
+            {
+                ("gpt-5.6-luna", "low"),
+                ("gpt-5.6-luna", "medium"),
+                ("gpt-5.6-terra", "medium"),
+                ("gpt-5.6-terra", "high"),
+                ("gpt-5.6-sol", "high"),
+                ("gpt-5.6-sol", "xhigh"),
+                ("gpt-5.6-sol", "max"),
+            },
+            {
+                (pair["model"], pair["reasoningEffort"])
+                for pair in bundle.policy_pairs
+            },
+        )
+
     def test_runtime_module_contains_no_model_name_literal(self) -> None:
         source = (
             PLUGIN_SRC / "codex_smart_subagents" / "policy_bundle_v2.py"
@@ -134,7 +180,7 @@ class PolicyBundleV2Tests(unittest.TestCase):
     def test_rejects_coordinator_drift_between_catalog_and_policy(self) -> None:
         temporary, target = self._mutated_json(
             self.routing,
-            lambda value: value["policy"]["coordinator"].update(
+            lambda value: value["policy"]["coordinator"]["candidates"][0].update(
                 {"reasoningEffort": "high"}
             ),
         )
