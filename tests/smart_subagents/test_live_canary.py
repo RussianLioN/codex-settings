@@ -35,6 +35,7 @@ from codex_smart_subagents.live_canary import (  # noqa: E402
     StrictAppServerClient,
     SubprocessExecutor,
     _StrictJsonLineReader,
+    expected_model_refresh_timeout_stderr,
     _read_app_server_response,
     _validate_initialize_result,
     _write_app_server_message,
@@ -264,6 +265,23 @@ class RecordingExecutor:
 
 
 class StrictAppServerClientTests(unittest.TestCase):
+    def test_session_accepts_only_complete_known_model_refresh_notices(
+        self,
+    ) -> None:
+        accepted = (
+            b"2026-07-26T14:41:57.944573Z ERROR "
+            b"codex_models_manager::manager: failed to refresh available models: "
+            b"timeout waiting for child process to exit\n"
+        )
+        self.assertTrue(expected_model_refresh_timeout_stderr(accepted * 4))
+        self.assertFalse(expected_model_refresh_timeout_stderr(accepted * 5))
+        self.assertFalse(expected_model_refresh_timeout_stderr(accepted[:-1]))
+        self.assertFalse(
+            expected_model_refresh_timeout_stderr(
+                accepted.replace(b"timeout waiting", b"unexpected failure")
+            )
+        )
+
     def test_reader_keeps_operation_deadline_object_and_root_timeout_code(
         self,
     ) -> None:

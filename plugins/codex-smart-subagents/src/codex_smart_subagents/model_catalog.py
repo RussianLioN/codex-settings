@@ -12,7 +12,11 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from .catalog import Catalog
-from .live_canary import AppServerError, StrictAppServerClient
+from .live_canary import (
+    AppServerError,
+    StrictAppServerClient,
+    expected_model_refresh_timeout_stderr,
+)
 
 
 MAX_CATALOG_BYTES = 16 * 1024 * 1024
@@ -79,6 +83,8 @@ class AppServerModelCatalogInspector:
                 cwd=cwd,
                 timeout_seconds=self._timeout_seconds,
                 max_output_bytes=self._max_output_bytes,
+                use_temporary_sqlite_home=False,
+                accepted_stderr=expected_model_refresh_timeout_stderr,
             )
             return client.run_session(read_account_model_pages)
 

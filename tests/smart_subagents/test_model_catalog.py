@@ -22,6 +22,9 @@ from codex_smart_subagents.model_catalog import (  # noqa: E402
     probe_model_catalog,
     require_catalog_support,
 )
+from codex_smart_subagents.live_canary import (  # noqa: E402
+    expected_model_refresh_timeout_stderr,
+)
 
 
 def model(slug: str, *efforts: str) -> dict[str, object]:
@@ -239,6 +242,35 @@ class CatalogCompatibilityTests(unittest.TestCase):
 
 
 class AccountModelInspectorTests(unittest.TestCase):
+    def test_account_inspector_reuses_existing_codex_sqlite_state(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            executable = root / "codex"
+            executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            executable.chmod(0o700)
+            codex_home = root / "codex-home"
+            codex_home.mkdir(mode=0o700)
+            runtime = root / "runtime"
+            runtime.mkdir(mode=0o700)
+            client = FakeAppServerClient([{"data": [], "nextCursor": None}])
+            client_factory = mock.Mock(return_value=client)
+            inspector = AppServerModelCatalogInspector(
+                codex_executable=executable,
+                codex_home=codex_home,
+                runtime_parent=runtime,
+                client_factory=client_factory,
+            )
+
+            inspector.inspect()
+
+        self.assertFalse(
+            client_factory.call_args.kwargs["use_temporary_sqlite_home"]
+        )
+        self.assertIs(
+            expected_model_refresh_timeout_stderr,
+            client_factory.call_args.kwargs["accepted_stderr"],
+        )
+
     def test_reads_bounded_paged_account_model_list(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

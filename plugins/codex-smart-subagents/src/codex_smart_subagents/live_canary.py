@@ -161,6 +161,7 @@ class StrictAppServerClient:
         client_version: str = "0.1.0",
         use_temporary_sqlite_home: bool = True,
         cancel_check: Callable[[], bool] | None = None,
+        accepted_stderr: Callable[[bytes], bool] | None = None,
     ) -> None:
         self._codex = _safe_executable(codex_executable, "Codex")
         self._codex_home = _safe_owned_directory(codex_home, "CODEX_HOME")
@@ -204,6 +205,11 @@ class StrictAppServerClient:
         if cancel_check is not None and not callable(cancel_check):
             raise TypeError("cancel_check must be callable")
         self._cancel_check = cancel_check
+        if accepted_stderr is not None and not callable(accepted_stderr):
+            raise TypeError("accepted_stderr must be callable")
+        self._accepted_stderr = (
+            _empty_stderr if accepted_stderr is None else accepted_stderr
+        )
 
     def call(self, method: str, params: Mapping[str, object]) -> object:
         return self.run_session(lambda session_call: session_call(method, params))
@@ -385,6 +391,7 @@ class StrictAppServerClient:
                 process=process,
                 deadline=trailing_deadline,
             )
+            reader.require_accepted_stderr(self._accepted_stderr)
             return result
         except OperationDeadlineExceededV2 as exc:
             try:
@@ -792,6 +799,7 @@ class _StrictJsonLineReader:
         self._maximum = maximum
         self._total = 0
         self._stdout = bytearray()
+        self._stderr = bytearray()
         self._selector = selectors.DefaultSelector()
         for stream in (process.stdout, process.stderr):
             descriptor = stream.fileno()
@@ -834,7 +842,6 @@ class _StrictJsonLineReader:
             )
             events = self._selector.select(timeout=select_timeout)
             deadline.checkpoint()
-            stderr_seen = False
             for key, _ in events:
                 descriptor = int(key.fd)
                 try:
@@ -854,14 +861,9 @@ class _StrictJsonLineReader:
                         "app-server output exceeded its byte limit",
                     )
                 if descriptor == self._stderr_fd:
-                    stderr_seen = True
+                    self._stderr.extend(chunk)
                 elif descriptor == self._stdout_fd:
                     self._stdout.extend(chunk)
-            if stderr_seen:
-                raise AppServerError(
-                    "APP_SERVER_INVALID",
-                    "app-server wrote unexpected diagnostic output",
-                )
             if (
                 self._process.poll() is not None
                 and not self._selector.get_map()
@@ -873,6 +875,17 @@ class _StrictJsonLineReader:
 
     def close(self) -> None:
         self._selector.close()
+
+    def require_accepted_stderr(
+        self,
+        accepted_stderr: Callable[[bytes], bool],
+    ) -> None:
+        payload = bytes(self._stderr)
+        if not accepted_stderr(payload):
+            raise AppServerError(
+                "APP_SERVER_INVALID",
+                "app-server wrote unexpected diagnostic output",
+            )
 
 
 def _read_app_server_response(
@@ -2059,12 +2072,14 @@ def _parse_exec_result(
     return False
 
 
-def _expected_exec_stderr(stderr: bytes) -> bool:
-    if stderr in {b"", EXEC_STDIN_NOTICE}:
+def _empty_stderr(stderr: bytes) -> bool:
+    return stderr == b""
+
+
+def expected_model_refresh_timeout_stderr(stderr: bytes) -> bool:
+    if stderr == b"":
         return True
     lines = stderr.splitlines(keepends=True)
-    if lines and lines[0] == EXEC_STDIN_NOTICE:
-        lines = lines[1:]
     return (
         1 <= len(lines) <= _MAX_MODEL_REFRESH_TIMEOUT_NOTICES
         and all(
@@ -2072,6 +2087,14 @@ def _expected_exec_stderr(stderr: bytes) -> bool:
             for line in lines
         )
     )
+
+
+def _expected_exec_stderr(stderr: bytes) -> bool:
+    if stderr == EXEC_STDIN_NOTICE:
+        return True
+    if stderr.startswith(EXEC_STDIN_NOTICE):
+        stderr = stderr[len(EXEC_STDIN_NOTICE) :]
+    return expected_model_refresh_timeout_stderr(stderr)
 
 
 def _exec_command_matches(observed: str, expected: str) -> bool:
