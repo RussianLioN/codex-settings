@@ -175,6 +175,57 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
                 self.assertEqual([], supervisor_calls)
                 self.assertFalse(gateway_arguments["managed_required"])
 
+    def test_ultra_bypasses_resolver_preparation_supervisor_and_controller(self) -> None:
+        arguments = [
+            "-c",
+            "model_reasoning_effort='ultra'",
+            "проверь",
+        ]
+        calls: list[str] = []
+        gateway_arguments: dict[str, object] = {}
+        error = StringIO()
+
+        def unexpected(name: str):
+            def fail(*_arguments, **_kwargs):
+                calls.append(name)
+                self.fail(f"ultra вызвал {name}")
+
+            return fail
+
+        def gateway(raw_arguments, **kwargs):
+            self.assertEqual(arguments, raw_arguments)
+            gateway_arguments.update(kwargs)
+            return 17
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "CODEX_HOME": str(self.codex_home),
+                    "CODEX_SMART_REQUIRED": "1",
+                },
+                clear=True,
+            ),
+            mock.patch.object(sys, "argv", [str(WRAPPER), *arguments]),
+            mock.patch.dict(
+                self.globals,
+                {
+                    "ActivationResolver": unexpected("resolver"),
+                    "_prepare_v2_decision": unexpected("preparation"),
+                    "ControllerSupervisorV2": unexpected("supervisor"),
+                    "ControllerProcessConfig": unexpected("controller"),
+                    "run_permanent_gateway": gateway,
+                },
+            ),
+            redirect_stderr(error),
+        ):
+            self.assertEqual(17, self.globals["main"]())
+
+        self.assertEqual([], calls)
+        self.assertIsNone(gateway_arguments["resolver"])
+        self.assertFalse(gateway_arguments["managed_required"])
+        self.assertEqual("", error.getvalue())
+
     def test_legacy_service_path_cleans_added_catalog_and_smart_environment(
         self,
     ) -> None:

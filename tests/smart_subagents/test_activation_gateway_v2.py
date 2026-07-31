@@ -567,6 +567,68 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
         self.assertEqual(0, resolver.calls)
         self.assertEqual([], observed)
 
+    def test_ultra_bypasses_gateway_without_a_resolver(self) -> None:
+        original = [
+            '-cmodel_reasoning_effort="ultra"',
+            "--model",
+            "user-model",
+            "проверь",
+        ]
+        observed: list[tuple[str, tuple[str, ...], dict[str, str]]] = []
+
+        def expected_exec(
+            path: str,
+            argv: Sequence[str],
+            environ: Mapping[str, str],
+        ) -> object:
+            observed.append((path, tuple(argv), dict(environ)))
+            raise RuntimeError("expected exec")
+
+        with self.assertRaisesRegex(RuntimeError, "expected exec"):
+            run_permanent_gateway(
+                original,
+                resolver=None,
+                wrapper=self.wrapper,
+                environment={
+                    "PATH": "/usr/bin",
+                    "CODEX_HOME": str(self.root),
+                    "CODEX_REAL_BIN": str(self.real),
+                    "CODEX_SMART_REQUIRED": "1",
+                    "CODEX_SMART_GATE_FINGERPRINT": "stale",
+                    "CODEX_ADAPTIVE_SESSION_ID": "stale",
+                    "CODEX_COORDINATOR_MODEL": "stale",
+                },
+                managed_required=False,
+                execve=expected_exec,
+            )
+
+        self.assertEqual(
+            [
+                (
+                    str(self.real),
+                    (str(self.real), *original),
+                    {"PATH": "/usr/bin", "CODEX_HOME": str(self.root)},
+                )
+            ],
+            observed,
+        )
+
+    def test_managed_invocation_without_resolver_fails_closed(self) -> None:
+        with self.assertRaises(ManagedLaunchUnavailable) as raised:
+            run_permanent_gateway(
+                ["проверь"],
+                resolver=None,
+                wrapper=self.wrapper,
+                environment={
+                    "PATH": "/usr/bin",
+                    "CODEX_HOME": str(self.root),
+                    "CODEX_REAL_BIN": str(self.real),
+                },
+                execve=lambda *_arguments: self.fail("выполнен управляемый запуск"),
+            )
+
+        self.assertEqual("MANAGED_RESOLVER_UNAVAILABLE", raised.exception.code)
+
     def test_required_managed_ordinary_decision_fails_without_exec(self) -> None:
         decision = GatewayDecision(
             state=GatewayState.ORDINARY,

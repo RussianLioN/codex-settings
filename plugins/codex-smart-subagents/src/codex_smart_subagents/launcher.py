@@ -77,6 +77,25 @@ _BYPASS_LONG_OPTIONS = frozenset(
     }
 )
 _BYPASS_SHORT_PREFIXES = ("-a", "-c", "-m", "-p", "-s")
+_ROOT_VALUE_OPTIONS = _SUPPORTED_VALUE_OPTIONS | frozenset(
+    {
+        "--add-dir",
+        "--ask-for-approval",
+        "--config",
+        "--disable",
+        "--enable",
+        "--local-provider",
+        "--model",
+        "--profile",
+        "--remote",
+        "--remote-auth-token-env",
+        "--sandbox",
+    }
+)
+_ROOT_SHORT_VALUE_OPTIONS = frozenset({"-a", "-m", "-p", "-s"})
+_MODEL_REASONING_EFFORT_ASSIGNMENT = re.compile(
+    r"^\s*model_reasoning_effort\s*=\s*(.*?)\s*$"
+)
 
 
 @dataclass
@@ -99,6 +118,42 @@ class ManagedInvocation:
     decision: InvocationDecision
     separator_index: int | None
     coordinator_control: bool
+
+
+def _model_reasoning_effort_value(assignment: str) -> str | None:
+    match = _MODEL_REASONING_EFFORT_ASSIGNMENT.fullmatch(assignment)
+    return None if match is None else match.group(1)
+
+
+def is_native_ultra_invocation(arguments: Sequence[str]) -> bool:
+    """Return whether the final root reasoning-effort assignment is Ultra."""
+
+    separator_index = next(
+        (index for index, token in enumerate(arguments) if token == "--"),
+        len(arguments),
+    )
+    effective_value: str | None = None
+    index = 0
+    while index < separator_index:
+        token = arguments[index]
+        if token in _ROOT_VALUE_OPTIONS or token in _ROOT_SHORT_VALUE_OPTIONS:
+            index += 2
+            continue
+        if token == "-c":
+            if index + 1 >= separator_index:
+                break
+            assignment = arguments[index + 1]
+            index += 2
+        elif token.startswith("-c"):
+            assignment = token[2:]
+            index += 1
+        else:
+            index += 1
+            continue
+        value = _model_reasoning_effort_value(assignment)
+        if value is not None:
+            effective_value = value
+    return effective_value in {"ultra", "\"ultra\"", "'ultra'"}
 
 
 def classify_invocation(arguments: Sequence[str]) -> InvocationDecision:
@@ -223,8 +278,8 @@ def parse_managed_invocation(arguments: Sequence[str]) -> ManagedInvocation:
                     coordinator_control,
                 )
             assignment = arguments[index + 1].lstrip()
-            if assignment.startswith("model=") or assignment.startswith(
-                "model_reasoning_effort="
+            if assignment.startswith("model=") or (
+                _model_reasoning_effort_value(assignment) is not None
             ):
                 coordinator_control = True
                 index += 2
@@ -234,8 +289,8 @@ def parse_managed_invocation(arguments: Sequence[str]) -> ManagedInvocation:
             continue
         if token.startswith("-c") and token != "-c":
             assignment = token[2:].lstrip()
-            if assignment.startswith("model=") or assignment.startswith(
-                "model_reasoning_effort="
+            if assignment.startswith("model=") or (
+                _model_reasoning_effort_value(assignment) is not None
             ):
                 coordinator_control = True
                 index += 1

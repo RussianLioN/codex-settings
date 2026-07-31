@@ -21,6 +21,7 @@ from codex_smart_subagents.launcher import (  # noqa: E402
     build_adaptive_environment,
     classify_invocation,
     classify_managed_invocation,
+    is_native_ultra_invocation,
     parse_codex_version,
     run_launcher,
     validate_real_binary,
@@ -100,6 +101,75 @@ class InvocationClassificationTests(unittest.TestCase):
         ):
             with self.subTest(arguments=arguments):
                 self.assertTrue(classify_managed_invocation(arguments).adaptive)
+
+    def test_native_ultra_detection_uses_only_last_root_reasoning_assignment(
+        self,
+    ) -> None:
+        cases = (
+            (["-c", "model_reasoning_effort=ultra"], True),
+            (["-cmodel_reasoning_effort=\"ultra\""], True),
+            (["-c", "model_reasoning_effort='ultra'"], True),
+            (
+                [
+                    "-cmodel_reasoning_effort=\"ultra\"",
+                    "-c",
+                    "model_reasoning_effort=high",
+                ],
+                False,
+            ),
+            (
+                [
+                    "-c",
+                    "model_reasoning_effort=max",
+                    "-cmodel_reasoning_effort=ultra",
+                ],
+                True,
+            ),
+            (["-c", "model_reasoning_effort=xhigh"], False),
+            (["-c", "model_reasoning_effort=high"], False),
+            (["-c", "model_reasoning_effort=max"], False),
+            (["-c", "model_reasoning_effort = ultra"], True),
+            (["-c", "model_reasoning_efforts=ultra"], False),
+            (["-c", "model=ultra"], False),
+            (["--config", "model_reasoning_effort=ultra"], False),
+            (["--config", "-cmodel_reasoning_effort=ultra"], False),
+            (["--model", "-cmodel_reasoning_effort=ultra"], False),
+            (["--cd", "-cmodel_reasoning_effort=ultra"], False),
+            (["--image", "-cmodel_reasoning_effort=ultra"], False),
+            (["--add-dir", "-cmodel_reasoning_effort=ultra"], False),
+            (
+                [
+                    "-cmodel_reasoning_effort=ultra",
+                    "--",
+                    "-cmodel_reasoning_effort=high",
+                ],
+                True,
+            ),
+            (
+                [
+                    "-c",
+                    "model_reasoning_effort=high",
+                    "--",
+                    "-cmodel_reasoning_effort=ultra",
+                ],
+                False,
+            ),
+        )
+
+        for arguments, expected in cases:
+            with self.subTest(arguments=arguments):
+                self.assertIs(expected, is_native_ultra_invocation(arguments))
+
+    def test_spaced_root_reasoning_effort_remains_managed_when_not_ultra(
+        self,
+    ) -> None:
+        for effort in ("high", "xhigh", "max"):
+            with self.subTest(effort=effort):
+                self.assertTrue(
+                    classify_managed_invocation(
+                        ["-c", f"model_reasoning_effort = {effort}"]
+                    ).adaptive
+                )
 
     def test_separator_keeps_service_words_as_managed_prompt_text(self) -> None:
         self.assertTrue(classify_managed_invocation(["--", "help"]).adaptive)

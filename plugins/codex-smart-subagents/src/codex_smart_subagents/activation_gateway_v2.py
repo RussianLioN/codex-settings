@@ -35,6 +35,7 @@ from .evidence import EvidenceError, verify_interface_evidence
 from .launcher import (
     apply_coordinator_defaults,
     clean_ordinary_environment,
+    is_native_ultra_invocation,
     parse_managed_invocation,
     validate_real_binary,
 )
@@ -1468,7 +1469,7 @@ def _managed_failure_code(error: Exception, default: str) -> str:
 def run_permanent_gateway(
     arguments: Sequence[str],
     *,
-    resolver: GatewayResolver,
+    resolver: GatewayResolver | None,
     wrapper: Path,
     environment: Mapping[str, str] | None = None,
     managed_required: bool = False,
@@ -1479,7 +1480,7 @@ def run_permanent_gateway(
     source_environment = dict(os.environ if environment is None else environment)
     parsed_invocation = parse_managed_invocation(arguments)
     invocation = parsed_invocation.decision
-    if not invocation.adaptive:
+    if is_native_ultra_invocation(arguments) or not invocation.adaptive:
         executable = validate_real_binary(
             Path(
                 source_environment.get(
@@ -1495,6 +1496,11 @@ def run_permanent_gateway(
             clean_ordinary_environment(source_environment),
         )
         raise AssertionError("execve unexpectedly returned")
+    if resolver is None:
+        raise ManagedLaunchUnavailable(
+            "MANAGED_RESOLVER_UNAVAILABLE",
+            "managed activation resolver is unavailable",
+        )
     try:
         decision = resolver.resolve()
     except Exception as exc:

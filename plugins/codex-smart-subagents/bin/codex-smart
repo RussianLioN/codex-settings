@@ -31,6 +31,7 @@ from codex_smart_subagents.controller_supervisor_v2 import (  # noqa: E402
 )
 from codex_smart_subagents.launcher import (  # noqa: E402
     classify_managed_invocation,
+    is_native_ultra_invocation,
     run_launcher,
 )
 
@@ -91,6 +92,14 @@ def main() -> int:
     codex_home = Path(environment["CODEX_HOME"]).expanduser().absolute()
     gateway_layout = GatewayLayout.for_codex_home(codex_home)
     arguments = sys.argv[1:]
+    if is_native_ultra_invocation(arguments):
+        return run_permanent_gateway(
+            arguments,
+            resolver=None,
+            wrapper=Path(__file__),
+            environment=environment,
+            managed_required=False,
+        )
     invocation = classify_managed_invocation(arguments)
     required_value = environment.get("CODEX_SMART_REQUIRED", "0")
     if invocation.adaptive and required_value not in {"0", "1"}:
