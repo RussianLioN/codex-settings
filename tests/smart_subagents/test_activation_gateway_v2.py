@@ -1667,6 +1667,47 @@ class _ActivationFixture:
         self.source.write_bytes(contents)
         self.source.chmod(0o500)
 
+    def set_captured_source_path(self, captured: Path) -> None:
+        source_locator = self.manifest["sourceLocator"]
+        source_locator["resolvedPathAtCapture"] = str(captured)
+        _write_json(
+            self.layout.fallback_path,
+            {
+                "schemaVersion": 2,
+                "sourceLocator": source_locator,
+                "backupSnapshot": {
+                    "absolutePath": str(self.snapshot),
+                    "sha256": self.source_sha256,
+                },
+                "extensions": {},
+            },
+        )
+        _write_json(self.layout.manifest_path, self.manifest)
+
+        manifest_value = self.receipt["manifest"]["value"]
+        manifest_value.update(
+            {
+                "file": _file_projection(self.layout.manifest_path),
+                "sourceLocatorFingerprint": hashlib.sha256(
+                    canonical_json_bytes(source_locator)
+                ).hexdigest(),
+                "semanticFingerprint": _manifest_semantic_fingerprint(self.manifest),
+            }
+        )
+        self.receipt["manifest"] = _journal_projection(
+            "manifest-v2", manifest_value
+        )
+        self.receipt["manifestDocument"] = copy.deepcopy(self.manifest)
+        receipt_projection = {
+            key: value
+            for key, value in self.receipt.items()
+            if key != "receiptFingerprint"
+        }
+        self.receipt["receiptFingerprint"] = domain_fingerprint(
+            "codex-smart/activation-commit-receipt/v2", receipt_projection
+        )
+        _write_json(self.receipt_path, self.receipt)
+
     def mutate_interface_subject(self, name: str, value: object) -> None:
         self.interface_evidence["subject"][name] = value
         _write_json(self.layout.manifest_path, self.manifest)
@@ -1773,6 +1814,17 @@ class ActivationResolverTests(unittest.TestCase):
             hashlib.sha256(b"compatible-new-codex").hexdigest(),
             decision.source_drift.observed_sha256,
         )
+
+    def test_missing_captured_source_path_closes_managed_activation(self) -> None:
+        self.fixture.set_captured_source_path(
+            self.fixture.root / "missing-captured-codex"
+        )
+
+        decision = self.fixture.resolver().resolve()
+
+        self.assertIs(GatewayState.ORDINARY, decision.state)
+        self.assertEqual("SOURCE_CHANGED", decision.reason_code)
+        self.assertIsNone(decision.source_drift)
 
     def test_source_change_does_not_hide_corrupt_snapshot(self) -> None:
         self.fixture.replace_live_codex(b"new-codex")

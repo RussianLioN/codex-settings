@@ -640,9 +640,10 @@ class ActivationResolver:
         expected = _sha256(source["sourceObservedSha256"], "SOURCE_CHANGED")
         try:
             resolved = lexical.resolve(strict=True)
+            captured_resolved = captured.resolve(strict=True)
             observed = _hash_file(resolved)
             if (
-                resolved == captured
+                resolved == captured_resolved
                 and observed == expected
                 and os.access(resolved, os.X_OK)
                 and resolved != self.wrapper.resolve()
