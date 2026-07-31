@@ -892,6 +892,13 @@ class _StrictJsonLineReader:
                 "app-server wrote unexpected diagnostic output",
             )
 
+    def require_complete_stdout(self) -> None:
+        if self._stdout:
+            raise AppServerError(
+                "APP_SERVER_INVALID",
+                "app-server emitted an incomplete response",
+            )
+
 
 def _read_app_server_response(
     reader: _StrictJsonLineReader,
@@ -999,6 +1006,7 @@ def _assert_no_app_server_message(
         reader.read(deadline=deadline)
     except OperationDeadlineExceededV2 as exc:
         if exc.code == "APP_SERVER_TRAILING_WAIT_COMPLETE":
+            reader.require_complete_stdout()
             return
         raise
     except AppServerError as exc:
