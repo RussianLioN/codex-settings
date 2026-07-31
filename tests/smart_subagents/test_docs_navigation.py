@@ -164,6 +164,104 @@ class DocsNavigationValidatorTests(unittest.TestCase):
             root,
         )
 
+    def test_sol_medium_and_ultra_guidance_is_complete_and_honest(self) -> None:
+        root_path = REPO / "README.md"
+        plugin_path = REPO / "plugins/codex-smart-subagents/README.md"
+        runbook_path = (
+            REPO / "docs/runbooks/adaptive-subagents-v2-operations.md"
+        )
+        flow_path = REPO / "docs/analysis/adaptive-subagents-v2-flow.md"
+        plan_path = (
+            REPO
+            / "docs/superpowers/plans/"
+            "2026-07-28-sol-medium-native-ultra.md"
+        )
+        documents = {
+            "root": root_path.read_text(encoding="utf-8"),
+            "plugin": plugin_path.read_text(encoding="utf-8"),
+            "runbook": runbook_path.read_text(encoding="utf-8"),
+            "flow": flow_path.read_text(encoding="utf-8"),
+        }
+
+        self.assertTrue(plan_path.is_file(), plan_path)
+        self.assertIn(
+            "](docs/superpowers/plans/2026-07-28-sol-medium-native-ultra.md)",
+            documents["root"],
+        )
+
+        required_everywhere = (
+            "`gpt-5.6-sol`",
+            "`gpt-5.6-terra`",
+            "`medium`",
+            "`codex-native`",
+            "кодом 69",
+        )
+        for document_name, document in documents.items():
+            for term in required_everywhere:
+                with self.subTest(document=document_name, term=term):
+                    self.assertIn(term, document)
+
+        for document_name in ("plugin", "runbook", "flow"):
+            document = documents[document_name]
+            with self.subTest(document=document_name, behavior="ultra"):
+                self.assertIn(
+                    "codex -c 'model_reasoning_effort=\"ultra\"'",
+                    document,
+                )
+                self.assertIn("`/model`", document)
+                self.assertRegex(
+                    document,
+                    r"[Яя]вно\s+зада\w*[^.]{0,120}сохраня",
+                )
+                self.assertRegex(
+                    document,
+                    r"до\s+разрешателя и\s+контроллера",
+                )
+                self.assertRegex(
+                    document,
+                    r"`pro` — план подписки, а не уровень\s+рассуждений",
+                )
+                self.assertRegex(
+                    document,
+                    r"дочерних\s+`allowedPairs` нет\s+`gpt-5\.6-sol \+ medium`\s+и `ultra`",
+                )
+                self.assertRegex(
+                    document,
+                    r"[Уу]же работающую\s+управляемую сессию нельзя превратить в нативную",
+                )
+
+        fallback = (
+            "codex-smart: COORDINATOR_PAIR_FALLBACK; "
+            "gpt-5.6-sol+medium недоступен, используется "
+            "gpt-5.6-terra+medium"
+        )
+        for document_name, document in documents.items():
+            with self.subTest(document=document_name, behavior="fallback"):
+                self.assertIn(fallback, document)
+                self.assertNotIn("codex-native+", document)
+                self.assertNotIn("codex-ultra", document)
+
+        flow = self.validator.parse_markdown(documents["flow"])
+        mermaid = tuple(
+            fence for fence in flow.fences if fence.language == "mermaid"
+        )
+        self.assertEqual(5, len(mermaid))
+        first_diagram = mermaid[0].content
+        for branch in (
+            "model_reasoning_effort=ultra",
+            "Нативный Codex без контроллера",
+            "gpt-5.6-sol + medium",
+            "gpt-5.6-terra + medium",
+            "Завершить запуск кодом 69",
+            "Делегирование дочерних узлов",
+        ):
+            with self.subTest(branch=branch):
+                self.assertIn(branch, first_diagram)
+        self.assertLess(
+            first_diagram.index("model_reasoning_effort=ultra"),
+            first_diagram.index("codex-smart классифицирует управляемый запуск"),
+        )
+
     def test_current_guides_use_exact_hook_event_names(self) -> None:
         for path in (
             REPO / "plugins/codex-smart-subagents/README.md",
