@@ -84,6 +84,11 @@ class _Snapshotter:
         }
 
 
+class _CoordinatorInspector:
+    def inspect(self):
+        return {"gpt-5.6-sol": frozenset({"medium"})}
+
+
 class _InterfaceExecutor:
     def __init__(self) -> None:
         self.commands: list[SnapshotCommand] = []
@@ -243,6 +248,9 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
             codex_binary=self.codex_binary,
             controller_candidate=self.candidate,
             policy_bundle=self.policy,
+            coordinator_inspector_factory=lambda **_arguments: (
+                _CoordinatorInspector()
+            ),
             snapshotter=self.snapshotter,
             interface_executor=self.interface_executor,
             completed_at=datetime(2026, 7, 18, 0, 0, 1, tzinfo=timezone.utc),
@@ -318,6 +326,15 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
             result.bundled_catalog_path.read_text(encoding="utf-8")
         )
         self.assertEqual(result.bundled_catalog, catalog_projection)
+        self.assertEqual(
+            {
+                "model": "gpt-5.6-sol",
+                "reasoningEffort": "medium",
+            },
+            result.expected_health_payload["coordinatorSelection"][
+                "selectedPair"
+            ],
+        )
         installed_routing_input = (
             result.activation_dir
             / "marketplace"

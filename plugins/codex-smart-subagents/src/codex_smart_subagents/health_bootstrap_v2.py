@@ -360,6 +360,7 @@ def bootstrap_health_activation_v2(
                 finalization = finalize_staged_activation_v2(
                     staged=staged,
                     controller=accepting_controller,
+                    coordinator_selection=coordinator_selection,
                     allow_initialized_database_recovery=(
                         initial_database is not None
                     ),
@@ -1112,6 +1113,10 @@ def _recovered_materialization_v2(
         "databaseSchemaVersion": 2,
         "workCounts": _read_work_counts_v2(binding.database_path),
     }
+    if decision.coordinator_selection is not None:
+        health["coordinatorSelection"] = copy.deepcopy(
+            dict(decision.coordinator_selection)
+        )
     return ActivationMaterializationV2(
         status="CONTROLLER_RECOVERED",
         readiness="HEALTH_ONLY_READY",

@@ -294,21 +294,26 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
     def test_automatic_coordinator_unavailable_returns_69_without_marker(
         self,
     ) -> None:
-        decision = _ordinary(self.fallback)
-        gateway_arguments: dict[str, object] = {}
-
-        class CoordinatorUnavailable(RuntimeError):
-            def __init__(self, code: str, message: str) -> None:
-                super().__init__(f"{code}: {message}")
-                self.code = code
-                self.message = message
-
-        def gateway(_arguments, **kwargs):
-            gateway_arguments.update(kwargs)
-            raise CoordinatorUnavailable(
-                "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
-                "private model/list details",
-            )
+        decision = GatewayDecision(
+            state=GatewayState.READY,
+            reason_code="READY",
+            executable=self.fallback,
+            coordinator=None,
+            coordinator_selection={
+                "selection": "first-verified-available",
+                "status": "UNAVAILABLE",
+                "reasonCode": "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+                "selectedPair": None,
+                "candidateIndex": None,
+                "accountCatalogFingerprint": None,
+                "accountContextFingerprint": "6" * 64,
+            },
+            catalog_schema_version=2,
+            activation_id="act2_" + "a" * 64,
+            gate_fingerprint="b" * 64,
+            activation_gate={"gateFingerprint": "b" * 64},
+            catalog_path=self.root / "adaptive-subagents.toml",
+        )
 
         error = StringIO()
         with (
@@ -321,18 +326,15 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
             mock.patch.dict(
                 self.globals,
                 {
-                    "ManagedLaunchUnavailable": CoordinatorUnavailable,
                     "classify_managed_invocation": classify_managed_invocation,
                     "v2_gateway_state_present": lambda _layout: True,
                     "_prepare_v2_decision": lambda **_kwargs: decision,
-                    "run_permanent_gateway": gateway,
                 },
             ),
             redirect_stderr(error),
         ):
             self.assertEqual(69, self.globals["main"]())
 
-        self.assertFalse(gateway_arguments["managed_required"])
         self.assertIn(
             "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
             error.getvalue(),

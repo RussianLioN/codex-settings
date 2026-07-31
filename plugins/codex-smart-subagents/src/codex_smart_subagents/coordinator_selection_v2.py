@@ -9,6 +9,7 @@ from typing import Any, Callable, ClassVar, Mapping, Protocol, Sequence
 from .canonical_json import domain_fingerprint
 from .live_canary import AppServerError
 from .model_catalog import AppServerModelCatalogInspector, ModelCatalogError
+from .operation_deadline_v2 import OperationDeadlineExceededV2
 
 
 _SELECTION = "first-verified-available"
@@ -120,7 +121,7 @@ def collect_coordinator_selection_v2(
             reason_code=_coordinator_catalog_reason(exc.code),
             active_context_fingerprint=active_context_fingerprint,
         )
-    except AppServerError:
+    except (AppServerError, OperationDeadlineExceededV2):
         return _failed_catalog_selection(
             selection=selection,
             candidates=normalized_candidates,
@@ -210,7 +211,7 @@ def inspect_coordinator_selection_v2(
             reason_code=_coordinator_catalog_reason(exc.code),
             active_context_fingerprint=active_context_fingerprint,
         )
-    except AppServerError:
+    except (AppServerError, OperationDeadlineExceededV2):
         return _failed_catalog_selection(
             selection=selection,
             candidates=normalized_candidates,

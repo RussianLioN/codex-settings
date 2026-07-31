@@ -45,7 +45,13 @@ from .codex_binary_snapshot import (
     CodexBinarySnapshotter,
     SnapshotCommandExecutor,
 )
+from .coordinator_selection_v2 import (
+    CoordinatorSelectionV2,
+    inspect_coordinator_selection_v2,
+    validate_coordinator_selection_document_v2,
+)
 from .interface_probe_v1 import probe_codex_interface_v1
+from .model_catalog import AppServerModelCatalogInspector
 from .operation_deadline_v2 import (
     OperationDeadlineExceededV2,
     checkpoint_current_operation_deadline_if_scoped_v2,
@@ -625,6 +631,7 @@ def finalize_staged_activation_v2(
     *,
     staged: StagedActivationV2,
     controller: AcceptingControllerV2,
+    coordinator_selection: CoordinatorSelectionV2,
     allow_initialized_database_recovery: bool = False,
 ) -> ActivationFinalizationV2:
     """Финализирует staged activation только по фактическому сокету сервера."""
@@ -790,6 +797,7 @@ def finalize_staged_activation_v2(
                 receipt_path=receipt_path,
                 candidate=controller,
                 controller_identity=controller.controller_identity,
+                coordinator_selection=coordinator_selection.to_document(),
             )
             return ActivationFinalizationV2(
                 materialization=materialization,
@@ -1427,6 +1435,9 @@ def materialize_activation_v2(
     codex_binary: Path,
     controller_candidate: ControllerCandidateV2,
     policy_bundle: PolicyBundleV2,
+    coordinator_inspector_factory: Callable[..., Any] = (
+        AppServerModelCatalogInspector
+    ),
     snapshotter: _Snapshotter | None = None,
     interface_executor: SnapshotCommandExecutor | None = None,
     completed_at: datetime | None = None,
@@ -1467,6 +1478,8 @@ def materialize_activation_v2(
                 state_home=state_home,
                 candidate=controller_candidate,
                 candidate_info=candidate_info,
+                policy_bundle=policy_bundle,
+                coordinator_inspector_factory=coordinator_inspector_factory,
             )
         if layout.marketplace_link.exists() or layout.marketplace_link.is_symlink():
             _fail(
@@ -1603,6 +1616,15 @@ def materialize_activation_v2(
                 "activationFingerprint": activation_fingerprint,
                 "identity": identity,
             }
+            coordinator_selection = inspect_coordinator_selection_v2(
+                codex_executable=snapshot_path,
+                codex_home=codex_home,
+                runtime_parent=state_home,
+                selection=policy_bundle.coordinator_selection,
+                candidates=policy_bundle.coordinator_candidates,
+                active_context_fingerprint=activation_fingerprint,
+                inspector_factory=coordinator_inspector_factory,
+            )
             _atomic_write_json(
                 activation_dir / "activation.json",
                 activation_document,
@@ -1763,6 +1785,7 @@ def materialize_activation_v2(
                 receipt_path=receipt_path,
                 candidate=controller_candidate,
                 controller_identity=controller_identity,
+                coordinator_selection=coordinator_selection.to_document(),
             )
         except ActivationMaterializationV2Error:
             _cleanup_failed_materialization(
@@ -2527,6 +2550,7 @@ def _result(
     receipt_path: Path,
     candidate: ControllerCandidateV2 | AcceptingControllerV2,
     controller_identity: str,
+    coordinator_selection: Mapping[str, object],
 ) -> ActivationMaterializationV2:
     identity = activation_document["identity"]
     database_id = identity["database"]["databaseId"]
@@ -2577,6 +2601,9 @@ def _result(
         "databaseSchemaVersion": 2,
         "workCounts": zero_counts,
     }
+    health["coordinatorSelection"] = (
+        validate_coordinator_selection_document_v2(coordinator_selection)
+    )
     activation_id = str(activation_document["activationId"])
     activation_dir = layout.managed_root / "activations" / activation_id
     return ActivationMaterializationV2(
@@ -2613,6 +2640,8 @@ def _read_existing_materialization(
     state_home: Path,
     candidate: ControllerCandidateV2,
     candidate_info: os.stat_result,
+    policy_bundle: PolicyBundleV2,
+    coordinator_inspector_factory: Callable[..., Any],
 ) -> ActivationMaterializationV2:
     try:
         manifest = _read_json(layout.manifest_path)
@@ -2640,6 +2669,19 @@ def _read_existing_materialization(
                 )
         activation_dir = layout.managed_root / "activations" / activation_id
         activation_document = _read_json(activation_dir / "activation.json")
+        coordinator_selection = inspect_coordinator_selection_v2(
+            codex_executable=Path(
+                str(activation_document["identity"]["codexSnapshot"]["absolutePath"])
+            ),
+            codex_home=layout.codex_home,
+            runtime_parent=state_home,
+            selection=policy_bundle.coordinator_selection,
+            candidates=policy_bundle.coordinator_candidates,
+            active_context_fingerprint=str(
+                activation_document["activationFingerprint"]
+            ),
+            inspector_factory=coordinator_inspector_factory,
+        )
         receipt_path = (
             layout.receipts_root
             / str(manifest["installationId"])
@@ -2693,6 +2735,7 @@ def _read_existing_materialization(
             receipt_path=receipt_path,
             candidate=candidate,
             controller_identity=str(row["controller_identity"]),
+            coordinator_selection=coordinator_selection.to_document(),
         )
     except ActivationMaterializationV2Error:
         raise

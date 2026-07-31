@@ -38,6 +38,9 @@ from codex_smart_subagents.codex_binary_snapshot import (  # noqa: E402
     SnapshotCommandResult,
 )
 from codex_smart_subagents.policy_bundle_v2 import load_policy_bundle_v2  # noqa: E402
+from codex_smart_subagents.operation_deadline_v2 import (  # noqa: E402
+    OperationDeadlineExceededV2,
+)
 from codex_smart_subagents.controller_health_v2 import (  # noqa: E402
     ControllerHealthServerV2,
     ControllerHealthV2Error,
@@ -170,7 +173,20 @@ class _CoordinatorInspector:
 
     def inspect(self):
         self.calls += 1
+        if isinstance(self.observed, BaseException):
+            raise self.observed
         return self.observed
+
+
+def _coordinator_deadline() -> OperationDeadlineExceededV2:
+    return OperationDeadlineExceededV2(
+        code="ROOT_OPERATION_EXPIRED",
+        operation="controller-bootstrap",
+        phase="model-list-cleanup",
+        deadline_kind="root",
+        configured_timeout_nanoseconds=5_000_000_000,
+        elapsed_monotonic_nanoseconds=5_000_000_001,
+    )
 
 
 class HealthBootstrapV2Tests(unittest.TestCase):
@@ -420,6 +436,53 @@ os._exit(0)
                 "reasoning_effort": "medium",
             },
             runtime.gateway_decision.coordinator,
+        )
+
+    def test_initial_deadline_is_materialized_as_health_unavailable(self) -> None:
+        inspector = _CoordinatorInspector(_coordinator_deadline())
+        runtime = self._bootstrap(
+            coordinator_inspector_factory=lambda **_arguments: inspector
+        )
+
+        selection = runtime.gateway_decision.coordinator_selection
+        self.assertIsNotNone(selection)
+        assert selection is not None
+        self.assertEqual(1, inspector.calls)
+        self.assertEqual("UNAVAILABLE", selection["status"])
+        self.assertEqual(
+            "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            selection["reasonCode"],
+        )
+        self.assertIsNone(selection["accountCatalogFingerprint"])
+        self.assertEqual(
+            selection,
+            runtime.materialization.expected_health_payload[
+                "coordinatorSelection"
+            ],
+        )
+
+    def test_recovery_deadline_is_materialized_as_health_unavailable(self) -> None:
+        self._create_dead_persisted_activation()
+        inspector = _CoordinatorInspector(_coordinator_deadline())
+        runtime = self._bootstrap(
+            coordinator_inspector_factory=lambda **_arguments: inspector
+        )
+
+        selection = runtime.gateway_decision.coordinator_selection
+        self.assertIsNotNone(selection)
+        assert selection is not None
+        self.assertEqual(1, inspector.calls)
+        self.assertEqual("UNAVAILABLE", selection["status"])
+        self.assertEqual(
+            "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            selection["reasonCode"],
+        )
+        self.assertIsNone(selection["accountCatalogFingerprint"])
+        self.assertEqual(
+            selection,
+            runtime.materialization.expected_health_payload[
+                "coordinatorSelection"
+            ],
         )
 
     def test_explicit_state_home_binds_health_database_and_manifest(self) -> None:

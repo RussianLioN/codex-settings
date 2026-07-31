@@ -26,6 +26,9 @@ from codex_smart_subagents.candidate_ready_channel_v2 import (  # noqa: E402
     CandidateReadyBootstrapV2,
     CandidateSpawnActionV2,
 )
+from codex_smart_subagents.operation_deadline_v2 import (  # noqa: E402
+    OperationDeadlineExceededV2,
+)
 
 
 class _FakeServer:
@@ -77,6 +80,22 @@ class _Application:
     def close(self) -> None:
         self.closed = True
         self.health.close()
+
+
+class _DeadlineInspector:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def inspect(self):
+        self.calls += 1
+        raise OperationDeadlineExceededV2(
+            code="ROOT_OPERATION_EXPIRED",
+            operation="candidate-controller",
+            phase="model-list-cleanup",
+            deadline_kind="root",
+            configured_timeout_nanoseconds=5_000_000_000,
+            elapsed_monotonic_nanoseconds=5_000_000_001,
+        )
 
 
 class _FakeReadyChannel:
@@ -420,6 +439,57 @@ class CandidateControllerV2Tests(unittest.TestCase):
             ].to_document()["selectedPair"],
         )
         self.assertEqual(self.state_home, captured["entrypoint_config"].state_home)
+
+    def test_candidate_deadline_becomes_saved_health_unavailable(self) -> None:
+        config = load_candidate_controller_config_v2(
+            plugin_root=self.plugin_root,
+            environment=self.environment,
+        )
+        server = _FakeServer()
+        inspector = _DeadlineInspector()
+        decision = type(
+            "Decision",
+            (),
+            {
+                "runtime_binding": type(
+                    "Binding",
+                    (),
+                    {
+                        "state_home": self.state_home,
+                        "database_path": self.database_path,
+                    },
+                )(),
+            },
+        )()
+
+        serve_candidate_controller_v2(
+            config,
+            policy_loader=lambda **_arguments: self._policy(),
+            coordinator_inspector_factory=lambda **_arguments: inspector,
+            server_factory=lambda **arguments: (
+                server.arguments.update(arguments) or server
+            ),
+            protocol_factory=_Protocol,
+            decision_provider=lambda: decision,
+            full_controller_starter=lambda _config, **arguments: _Application(
+                arguments["bootstrapper"]()
+            ),
+            signal_installer=lambda _application: None,
+            ready_timeout_seconds=12.0,
+        )
+
+        selection = server.arguments["coordinator_selection"].to_document()
+        self.assertEqual(1, inspector.calls)
+        self.assertEqual("UNAVAILABLE", selection["status"])
+        self.assertEqual(
+            "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            selection["reasonCode"],
+        )
+        self.assertIsNone(selection["accountCatalogFingerprint"])
+        self.assertRegex(
+            selection["accountContextFingerprint"],
+            r"^[0-9a-f]{64}$",
+        )
 
     def test_ready_channel_bridges_start_candidate_to_controller_accept(self) -> None:
         config = load_candidate_controller_config_v2(

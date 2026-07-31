@@ -17,6 +17,9 @@ from codex_smart_subagents.coordinator_selection_v2 import (  # noqa: E402
     inspect_coordinator_selection_v2,
 )
 from codex_smart_subagents.model_catalog import ModelCatalogError  # noqa: E402
+from codex_smart_subagents.operation_deadline_v2 import (  # noqa: E402
+    OperationDeadlineExceededV2,
+)
 
 
 CANDIDATES = (
@@ -30,6 +33,17 @@ CANDIDATES = (
     },
 )
 ACTIVE_CONTEXT = "7" * 64
+
+
+def _expired_deadline() -> OperationDeadlineExceededV2:
+    return OperationDeadlineExceededV2(
+        code="ROOT_OPERATION_EXPIRED",
+        operation="controller-bootstrap",
+        phase="model-list-cleanup",
+        deadline_kind="root",
+        configured_timeout_nanoseconds=5_000_000_000,
+        elapsed_monotonic_nanoseconds=5_000_000_001,
+    )
 
 
 class _Inspector:
@@ -148,6 +162,57 @@ class CoordinatorSelectionV2Tests(unittest.TestCase):
         self.assertEqual(1, inspector.calls)
         self.assertEqual(
             "COORDINATOR_ACCOUNT_CATALOG_INVALID",
+            selection.reason_code,
+        )
+        self.assertIsNone(selection.account_catalog_fingerprint)
+        self.assertRegex(
+            selection.account_context_fingerprint or "",
+            r"^[0-9a-f]{64}$",
+        )
+
+    def test_inspection_deadline_becomes_exact_catalog_unavailable(self) -> None:
+        try:
+            selection, inspector = self.collect(_expired_deadline())
+        except OperationDeadlineExceededV2:
+            self.fail("inspection deadline escaped coordinator selection")
+
+        self.assertEqual(1, inspector.calls)
+        self.assertEqual("UNAVAILABLE", selection.status)
+        self.assertEqual(
+            "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            selection.reason_code,
+        )
+        self.assertIsNone(selection.account_catalog_fingerprint)
+        self.assertRegex(
+            selection.account_context_fingerprint or "",
+            r"^[0-9a-f]{64}$",
+        )
+
+    def test_inspector_factory_deadline_becomes_catalog_unavailable(self) -> None:
+        factory_calls = 0
+
+        def expired_factory(**_arguments):
+            nonlocal factory_calls
+            factory_calls += 1
+            raise _expired_deadline()
+
+        try:
+            selection = inspect_coordinator_selection_v2(
+                codex_executable=Path("/private/codex"),
+                codex_home=Path("/private/codex-home"),
+                runtime_parent=Path("/private/runtime"),
+                selection="first-verified-available",
+                candidates=CANDIDATES,
+                active_context_fingerprint=ACTIVE_CONTEXT,
+                inspector_factory=expired_factory,
+            )
+        except OperationDeadlineExceededV2:
+            self.fail("factory deadline escaped coordinator selection")
+
+        self.assertEqual(1, factory_calls)
+        self.assertEqual("UNAVAILABLE", selection.status)
+        self.assertEqual(
+            "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
             selection.reason_code,
         )
         self.assertIsNone(selection.account_catalog_fingerprint)
