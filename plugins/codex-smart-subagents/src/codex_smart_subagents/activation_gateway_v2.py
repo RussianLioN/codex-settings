@@ -160,6 +160,23 @@ class GatewayState(str, Enum):
 
 
 @dataclass(frozen=True)
+class SourceDriftV1:
+    """Наблюдаемое изменение внешнего Codex при сохранённом снимке."""
+
+    lexical_path: Path
+    resolved_path: Path
+    observed_sha256: str
+    expected_sha256: str
+
+    def __post_init__(self) -> None:
+        if not self.lexical_path.is_absolute() or not self.resolved_path.is_absolute():
+            raise ValueError("source drift paths must be absolute")
+        for value in (self.observed_sha256, self.expected_sha256):
+            if _SHA256.fullmatch(value) is None:
+                raise ValueError("source drift hash is invalid")
+
+
+@dataclass(frozen=True)
 class GatewayRuntimeBindingV2:
     """Fresh runtime facts retained only after the complete READY proof."""
 
@@ -221,6 +238,7 @@ class GatewayDecision:
     activation_gate: Mapping[str, object] | None = None
     catalog_path: Path | None = None
     runtime_binding: GatewayRuntimeBindingV2 | None = None
+    source_drift: SourceDriftV1 | None = None
 
     def __post_init__(self) -> None:
         if not self.executable.is_absolute():
@@ -270,6 +288,7 @@ class GatewayDecision:
                 self.activation_gate,
                 self.catalog_path,
                 self.runtime_binding,
+                self.source_drift,
             )
         ):
             raise ValueError("ordinary gateway decision carries adaptive state")
@@ -385,7 +404,10 @@ class ActivationResolver:
                         "MANIFEST_BINDING_MISMATCH",
                         "manifest snapshot differs from fallback capsule",
                     )
-                executable = self._verify_ready_source(source_locator)
+                executable, source_drift = self._verify_ready_source(
+                    source_locator,
+                    fallback_snapshot,
+                )
 
                 active = manifest["activeActivation"]
                 activation_id = active["activationId"]
@@ -548,6 +570,7 @@ class ActivationResolver:
                         interface_evidence=dict(interface),
                         activation_identity=dict(identity),
                     ),
+                    source_drift=source_drift,
                 )
         except operation_deadline_v2.OperationDeadlineExceededV2:
             raise
@@ -605,22 +628,54 @@ class ActivationResolver:
         if type(manifest["extensions"]) is not dict:
             raise _ProofError("MANIFEST_INVALID", "manifest extensions are invalid")
 
-    def _verify_ready_source(self, source: dict[str, object]) -> Path:
+    def _verify_ready_source(
+        self,
+        source: dict[str, object],
+        snapshot: dict[str, object],
+    ) -> tuple[Path, SourceDriftV1 | None]:
         lexical = _absolute_path(source["lexicalPath"], "SOURCE_CHANGED")
         captured = _absolute_path(
             source["resolvedPathAtCapture"], "SOURCE_CHANGED"
         )
+        expected = _sha256(source["sourceObservedSha256"], "SOURCE_CHANGED")
         try:
             resolved = lexical.resolve(strict=True)
-            if resolved != captured.resolve(strict=True):
-                raise _ProofError("SOURCE_CHANGED", "source target changed")
-            if _hash_file(resolved) != source["sourceObservedSha256"]:
-                raise _ProofError("SOURCE_CHANGED", "source bytes changed")
-            if not os.access(resolved, os.X_OK) or resolved == self.wrapper.resolve():
-                raise _ProofError("SOURCE_CHANGED", "source is not executable")
-            return lexical
-        except OSError as exc:
+            observed = _hash_file(resolved)
+            if (
+                resolved == captured
+                and observed == expected
+                and os.access(resolved, os.X_OK)
+                and resolved != self.wrapper.resolve()
+            ):
+                return lexical, None
+        except (OSError, RuntimeError) as exc:
             raise _ProofError("SOURCE_CHANGED", str(exc)) from exc
+
+        try:
+            snapshot_path = _absolute_path(snapshot["absolutePath"], "SNAPSHOT_INVALID")
+            snapshot_sha256 = _sha256(snapshot["sha256"], "SNAPSHOT_INVALID")
+            _verify_private_file(
+                snapshot_path,
+                expected_mode=0o500,
+                expected_sha256=snapshot_sha256,
+                code="SNAPSHOT_INVALID",
+            )
+            if (
+                snapshot_sha256 != expected
+                or snapshot_path.resolve() == self.wrapper.resolve()
+            ):
+                raise _ProofError("SNAPSHOT_INVALID", "snapshot binding differs")
+        except (OSError, RuntimeError, _ProofError) as exc:
+            raise _ProofError(
+                "ACTIVATION_PROOF_INVALID",
+                "backup snapshot is invalid",
+            ) from exc
+        return snapshot_path, SourceDriftV1(
+            lexical_path=lexical,
+            resolved_path=resolved,
+            observed_sha256=observed,
+            expected_sha256=expected,
+        )
 
     def _validate_activation(
         self,
@@ -720,7 +775,10 @@ class ActivationResolver:
         identity: dict[str, object],
         manifest: dict[str, object],
     ) -> dict[str, object]:
-        interface = verify_interface_evidence(value)
+        try:
+            interface = verify_interface_evidence(value)
+        except EvidenceError as exc:
+            raise _ProofError("ACTIVATION_PROOF_INVALID", str(exc)) from exc
         subject = interface["subject"]
         semantic = interface["semantic"]
         if (

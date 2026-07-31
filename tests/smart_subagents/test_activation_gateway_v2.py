@@ -1654,6 +1654,27 @@ class _ActivationFixture:
         self.controller_socket.close()
         self.temporary.cleanup()
 
+    @property
+    def live_codex(self) -> Path:
+        return self.source
+
+    @property
+    def snapshot_path(self) -> Path:
+        return self.snapshot
+
+    def replace_live_codex(self, contents: bytes) -> None:
+        self.source.chmod(0o700)
+        self.source.write_bytes(contents)
+        self.source.chmod(0o500)
+
+    def mutate_interface_subject(self, name: str, value: object) -> None:
+        self.interface_evidence["subject"][name] = value
+        _write_json(self.layout.manifest_path, self.manifest)
+
+    def mutate_interface_evidence(self, name: str, value: object) -> None:
+        self.interface_evidence[name] = value
+        _write_json(self.layout.manifest_path, self.manifest)
+
     def controller_probe(self, _socket_path: Path, request: dict[str, object]):
         response = {
             "messageType": "response",
@@ -1737,6 +1758,57 @@ class ActivationResolverTests(unittest.TestCase):
             self.fixture.controller_identity,
             binding.controller_row["controller_identity"],
         )
+
+    def test_source_change_keeps_valid_activation_ready_on_snapshot(self) -> None:
+        self.fixture.replace_live_codex(b"compatible-new-codex")
+
+        decision = self.fixture.resolver().resolve_persisted_activation()
+
+        self.assertIs(GatewayState.READY, decision.state)
+        self.assertEqual(self.fixture.snapshot_path, decision.executable)
+        self.assertIsNotNone(decision.source_drift)
+        assert decision.source_drift is not None
+        self.assertEqual(self.fixture.live_codex, decision.source_drift.lexical_path)
+        self.assertEqual(
+            hashlib.sha256(b"compatible-new-codex").hexdigest(),
+            decision.source_drift.observed_sha256,
+        )
+
+    def test_source_change_does_not_hide_corrupt_snapshot(self) -> None:
+        self.fixture.replace_live_codex(b"new-codex")
+        self.fixture.snapshot_path.chmod(0o700)
+
+        decision = self.fixture.resolver().resolve()
+
+        self.assertIs(GatewayState.ORDINARY, decision.state)
+        self.assertEqual("ACTIVATION_PROOF_INVALID", decision.reason_code)
+        self.assertIsNone(decision.source_drift)
+
+    def test_unchanged_source_has_no_drift_marker(self) -> None:
+        decision = self.fixture.resolver().resolve_persisted_activation()
+
+        self.assertIs(GatewayState.READY, decision.state)
+        self.assertIsNone(decision.source_drift)
+
+    def test_source_change_rejects_tampered_snapshot_interface_evidence(self) -> None:
+        self.fixture.replace_live_codex(b"new-codex")
+        self.fixture.mutate_interface_subject("architecture", "x86_64")
+
+        decision = self.fixture.resolver().resolve()
+
+        self.assertIs(GatewayState.ORDINARY, decision.state)
+        self.assertEqual("ACTIVATION_PROOF_INVALID", decision.reason_code)
+        self.assertIsNone(decision.source_drift)
+
+    def test_source_change_rejects_foreign_interface_fingerprint(self) -> None:
+        self.fixture.replace_live_codex(b"new-codex")
+        self.fixture.mutate_interface_evidence("compatibilityFingerprint", "f" * 64)
+
+        decision = self.fixture.resolver().resolve()
+
+        self.assertIs(GatewayState.ORDINARY, decision.state)
+        self.assertEqual("ACTIVATION_PROOF_INVALID", decision.reason_code)
+        self.assertIsNone(decision.source_drift)
 
     def test_fast_pinned_health_check_reuses_the_proven_controller_protocol(
         self,

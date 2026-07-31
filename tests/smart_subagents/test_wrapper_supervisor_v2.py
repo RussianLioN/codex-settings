@@ -20,6 +20,7 @@ sys.path.insert(0, str(PLUGIN_SRC))
 from codex_smart_subagents.activation_gateway_v2 import (  # noqa: E402
     GatewayDecision,
     GatewayState,
+    SourceDriftV1,
 )
 from codex_smart_subagents.launcher import (  # noqa: E402
     classify_managed_invocation,
@@ -51,7 +52,29 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_v2_path_passes_exact_supervisor_decision_to_gateway(self) -> None:
-        decision = _ordinary(self.fallback)
+        snapshot = self.root / "snapshot-codex"
+        snapshot.write_text("#!/bin/sh\n", encoding="utf-8")
+        snapshot.chmod(0o500)
+        live_codex = self.root / "live-codex"
+        live_codex.write_text("#!/bin/sh\n", encoding="utf-8")
+        live_codex.chmod(0o500)
+        decision = GatewayDecision(
+            state=GatewayState.READY,
+            reason_code="READY",
+            executable=snapshot,
+            coordinator={"model": "gpt-5.6-terra", "reasoning_effort": "medium"},
+            catalog_schema_version=1,
+            activation_id="act2_" + "a" * 64,
+            gate_fingerprint="b" * 64,
+            activation_gate={"gateFingerprint": "b" * 64},
+            catalog_path=self.root / "adaptive-subagents.toml",
+            source_drift=SourceDriftV1(
+                lexical_path=live_codex,
+                resolved_path=live_codex,
+                observed_sha256="c" * 64,
+                expected_sha256="d" * 64,
+            ),
+        )
         result = SimpleNamespace(gateway_decision=decision)
         supervisor_arguments: dict[str, object] = {}
         gateway_arguments: dict[str, object] = {}
@@ -78,6 +101,10 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
         def gateway(arguments, **kwargs):
             gateway_arguments.update(kwargs)
             self.assertIs(decision, kwargs["resolver"].resolve())
+            self.assertIs(
+                decision.source_drift,
+                kwargs["resolver"].resolve().source_drift,
+            )
             return 17
 
         globals_ = self.globals
