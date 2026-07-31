@@ -35,11 +35,14 @@ def codex_version_supported(
     *,
     minimum: str = MINIMUM_STABLE_CODEX_VERSION,
 ) -> bool:
-    """Return whether a canonical stable version meets the minimum."""
+    """Return whether a canonical stable version meets the effective minimum."""
 
     try:
         parsed = parse_stable_codex_version(version)
         minimum_parsed = parse_stable_codex_version(minimum)
+        global_minimum = parse_stable_codex_version(
+            MINIMUM_STABLE_CODEX_VERSION
+        )
     except ValueError:
         return False
-    return parsed >= minimum_parsed
+    return parsed >= max(global_minimum, minimum_parsed)

@@ -439,6 +439,48 @@ for line in sys.stdin:
             with self.assertRaisesRegex(AppServerError, "APP_SERVER_TRAILING_MESSAGE"):
                 client.call("model/list", {"limit": 100})
 
+    def test_rejects_partial_stdout_after_final_response(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            executable = root / "codex"
+            executable.write_text(
+                """#!/usr/bin/env python3
+import json
+import os
+import sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if request.get("method") == "initialize":
+        result = {"userAgent":"fake","codexHome":os.environ["CODEX_HOME"],"platformFamily":"unix","platformOs":"test"}
+        print(json.dumps({"id":request["id"],"result":result}), flush=True)
+    elif request.get("method") == "initialized":
+        continue
+    else:
+        response = {"id":request["id"],"result":{"ok":True}}
+        print(json.dumps(response), flush=True)
+        sys.stdout.write("partial-json")
+        sys.stdout.flush()
+        break
+""",
+                encoding="utf-8",
+            )
+            executable.chmod(0o700)
+            directories = [
+                root / name for name in ("codex-home", "home", "tmp", "cwd")
+            ]
+            for path in directories:
+                path.mkdir(mode=0o700)
+            client = StrictAppServerClient(
+                codex_executable=executable,
+                codex_home=directories[0],
+                home=directories[1],
+                tmpdir=directories[2],
+                cwd=directories[3],
+            )
+
+            with self.assertRaisesRegex(AppServerError, "APP_SERVER_INVALID"):
+                client.call("model/list", {"limit": 100})
+
     def test_run_session_reuses_one_process_and_increments_request_ids(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

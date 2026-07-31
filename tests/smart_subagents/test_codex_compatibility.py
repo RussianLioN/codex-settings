@@ -40,6 +40,14 @@ class CodexCompatibilityTests(unittest.TestCase):
             with self.subTest(version=version):
                 self.assertFalse(codex_version_supported(version))
 
+    def test_never_lowers_the_global_stable_version_floor(self) -> None:
+        self.assertFalse(
+            codex_version_supported("0.1.0", minimum="0.1.0")
+        )
+        self.assertTrue(
+            codex_version_supported("0.144.4", minimum="0.1.0")
+        )
+
     def test_catalog_uses_a_minimum_stable_version(
         self,
     ) -> None:

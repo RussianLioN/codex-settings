@@ -868,6 +868,11 @@ class _StrictJsonLineReader:
                 self._process.poll() is not None
                 and not self._selector.get_map()
             ):
+                if self._stdout:
+                    raise AppServerError(
+                        "APP_SERVER_INVALID",
+                        "app-server exited with an incomplete response",
+                    )
                 raise AppServerError(
                     "APP_SERVER_INVALID",
                     "app-server exited before returning a complete response",
