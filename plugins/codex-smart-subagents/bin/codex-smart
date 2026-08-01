@@ -23,6 +23,9 @@ from codex_smart_subagents.activation_gateway_v2 import (  # noqa: E402
     GatewayLayout,
     GatewayState,
     ManagedLaunchUnavailable,
+    _build_source_reconciliation_request_v1,
+    _run_source_reconciliation_process_v1,
+    _verify_source_reconciliation_acceptance_v1,
     run_permanent_gateway,
     v2_gateway_state_present,
 )
@@ -31,8 +34,13 @@ from codex_smart_subagents.controller_supervisor_v2 import (  # noqa: E402
 )
 from codex_smart_subagents.launcher import (  # noqa: E402
     classify_managed_invocation,
+    clean_ordinary_environment,
     is_native_ultra_invocation,
     run_launcher,
+)
+from codex_smart_subagents.source_reconciliation_v1 import (  # noqa: E402
+    SourceReconciliationResultV1,
+    reconcile_source_drift_v1,
 )
 
 
@@ -86,6 +94,46 @@ def _prepare_v2_decision(
         )
 
 
+def _reconcile_source_drift(
+    *,
+    decision: GatewayDecision,
+    gateway_layout: GatewayLayout,
+    environment: dict[str, str],
+) -> tuple[SourceReconciliationResultV1, Path]:
+    """Согласовать один изменившийся Codex из активной капсулы."""
+
+    request, stable_wrapper = _build_source_reconciliation_request_v1(
+        decision=decision,
+        gateway_layout=gateway_layout,
+        python_executable=Path(sys.executable).resolve(strict=True),
+    )
+    process_environment = clean_ordinary_environment(environment)
+    process_environment["PYTHONPATH"] = ""
+    process_environment["PYTHONNOUSERSITE"] = "1"
+    process_environment["NO_COLOR"] = "1"
+
+    def verify_accepted():
+        return _verify_source_reconciliation_acceptance_v1(
+            gateway_layout=gateway_layout,
+            wrapper=Path(__file__).absolute(),
+        )
+
+    def run_process(argv, *, timeout_seconds, max_output_bytes):
+        return _run_source_reconciliation_process_v1(
+            argv,
+            timeout_seconds=timeout_seconds,
+            max_output_bytes=max_output_bytes,
+            environment=process_environment,
+        )
+
+    result = reconcile_source_drift_v1(
+        request,
+        verify_accepted=verify_accepted,
+        run_process=run_process,
+    )
+    return result, stable_wrapper
+
+
 def main() -> int:
     environment = dict(os.environ)
     environment.setdefault("CODEX_HOME", str(Path.home() / ".codex"))
@@ -137,6 +185,41 @@ def main() -> int:
                         "managed activation preparation failed",
                     ) from exc
                 raise
+            if decision.source_drift is not None:
+                if environment.get("CODEX_SMART_RECONCILED_V1") != "1":
+                    try:
+                        result, stable_wrapper = _reconcile_source_drift(
+                            decision=decision,
+                            gateway_layout=gateway_layout,
+                            environment=environment,
+                        )
+                    except Exception:
+                        print(
+                            "codex-smart: SOURCE_UPDATE_RETRY_AFTER; "
+                            "используется последний проверенный снимок",
+                            file=sys.stderr,
+                        )
+                    else:
+                        if result.restart:
+                            restarted = clean_ordinary_environment(environment)
+                            restarted["CODEX_SMART_RECONCILED_V1"] = "1"
+                            os.execve(
+                                str(stable_wrapper),
+                                [str(stable_wrapper), *arguments],
+                                restarted,
+                            )
+                            raise AssertionError("execve unexpectedly returned")
+                        print(
+                            f"codex-smart: SOURCE_UPDATE_{result.outcome}; "
+                            "используется последний проверенный снимок",
+                            file=sys.stderr,
+                        )
+                else:
+                    print(
+                        "codex-smart: SOURCE_UPDATE_RESTART_GUARD; "
+                        "используется последний проверенный снимок",
+                        file=sys.stderr,
+                    )
             return run_permanent_gateway(
                 arguments,
                 resolver=_PreparedDecisionResolver(decision),

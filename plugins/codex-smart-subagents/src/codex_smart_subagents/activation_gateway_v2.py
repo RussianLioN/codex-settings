@@ -71,6 +71,25 @@ _ADAPTIVE_DIRECT_TOOL_ARGUMENTS = (
 )
 _RELEASE = "0.2.0"
 _NAMESPACE = "codex-smart-subagents-v2"
+_INSTALLER_RECEIPT_NAME = "codex-smart-subagents-v2.installer.json"
+_INSTALLER_RECEIPT_KEYS = frozenset(
+    {
+        "schemaVersion",
+        "kind",
+        "sourceDigest",
+        "installationId",
+        "activationId",
+        "codexHome",
+        "codexBinary",
+        "stateHome",
+        "marketplacePath",
+        "registeredMarketplacePath",
+        "links",
+        "marketplaceName",
+        "pluginId",
+        "extensions",
+    }
+)
 _LIFECYCLE_SCHEMA_SHA256 = (
     "f9f03f8bd7437b48c65e027e582caf574cd1b85932941929d9a49ef30d91795d"
 )
@@ -1698,6 +1717,502 @@ def run_permanent_gateway(
         adaptive_environment,
     )
     raise AssertionError("execve unexpectedly returned")
+
+
+def _build_source_reconciliation_request_v1(
+    *,
+    decision: GatewayDecision,
+    gateway_layout: GatewayLayout,
+    python_executable: Path,
+):
+    """Связать один запрос согласования с доказанной активной капсулой."""
+
+    from .source_reconciliation_v1 import SourceReconciliationRequestV1
+
+    if not isinstance(decision, GatewayDecision):
+        raise TypeError("decision must be GatewayDecision")
+    if not isinstance(gateway_layout, GatewayLayout):
+        raise TypeError("gateway_layout must be GatewayLayout")
+    binding = decision.runtime_binding
+    if (
+        decision.state is not GatewayState.READY
+        or decision.source_drift is None
+        or binding is None
+        or decision.activation_id != binding.activation_id
+    ):
+        raise _ProofError(
+            "SOURCE_RECONCILIATION_REQUEST_INVALID",
+            "gateway decision is not a drifted READY activation",
+        )
+    checked_python = _verified_external_executable_v1(
+        python_executable,
+        code="SOURCE_RECONCILIATION_REQUEST_INVALID",
+    )
+    with _shared_installation_lock(gateway_layout.lock_path):
+        manifest = _read_reconciliation_manifest_v1(
+            gateway_layout,
+            expected_activation_id=binding.activation_id,
+            expected_state_home=binding.state_home,
+            expected_marketplace=binding.marketplace_path,
+        )
+        installer, stable_wrapper = _read_reconciliation_installer_v1(
+            gateway_layout,
+            expected_installation_id=str(manifest["installationId"]),
+            expected_activation_id=binding.activation_id,
+            expected_state_home=binding.state_home,
+            expected_marketplace=binding.marketplace_path,
+            expected_codex_binary=decision.source_drift.lexical_path,
+        )
+    source = manifest["sourceLocator"]
+    snapshot = manifest["codexSnapshot"]
+    if (
+        source["lexicalPath"] != str(decision.source_drift.lexical_path)
+        or Path(str(source["resolvedPathAtCapture"])).resolve(strict=True)
+        != decision.source_drift.resolved_path
+        or source["sourceObservedSha256"]
+        != decision.source_drift.expected_sha256
+        or snapshot["sha256"] != decision.source_drift.expected_sha256
+        or snapshot["absolutePath"] != str(decision.executable)
+    ):
+        raise _ProofError(
+            "SOURCE_RECONCILIATION_REQUEST_INVALID",
+            "fresh manifest differs from the proven source drift",
+        )
+    source_root = binding.marketplace_path
+    expected_source_root = (
+        gateway_layout.managed_root
+        / "activations"
+        / binding.activation_id
+        / "marketplace"
+    )
+    if (
+        source_root != expected_source_root
+        or source_root.resolve(strict=True)
+        != gateway_layout.marketplace_link.resolve(strict=True)
+    ):
+        raise _ProofError(
+            "SOURCE_RECONCILIATION_REQUEST_INVALID",
+            "updater marketplace is not the active immutable activation",
+        )
+    installer_path = source_root / "scripts" / "install_adaptive_subagents.py"
+    _verify_owned_executable_v1(
+        installer_path,
+        code="SOURCE_RECONCILIATION_REQUEST_INVALID",
+    )
+    return (
+        SourceReconciliationRequestV1(
+            drift=decision.source_drift,
+            updater_activation_id=binding.activation_id,
+            updater_release=str(manifest["release"]),
+            updater_source_digest=str(installer["sourceDigest"]),
+            source_root=source_root,
+            installer_path=installer_path,
+            python_executable=checked_python,
+            codex_home=gateway_layout.codex_home,
+            bin_dir=stable_wrapper.parent,
+            state_home=binding.state_home,
+        ),
+        stable_wrapper,
+    )
+
+
+def _verify_source_reconciliation_acceptance_v1(
+    *,
+    gateway_layout: GatewayLayout,
+    wrapper: Path,
+):
+    """Заново доказать принятую активацию и вернуть только свежие факты."""
+
+    from .source_reconciliation_v1 import SourceReconciliationAcceptanceV1
+
+    if not isinstance(gateway_layout, GatewayLayout):
+        raise TypeError("gateway_layout must be GatewayLayout")
+    if not isinstance(wrapper, Path) or not wrapper.is_absolute():
+        raise TypeError("wrapper must be an absolute Path")
+    decision = ActivationResolver(
+        layout=gateway_layout,
+        wrapper=wrapper,
+    ).resolve_persisted_activation()
+    binding = decision.runtime_binding
+    if (
+        decision.state is not GatewayState.READY
+        or decision.source_drift is not None
+        or binding is None
+        or decision.activation_id != binding.activation_id
+    ):
+        raise _ProofError(
+            "SOURCE_RECONCILIATION_ACCEPTANCE_INVALID",
+            "fresh persisted activation is not READY without source drift",
+        )
+    with _shared_installation_lock(gateway_layout.lock_path):
+        manifest = _read_reconciliation_manifest_v1(
+            gateway_layout,
+            expected_activation_id=binding.activation_id,
+            expected_state_home=binding.state_home,
+            expected_marketplace=binding.marketplace_path,
+        )
+        installer, _stable_wrapper = _read_reconciliation_installer_v1(
+            gateway_layout,
+            expected_installation_id=str(manifest["installationId"]),
+            expected_activation_id=binding.activation_id,
+            expected_state_home=binding.state_home,
+            expected_marketplace=binding.marketplace_path,
+            expected_codex_binary=Path(
+                str(manifest["sourceLocator"]["lexicalPath"])
+            ),
+        )
+        source = manifest["sourceLocator"]
+        snapshot = manifest["codexSnapshot"]
+        lexical = _absolute_path(
+            source["lexicalPath"],
+            "SOURCE_RECONCILIATION_ACCEPTANCE_INVALID",
+        )
+        captured = _absolute_path(
+            source["resolvedPathAtCapture"],
+            "SOURCE_RECONCILIATION_ACCEPTANCE_INVALID",
+        )
+        source_sha256 = _sha256(
+            source["sourceObservedSha256"],
+            "SOURCE_RECONCILIATION_ACCEPTANCE_INVALID",
+        )
+        resolved = lexical.resolve(strict=True)
+        if (
+            resolved != captured.resolve(strict=True)
+            or _stable_external_file_sha256_v1(
+                resolved,
+                executable=True,
+                code="SOURCE_RECONCILIATION_ACCEPTANCE_INVALID",
+            )
+            != source_sha256
+        ):
+            raise _ProofError(
+                "SOURCE_RECONCILIATION_ACCEPTANCE_INVALID",
+                "live source differs from the accepted locator",
+            )
+        snapshot_path = _absolute_path(
+            snapshot["absolutePath"],
+            "SOURCE_RECONCILIATION_ACCEPTANCE_INVALID",
+        )
+        snapshot_sha256 = _sha256(
+            snapshot["sha256"],
+            "SOURCE_RECONCILIATION_ACCEPTANCE_INVALID",
+        )
+        _verify_private_file(
+            snapshot_path,
+            expected_mode=0o500,
+            expected_sha256=snapshot_sha256,
+            code="SOURCE_RECONCILIATION_ACCEPTANCE_INVALID",
+        )
+        if snapshot_sha256 != source_sha256:
+            raise _ProofError(
+                "SOURCE_RECONCILIATION_ACCEPTANCE_INVALID",
+                "accepted snapshot does not contain the observed source",
+            )
+    return SourceReconciliationAcceptanceV1(
+        activation_id=binding.activation_id,
+        source_lexical_path=lexical,
+        source_resolved_path=resolved,
+        source_sha256=source_sha256,
+        snapshot_sha256=snapshot_sha256,
+        installer_receipt_activation_id=str(installer["activationId"]),
+    )
+
+
+def _run_source_reconciliation_process_v1(
+    argv: Sequence[str],
+    *,
+    timeout_seconds: float,
+    max_output_bytes: int,
+    environment: Mapping[str, str],
+):
+    """Выполнить установщик в отдельной надзираемой группе процесса."""
+
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or float(timeout_seconds) != 180.0
+    ):
+        raise ValueError("source reconciliation timeout must be exactly 180 seconds")
+    if type(max_output_bytes) is not int or max_output_bytes != 1024 * 1024:
+        raise ValueError("source reconciliation output limit must be exactly 1 MiB")
+    if not isinstance(environment, Mapping) or any(
+        type(key) is not str
+        or type(value) is not str
+        or "\0" in key
+        or "\0" in value
+        for key, value in environment.items()
+    ):
+        raise TypeError("source reconciliation environment is invalid")
+    deadline = operation_deadline_v2.OperationDeadlineV2.start(
+        operation="source-reconciliation-process",
+        timeout_seconds=185.0,
+        timeout_code="SOURCE_RECONCILIATION_PROCESS_DEADLINE_EXCEEDED",
+    )
+    supervisor = (
+        operation_process_group_supervisor_v2.OperationProcessGroupSupervisorV2()
+    )
+    with (
+        operation_deadline_v2.scoped_current_deadline_v2(deadline),
+        operation_process_group_supervisor_v2.
+        scoped_current_process_group_supervisor_v2(supervisor),
+    ):
+        result = supervised_subprocess_v2.run_supervised_command_v2(
+            argv=argv,
+            label="source-reconciliation-installer",
+            stdin=b"",
+            local_timeout_seconds=180.0,
+            cleanup_wait_seconds=5.0,
+            max_output_bytes=1024 * 1024,
+            env=dict(environment),
+            deadline=deadline,
+            supervisor=supervisor,
+        )
+    supervisor.assert_operation_quiescent()
+    return result
+
+
+def _read_reconciliation_manifest_v1(
+    gateway_layout: GatewayLayout,
+    *,
+    expected_activation_id: str,
+    expected_state_home: Path,
+    expected_marketplace: Path,
+) -> dict[str, object]:
+    _verify_directory(
+        gateway_layout.codex_home,
+        private=False,
+        code="SOURCE_RECONCILIATION_MANIFEST_INVALID",
+    )
+    _verify_directory(
+        gateway_layout.manifest_root,
+        private=True,
+        code="SOURCE_RECONCILIATION_MANIFEST_INVALID",
+    )
+    _verify_directory(
+        gateway_layout.managed_root,
+        private=True,
+        code="SOURCE_RECONCILIATION_MANIFEST_INVALID",
+    )
+    if _path_exists_no_follow(gateway_layout.journal_path):
+        raise _ProofError(
+            "SOURCE_RECONCILIATION_MANIFEST_INVALID",
+            "installation journal is present",
+        )
+    manifest = _read_owned_json(
+        gateway_layout.manifest_path,
+        expected_mode=0o600,
+        code="SOURCE_RECONCILIATION_MANIFEST_INVALID",
+    )
+    _validate_reconciliation_manifest_document_v1(
+        manifest,
+        codex_home=gateway_layout.codex_home,
+    )
+    active = manifest["activeActivation"]
+    expected_path = (
+        gateway_layout.managed_root
+        / "activations"
+        / expected_activation_id
+        / "marketplace"
+    )
+    if (
+        active["activationId"] != expected_activation_id
+        or manifest["stateHome"] != str(expected_state_home)
+        or expected_marketplace != expected_path
+        or gateway_layout.marketplace_link.resolve(strict=True)
+        != expected_marketplace.resolve(strict=True)
+    ):
+        raise _ProofError(
+            "SOURCE_RECONCILIATION_MANIFEST_INVALID",
+            "active manifest binding differs",
+        )
+    return manifest
+
+
+def _validate_reconciliation_manifest_document_v1(
+    manifest: dict[str, object],
+    *,
+    codex_home: Path,
+) -> None:
+    code = "SOURCE_RECONCILIATION_MANIFEST_INVALID"
+    _exact_keys(manifest, _MANIFEST_KEYS, code)
+    constants = {
+        "schemaVersion": 2,
+        "release": _RELEASE,
+        "pluginId": "codex-smart-subagents",
+        "marketplaceName": "codex-settings-adaptive",
+        "databaseSchemaVersion": 2,
+    }
+    if any(manifest[name] != expected for name, expected in constants.items()):
+        raise _ProofError(code, "manifest constants differ")
+    _identifier(manifest["installationId"], "ins2_", 32, code)
+    _identifier(manifest["lastCommittedOperation"], "op2_", 32, code)
+    _absolute_path(manifest["stateHome"], code)
+    _validate_source_locator(manifest["sourceLocator"], code)
+    _validate_snapshot_locator(manifest["codexSnapshot"], code)
+    _validate_activation_pointer(manifest["activeActivation"], code)
+    previous = manifest["previousActivation"]
+    if previous is not None:
+        _validate_activation_pointer(previous, code)
+    _sha256(manifest["routingPolicyFingerprint"], code)
+    _sha256(manifest["bundledCatalogFingerprint"], code)
+    _validate_artifacts(manifest["artifacts"], codex_home)
+    _validate_original_backup(manifest["originalBackup"], code)
+    if type(manifest["extensions"]) is not dict:
+        raise _ProofError(code, "manifest extensions are invalid")
+
+
+def _read_reconciliation_installer_v1(
+    gateway_layout: GatewayLayout,
+    *,
+    expected_installation_id: str,
+    expected_activation_id: str,
+    expected_state_home: Path,
+    expected_marketplace: Path,
+    expected_codex_binary: Path,
+) -> tuple[dict[str, object], Path]:
+    code = "SOURCE_RECONCILIATION_INSTALLER_RECEIPT_INVALID"
+    receipt_path = gateway_layout.manifest_root / _INSTALLER_RECEIPT_NAME
+    if os.lstat(receipt_path).st_size > 64 * 1024:
+        raise _ProofError(code, "installer receipt exceeds the size limit")
+    receipt = _read_owned_json(
+        receipt_path,
+        expected_mode=0o600,
+        code=code,
+    )
+    _exact_keys(receipt, set(_INSTALLER_RECEIPT_KEYS), code)
+    if (
+        receipt["schemaVersion"] != 2
+        or receipt["kind"] != "codex-smart-installer-receipt/v2"
+        or receipt["installationId"] != expected_installation_id
+        or receipt["codexHome"] != str(gateway_layout.codex_home)
+        or receipt["stateHome"] != str(expected_state_home)
+        or receipt["activationId"] != expected_activation_id
+        or receipt["marketplacePath"] != str(gateway_layout.marketplace_link)
+        or receipt["registeredMarketplacePath"] != str(expected_marketplace)
+        or receipt["codexBinary"] != str(expected_codex_binary)
+        or receipt["marketplaceName"] != "codex-settings-adaptive"
+        or receipt["pluginId"]
+        != "codex-smart-subagents@codex-settings-adaptive"
+        or receipt["extensions"] != {}
+    ):
+        raise _ProofError(code, "installer receipt binding differs")
+    _identifier(receipt["installationId"], "ins2_", 32, code)
+    _identifier(receipt["activationId"], "act2_", 64, code)
+    _sha256(receipt["sourceDigest"], code)
+    registered = _absolute_path(receipt["registeredMarketplacePath"], code)
+    if (
+        registered != expected_marketplace
+        or registered.resolve(strict=True)
+        != gateway_layout.marketplace_link.resolve(strict=True)
+    ):
+        raise _ProofError(code, "registered marketplace is not active")
+    links = receipt["links"]
+    if type(links) is not list or len(links) != 2:
+        raise _ProofError(code, "installer links are incomplete")
+    expected_names = {"codex-smart", "codex-smart-subagents-admin"}
+    observed: dict[str, Path] = {}
+    bin_dir: Path | None = None
+    lexical_bin = (
+        gateway_layout.marketplace_link
+        / "plugins"
+        / "codex-smart-subagents"
+        / "bin"
+    )
+    registered_bin = (
+        expected_marketplace
+        / "plugins"
+        / "codex-smart-subagents"
+        / "bin"
+    ).resolve(strict=True)
+    for item in links:
+        _exact_keys(item, {"path", "target"}, code)
+        path = _absolute_path(item["path"], code)
+        target = _absolute_path(item["target"], code)
+        if (
+            path.name not in expected_names
+            or path.name in observed
+            or target != lexical_bin / path.name
+            or (bin_dir is not None and path.parent != bin_dir)
+        ):
+            raise _ProofError(code, "installer link identity differs")
+        bin_dir = path.parent
+        info = os.lstat(path)
+        target_info = os.lstat(target)
+        if (
+            not stat.S_ISLNK(info.st_mode)
+            or info.st_uid != os.getuid()
+            or os.readlink(path) != str(target)
+            or not stat.S_ISREG(target_info.st_mode)
+            or target_info.st_uid != os.getuid()
+            or not os.access(target, os.X_OK)
+            or target.resolve(strict=True).parent != registered_bin
+        ):
+            raise _ProofError(code, "installed link or target differs")
+        observed[path.name] = path
+    if set(observed) != expected_names or bin_dir is None:
+        raise _ProofError(code, "installer links are incomplete")
+    _verify_directory(bin_dir, private=False, code=code)
+    stable_wrapper = bin_dir / "codex-smart"
+    expected_wrapper = lexical_bin / "codex-smart"
+    if (
+        observed["codex-smart"] != stable_wrapper
+        or os.readlink(stable_wrapper) != str(expected_wrapper)
+        or stable_wrapper.resolve(strict=True)
+        != (registered_bin / "codex-smart").resolve(strict=True)
+    ):
+        raise _ProofError(code, "stable wrapper does not target active marketplace")
+    return receipt, stable_wrapper
+
+
+def _verified_external_executable_v1(path: Path, *, code: str) -> Path:
+    if not isinstance(path, Path) or not path.is_absolute():
+        raise _ProofError(code, "executable path is not absolute")
+    resolved = path.resolve(strict=True)
+    info = os.lstat(resolved)
+    if not stat.S_ISREG(info.st_mode) or not os.access(resolved, os.X_OK):
+        raise _ProofError(code, "external executable is unavailable")
+    return resolved
+
+
+def _verify_owned_executable_v1(path: Path, *, code: str) -> None:
+    info = os.lstat(path)
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.getuid()
+        or info.st_nlink != 1
+        or stat.S_IMODE(info.st_mode) != 0o500
+        or not os.access(path, os.X_OK)
+    ):
+        raise _ProofError(code, "owned executable metadata is invalid")
+
+
+def _stable_external_file_sha256_v1(
+    path: Path,
+    *,
+    executable: bool,
+    code: str,
+) -> str:
+    before = os.lstat(path)
+    digest = _hash_file(path)
+    after = os.lstat(path)
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or (executable and not os.access(path, os.X_OK))
+        or (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        )
+        != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        )
+    ):
+        raise _ProofError(code, "external file changed during hashing")
+    return digest
 
 
 def _read_owned_json(

@@ -1202,6 +1202,18 @@ class _ActivationFixture:
         installed_schema.parent.mkdir(parents=True, mode=0o700)
         shutil.copyfile(self.schema_artifact, installed_schema)
         installed_schema.chmod(0o600)
+        installed_bin = plugin_root / "bin"
+        installed_bin.mkdir(mode=0o700)
+        for name in ("codex-smart", "codex-smart-subagents-admin"):
+            entrypoint = installed_bin / name
+            entrypoint.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            entrypoint.chmod(0o500)
+        capsule_installer = (
+            self.marketplace / "scripts" / "install_adaptive_subagents.py"
+        )
+        capsule_installer.parent.mkdir(mode=0o700)
+        capsule_installer.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        capsule_installer.chmod(0o500)
         for directory in (
             self.layout.managed_root / "activations",
             activation_seed,
@@ -1212,6 +1224,8 @@ class _ActivationFixture:
             plugin_root / "src",
             plugin_root / "src/codex_smart_subagents",
             plugin_root / "src/codex_smart_subagents/schema",
+            installed_bin,
+            capsule_installer.parent,
         ):
             directory.chmod(0o700)
 
@@ -1301,6 +1315,43 @@ class _ActivationFixture:
         self.layout.marketplace_link.symlink_to(
             f"activations/{self.activation_id}/marketplace"
         )
+        self.operator_bin = self.root / "bin"
+        self.operator_bin.mkdir(mode=0o700)
+        self.operator_links: dict[str, Path] = {}
+        link_documents = []
+        for name in ("codex-smart", "codex-smart-subagents-admin"):
+            link = self.operator_bin / name
+            target = (
+                self.layout.marketplace_link
+                / "plugins"
+                / "codex-smart-subagents"
+                / "bin"
+                / name
+            )
+            link.symlink_to(target)
+            self.operator_links[name] = link
+            link_documents.append({"path": str(link), "target": str(target)})
+        self.source_digest = "a" * 64
+        self.installer_receipt_path = (
+            self.layout.manifest_root / "codex-smart-subagents-v2.installer.json"
+        )
+        self.installer_receipt = {
+            "schemaVersion": 2,
+            "kind": "codex-smart-installer-receipt/v2",
+            "sourceDigest": self.source_digest,
+            "installationId": self.installation_id,
+            "activationId": self.activation_id,
+            "codexHome": str(self.codex_home),
+            "codexBinary": str(self.source),
+            "stateHome": str(self.state_home),
+            "marketplacePath": str(self.layout.marketplace_link),
+            "registeredMarketplacePath": str(self.marketplace),
+            "links": link_documents,
+            "marketplaceName": "codex-settings-adaptive",
+            "pluginId": "codex-smart-subagents@codex-settings-adaptive",
+            "extensions": {},
+        }
+        _write_json(self.installer_receipt_path, self.installer_receipt)
 
         self.socket_path = self.state_home / "controller.sock"
         self.controller_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -1861,6 +1912,194 @@ class ActivationResolverTests(unittest.TestCase):
         self.assertIs(GatewayState.ORDINARY, decision.state)
         self.assertEqual("ACTIVATION_PROOF_INVALID", decision.reason_code)
         self.assertIsNone(decision.source_drift)
+
+
+class SourceReconciliationGatewayV1Tests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fixture = _ActivationFixture()
+
+    def tearDown(self) -> None:
+        self.fixture.close()
+
+    def test_active_manifest_and_installer_receipt_bind_request_and_wrapper(
+        self,
+    ) -> None:
+        self.fixture.replace_live_codex(b"compatible-new-codex")
+        decision = self.fixture.resolver().resolve_persisted_activation()
+        self.assertIsNotNone(decision.source_drift)
+
+        request, stable_wrapper = (
+            gateway_module._build_source_reconciliation_request_v1(
+                decision=decision,
+                gateway_layout=self.fixture.layout,
+                python_executable=Path(sys.executable).resolve(strict=True),
+            )
+        )
+
+        self.assertIs(decision.source_drift, request.drift)
+        self.assertEqual(self.fixture.activation_id, request.updater_activation_id)
+        self.assertEqual("0.2.0", request.updater_release)
+        self.assertEqual(self.fixture.source_digest, request.updater_source_digest)
+        self.assertEqual(self.fixture.marketplace, request.source_root)
+        self.assertEqual(
+            self.fixture.marketplace / "scripts/install_adaptive_subagents.py",
+            request.installer_path,
+        )
+        self.assertEqual(self.fixture.operator_bin, request.bin_dir)
+        self.assertEqual(self.fixture.state_home, request.state_home)
+        self.assertEqual(
+            self.fixture.operator_links["codex-smart"],
+            stable_wrapper,
+        )
+
+    def test_request_rejects_links_without_one_absolute_shared_bin_directory(
+        self,
+    ) -> None:
+        self.fixture.replace_live_codex(b"compatible-new-codex")
+        decision = self.fixture.resolver().resolve_persisted_activation()
+        changed = copy.deepcopy(self.fixture.installer_receipt)
+        changed["links"][1]["path"] = str(
+            self.fixture.root / "other-bin" / "codex-smart-subagents-admin"
+        )
+        _write_json(self.fixture.installer_receipt_path, changed)
+
+        with self.assertRaisesRegex(ValueError, "INSTALLER_RECEIPT"):
+            gateway_module._build_source_reconciliation_request_v1(
+                decision=decision,
+                gateway_layout=self.fixture.layout,
+                python_executable=Path(sys.executable).resolve(strict=True),
+            )
+
+    def test_stable_wrapper_must_point_to_active_marketplace_wrapper(self) -> None:
+        self.fixture.replace_live_codex(b"compatible-new-codex")
+        decision = self.fixture.resolver().resolve_persisted_activation()
+        stable = self.fixture.operator_links["codex-smart"]
+        stable.unlink()
+        stable.symlink_to(
+            self.fixture.layout.marketplace_link
+            / "plugins/codex-smart-subagents/bin/codex-smart-subagents-admin"
+        )
+
+        with self.assertRaisesRegex(ValueError, "INSTALLER_RECEIPT"):
+            gateway_module._build_source_reconciliation_request_v1(
+                decision=decision,
+                gateway_layout=self.fixture.layout,
+                python_executable=Path(sys.executable).resolve(strict=True),
+            )
+
+    def test_acceptance_re_resolves_and_re_reads_full_new_binding(self) -> None:
+        decision = self.fixture.resolver().resolve_persisted_activation()
+        resolver_calls: list[tuple[GatewayLayout, Path]] = []
+
+        class Resolver:
+            def __init__(inner_self, *, layout, wrapper, **_kwargs) -> None:
+                resolver_calls.append((layout, wrapper))
+
+            def resolve_persisted_activation(inner_self):
+                return decision
+
+        with patch.object(gateway_module, "ActivationResolver", Resolver):
+            acceptance = (
+                gateway_module._verify_source_reconciliation_acceptance_v1(
+                    gateway_layout=self.fixture.layout,
+                    wrapper=self.fixture.wrapper,
+                )
+            )
+
+        self.assertEqual(
+            [(self.fixture.layout, self.fixture.wrapper)],
+            resolver_calls,
+        )
+        self.assertEqual(self.fixture.activation_id, acceptance.activation_id)
+        self.assertEqual(self.fixture.source, acceptance.source_lexical_path)
+        self.assertEqual(self.fixture.source, acceptance.source_resolved_path)
+        self.assertEqual(self.fixture.source_sha256, acceptance.source_sha256)
+        self.assertEqual(self.fixture.source_sha256, acceptance.snapshot_sha256)
+        self.assertEqual(
+            self.fixture.activation_id,
+            acceptance.installer_receipt_activation_id,
+        )
+
+    def test_acceptance_rejects_ready_proof_with_remaining_source_drift(self) -> None:
+        self.fixture.replace_live_codex(b"compatible-new-codex")
+        decision = self.fixture.resolver().resolve_persisted_activation()
+
+        class Resolver:
+            def __init__(inner_self, **_kwargs) -> None:
+                pass
+
+            def resolve_persisted_activation(inner_self):
+                return decision
+
+        with (
+            patch.object(gateway_module, "ActivationResolver", Resolver),
+            self.assertRaisesRegex(ValueError, "SOURCE_RECONCILIATION_ACCEPTANCE"),
+        ):
+            gateway_module._verify_source_reconciliation_acceptance_v1(
+                gateway_layout=self.fixture.layout,
+                wrapper=self.fixture.wrapper,
+            )
+
+    def test_process_adapter_uses_180_seconds_one_mib_and_group_supervision(
+        self,
+    ) -> None:
+        observed: dict[str, object] = {}
+
+        def run_supervised(**kwargs):
+            observed.update(kwargs)
+            return gateway_module.supervised_subprocess_v2.SupervisedCommandResultV2(
+                argv=tuple(kwargs["argv"]),
+                returncode=0,
+                stdout=b"{}\n",
+                stderr=b"",
+            )
+
+        environment = {"PATH": "/usr/bin", "PYTHONNOUSERSITE": "1"}
+        with patch.object(
+            gateway_module.supervised_subprocess_v2,
+            "run_supervised_command_v2",
+            side_effect=run_supervised,
+        ):
+            result = gateway_module._run_source_reconciliation_process_v1(
+                (str(Path(sys.executable).resolve(strict=True)), "-c", "pass"),
+                timeout_seconds=180.0,
+                max_output_bytes=1024 * 1024,
+                environment=environment,
+            )
+
+        self.assertEqual(0, result.returncode)
+        self.assertEqual(180.0, observed["local_timeout_seconds"])
+        self.assertEqual(5.0, observed["cleanup_wait_seconds"])
+        self.assertEqual(1024 * 1024, observed["max_output_bytes"])
+        self.assertEqual(environment, observed["env"])
+        deadline = observed["deadline"]
+        self.assertIsInstance(deadline, OperationDeadlineV2)
+        self.assertEqual(
+            185_000_000_000,
+            deadline.configured_timeout_nanoseconds,
+        )
+        self.assertIsInstance(
+            observed["supervisor"],
+            gateway_module.operation_process_group_supervisor_v2.
+            OperationProcessGroupSupervisorV2,
+        )
+
+    def test_process_adapter_rejects_weaker_limits(self) -> None:
+        with self.assertRaises(ValueError):
+            gateway_module._run_source_reconciliation_process_v1(
+                (str(Path(sys.executable).resolve(strict=True)), "-c", "pass"),
+                timeout_seconds=179.0,
+                max_output_bytes=1024 * 1024,
+                environment={},
+            )
+
+
+class ActivationResolverRuntimeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fixture = _ActivationFixture()
+
+    def tearDown(self) -> None:
+        self.fixture.close()
 
     def test_fast_pinned_health_check_reuses_the_proven_controller_protocol(
         self,

@@ -51,6 +51,224 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    def _ready_snapshot_decision(self) -> GatewayDecision:
+        snapshot = self.root / "snapshot-codex"
+        snapshot.write_text("#!/bin/sh\n", encoding="utf-8")
+        snapshot.chmod(0o500)
+        live_codex = self.root / "live-codex"
+        live_codex.write_text("#!/bin/sh\n", encoding="utf-8")
+        live_codex.chmod(0o500)
+        return GatewayDecision(
+            state=GatewayState.READY,
+            reason_code="READY",
+            executable=snapshot,
+            coordinator={"model": "gpt-5.6-terra", "reasoning_effort": "medium"},
+            catalog_schema_version=1,
+            activation_id="act2_" + "a" * 64,
+            gate_fingerprint="b" * 64,
+            activation_gate={"gateFingerprint": "b" * 64},
+            catalog_path=self.root / "adaptive-subagents.toml",
+            source_drift=SourceDriftV1(
+                lexical_path=live_codex,
+                resolved_path=live_codex,
+                observed_sha256="c" * 64,
+                expected_sha256="d" * 64,
+            ),
+        )
+
+    def test_source_drift_reconciles_and_restarts_stable_wrapper_once(self) -> None:
+        decision = self._ready_snapshot_decision()
+        stable_wrapper = self.root / "bin" / "codex-smart"
+        stable_wrapper.parent.mkdir(mode=0o700)
+        stable_wrapper.symlink_to(WRAPPER)
+        reconcile_calls: list[tuple[GatewayDecision, object]] = []
+
+        class ExecCalled(RuntimeError):
+            def __init__(self, executable, arguments, environment) -> None:
+                self.executable = executable
+                self.arguments = tuple(arguments)
+                self.environment = dict(environment)
+
+        def reconcile(**kwargs):
+            reconcile_calls.append((kwargs["decision"], kwargs["gateway_layout"]))
+            return (
+                SimpleNamespace(outcome="ACCEPTED", restart=True),
+                stable_wrapper,
+            )
+
+        def execve(executable, arguments, environment):
+            raise ExecCalled(executable, arguments, environment)
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "CODEX_HOME": str(self.codex_home),
+                    "CODEX_SMART_STALE": "remove-me",
+                    "PATH": "/usr/bin",
+                },
+                clear=True,
+            ),
+            mock.patch.object(sys, "argv", [str(WRAPPER), "исправь задачу"]),
+            mock.patch.object(os, "execve", side_effect=execve),
+            mock.patch.dict(
+                self.globals,
+                {
+                    "v2_gateway_state_present": lambda _layout: True,
+                    "_prepare_v2_decision": lambda **_kwargs: decision,
+                    "_reconcile_source_drift": reconcile,
+                    "run_permanent_gateway": lambda *_args, **_kwargs: self.fail(
+                        "accepted reconciliation reached the old gateway"
+                    ),
+                },
+            ),
+            self.assertRaises(ExecCalled) as caught,
+        ):
+            self.globals["main"]()
+
+        self.assertEqual(1, len(reconcile_calls))
+        self.assertIs(decision, reconcile_calls[0][0])
+        self.assertEqual(str(stable_wrapper), caught.exception.executable)
+        self.assertEqual(
+            (str(stable_wrapper), "исправь задачу"),
+            caught.exception.arguments,
+        )
+        self.assertEqual(
+            "1",
+            caught.exception.environment["CODEX_SMART_RECONCILED_V1"],
+        )
+        self.assertNotIn("CODEX_SMART_STALE", caught.exception.environment)
+        self.assertEqual("/usr/bin", caught.exception.environment["PATH"])
+
+    def test_update_failure_warns_once_and_continues_exact_snapshot(self) -> None:
+        decision = self._ready_snapshot_decision()
+        gateway_decisions: list[GatewayDecision] = []
+        error = StringIO()
+
+        def gateway(_arguments, **kwargs):
+            gateway_decisions.append(kwargs["resolver"].resolve())
+            return 17
+
+        for result in (
+            SimpleNamespace(outcome="INCOMPATIBLE", restart=False),
+            SimpleNamespace(outcome="RETRY_AFTER", restart=False),
+        ):
+            with self.subTest(outcome=result.outcome):
+                error.seek(0)
+                error.truncate(0)
+                gateway_decisions.clear()
+                with (
+                    mock.patch.dict(
+                        os.environ,
+                        {"CODEX_HOME": str(self.codex_home)},
+                        clear=True,
+                    ),
+                    mock.patch.object(sys, "argv", [str(WRAPPER), "задача"]),
+                    mock.patch.dict(
+                        self.globals,
+                        {
+                            "v2_gateway_state_present": lambda _layout: True,
+                            "_prepare_v2_decision": lambda **_kwargs: decision,
+                            "_reconcile_source_drift": lambda **_kwargs: (
+                                result,
+                                self.root / "bin" / "codex-smart",
+                            ),
+                            "run_permanent_gateway": gateway,
+                        },
+                    ),
+                    redirect_stderr(error),
+                ):
+                    self.assertEqual(17, self.globals["main"]())
+
+                self.assertEqual([decision], gateway_decisions)
+                self.assertEqual(
+                    "codex-smart: "
+                    f"SOURCE_UPDATE_{result.outcome}; "
+                    "используется последний проверенный снимок\n",
+                    error.getvalue(),
+                )
+
+    def test_reconciliation_error_warns_once_and_continues_snapshot(self) -> None:
+        decision = self._ready_snapshot_decision()
+        gateway_decisions: list[GatewayDecision] = []
+        error = StringIO()
+
+        def fail(**_kwargs):
+            raise OSError("private updater failure")
+
+        def gateway(_arguments, **kwargs):
+            gateway_decisions.append(kwargs["resolver"].resolve())
+            return 17
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"CODEX_HOME": str(self.codex_home)},
+                clear=True,
+            ),
+            mock.patch.object(sys, "argv", [str(WRAPPER), "задача"]),
+            mock.patch.dict(
+                self.globals,
+                {
+                    "v2_gateway_state_present": lambda _layout: True,
+                    "_prepare_v2_decision": lambda **_kwargs: decision,
+                    "_reconcile_source_drift": fail,
+                    "run_permanent_gateway": gateway,
+                },
+            ),
+            redirect_stderr(error),
+        ):
+            self.assertEqual(17, self.globals["main"]())
+
+        self.assertEqual([decision], gateway_decisions)
+        self.assertEqual(
+            "codex-smart: SOURCE_UPDATE_RETRY_AFTER; "
+            "используется последний проверенный снимок\n",
+            error.getvalue(),
+        )
+        self.assertNotIn("private updater failure", error.getvalue())
+
+    def test_restart_guard_never_runs_reconciler_twice(self) -> None:
+        decision = self._ready_snapshot_decision()
+        gateway_decisions: list[GatewayDecision] = []
+        error = StringIO()
+
+        def gateway(_arguments, **kwargs):
+            gateway_decisions.append(kwargs["resolver"].resolve())
+            return 17
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "CODEX_HOME": str(self.codex_home),
+                    "CODEX_SMART_RECONCILED_V1": "1",
+                },
+                clear=True,
+            ),
+            mock.patch.object(sys, "argv", [str(WRAPPER), "задача"]),
+            mock.patch.dict(
+                self.globals,
+                {
+                    "v2_gateway_state_present": lambda _layout: True,
+                    "_prepare_v2_decision": lambda **_kwargs: decision,
+                    "_reconcile_source_drift": lambda **_kwargs: self.fail(
+                        "restart guard invoked reconciliation"
+                    ),
+                    "run_permanent_gateway": gateway,
+                },
+            ),
+            redirect_stderr(error),
+        ):
+            self.assertEqual(17, self.globals["main"]())
+
+        self.assertEqual([decision], gateway_decisions)
+        self.assertEqual(
+            "codex-smart: SOURCE_UPDATE_RESTART_GUARD; "
+            "используется последний проверенный снимок\n",
+            error.getvalue(),
+        )
+
     def test_v2_path_passes_exact_supervisor_decision_to_gateway(self) -> None:
         snapshot = self.root / "snapshot-codex"
         snapshot.write_text("#!/bin/sh\n", encoding="utf-8")
@@ -108,6 +326,7 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
             return 17
 
         globals_ = self.globals
+        error = StringIO()
         self_state_home = self.root / "external-state"
         self_state_home.mkdir(mode=0o700)
         with (
@@ -121,9 +340,14 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
                     "v2_gateway_state_present": lambda _layout: True,
                     "ActivationResolver": Resolver,
                     "ControllerSupervisorV2": Supervisor,
+                    "_reconcile_source_drift": lambda **_kwargs: (
+                        SimpleNamespace(outcome="RETRY_AFTER", restart=False),
+                        self.root / "bin/codex-smart",
+                    ),
                     "run_permanent_gateway": gateway,
                 },
             ),
+            redirect_stderr(error),
         ):
             self.assertEqual(17, globals_["main"]())
 
@@ -132,6 +356,7 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
             self_state_home,
             supervisor_arguments["state_home"],
         )
+        self.assertIn("SOURCE_UPDATE_RETRY_AFTER", error.getvalue())
 
     def test_service_and_explicit_native_calls_bypass_supervisor(self) -> None:
         for arguments in (
@@ -193,6 +418,9 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
                             "v2_gateway_state_present": lambda _layout: True,
                             "ActivationResolver": Resolver,
                             "ControllerSupervisorV2": Supervisor,
+                            "_reconcile_source_drift": lambda **_kwargs: self.fail(
+                                "native invocation started reconciliation"
+                            ),
                             "run_permanent_gateway": gateway,
                         },
                     ),
@@ -241,6 +469,7 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
                     "_prepare_v2_decision": unexpected("preparation"),
                     "ControllerSupervisorV2": unexpected("supervisor"),
                     "ControllerProcessConfig": unexpected("controller"),
+                    "_reconcile_source_drift": unexpected("reconciliation"),
                     "run_permanent_gateway": gateway,
                 },
             ),

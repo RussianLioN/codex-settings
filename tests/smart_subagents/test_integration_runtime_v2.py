@@ -5,6 +5,7 @@ import hashlib
 import json
 import importlib.util
 import os
+import runpy
 import socket
 import sqlite3
 import stat
@@ -13,6 +14,9 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from contextlib import redirect_stderr
+from io import StringIO
+from types import SimpleNamespace
 from typing import Mapping
 from unittest import mock
 
@@ -36,6 +40,11 @@ from codex_smart_subagents.activation_gateway_v2 import (  # noqa: E402
     GatewayDecision,
     GatewayRuntimeBindingV2,
     GatewayState,
+    SourceDriftV1,
+)
+from codex_smart_subagents import activation_gateway_v2 as gateway_module  # noqa: E402
+from codex_smart_subagents.supervised_subprocess_v2 import (  # noqa: E402
+    SupervisedCommandOutputLimitExceededV2,
 )
 from codex_smart_subagents import operation_deadline_v2  # noqa: E402
 from codex_smart_subagents.mcp_contracts_v2 import (  # noqa: E402
@@ -1867,6 +1876,113 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
                 ),
             )
         )
+
+    def test_source_reconciliation_process_uses_real_supervised_group(self) -> None:
+        python = str(Path(sys.executable).resolve(strict=True))
+        result = gateway_module._run_source_reconciliation_process_v1(
+            (python, "-c", "import sys; sys.stdout.write('accepted')"),
+            timeout_seconds=180.0,
+            max_output_bytes=1024 * 1024,
+            environment={
+                "PATH": "/usr/bin:/bin",
+                "PYTHONPATH": "",
+                "PYTHONNOUSERSITE": "1",
+            },
+        )
+
+        self.assertEqual(0, result.returncode)
+        self.assertEqual(b"accepted", result.stdout)
+        self.assertEqual(b"", result.stderr)
+
+    def test_source_reconciliation_output_overflow_is_cleaned_before_return(
+        self,
+    ) -> None:
+        python = str(Path(sys.executable).resolve(strict=True))
+        with self.assertRaises(SupervisedCommandOutputLimitExceededV2):
+            gateway_module._run_source_reconciliation_process_v1(
+                (
+                    python,
+                    "-c",
+                    "import os; os.write(1, b'x' * (1024 * 1024 + 1))",
+                ),
+                timeout_seconds=180.0,
+                max_output_bytes=1024 * 1024,
+                environment={
+                    "PATH": "/usr/bin:/bin",
+                    "PYTHONPATH": "",
+                    "PYTHONNOUSERSITE": "1",
+                },
+            )
+
+    def test_launch_reconciliation_failure_keeps_exact_snapshot(self) -> None:
+        wrapper = PLUGIN / "bin" / "codex-smart"
+        module = runpy.run_path(
+            str(wrapper),
+            run_name="codex_smart_failure_integration_test",
+        )
+        globals_ = module["main"].__globals__
+        live = self.root / "live-codex"
+        live.write_bytes(b"new")
+        live.chmod(0o500)
+        snapshot = self.root / "snapshot-codex"
+        snapshot.write_bytes(b"old")
+        snapshot.chmod(0o500)
+        decision = GatewayDecision(
+            state=GatewayState.READY,
+            reason_code="READY",
+            executable=snapshot,
+            coordinator={"model": "gpt-5.6-terra", "reasoning_effort": "medium"},
+            activation_id="act2_" + "a" * 64,
+            gate_fingerprint="b" * 64,
+            activation_gate={"gateFingerprint": "b" * 64},
+            catalog_path=self.catalog,
+            source_drift=SourceDriftV1(
+                lexical_path=live,
+                resolved_path=live,
+                observed_sha256="c" * 64,
+                expected_sha256="d" * 64,
+            ),
+        )
+        for failure in ("exception", "retry-after"):
+            with self.subTest(failure=failure):
+                gateway_decisions: list[GatewayDecision] = []
+                error = StringIO()
+
+                def reconcile(**_kwargs):
+                    if failure == "exception":
+                        raise OSError("private failure")
+                    return (
+                        SimpleNamespace(outcome="RETRY_AFTER", restart=False),
+                        self.root / "bin/codex-smart",
+                    )
+
+                def gateway(_arguments, **kwargs):
+                    gateway_decisions.append(kwargs["resolver"].resolve())
+                    return 17
+
+                with (
+                    mock.patch.dict(
+                        os.environ,
+                        {"CODEX_HOME": str(self.codex_home)},
+                        clear=True,
+                    ),
+                    mock.patch.object(sys, "argv", [str(wrapper), "задача"]),
+                    mock.patch.dict(
+                        globals_,
+                        {
+                            "v2_gateway_state_present": lambda _layout: True,
+                            "_prepare_v2_decision": lambda **_kwargs: decision,
+                            "_reconcile_source_drift": reconcile,
+                            "run_permanent_gateway": gateway,
+                        },
+                    ),
+                    redirect_stderr(error),
+                ):
+                    self.assertEqual(17, globals_["main"]())
+
+                self.assertEqual([decision], gateway_decisions)
+                self.assertEqual(1, error.getvalue().count("SOURCE_UPDATE_"))
+                self.assertIn("SOURCE_UPDATE_RETRY_AFTER", error.getvalue())
 
 
 if __name__ == "__main__":
