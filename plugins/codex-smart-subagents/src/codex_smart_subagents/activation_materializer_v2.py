@@ -2101,7 +2101,9 @@ def _materialize_marketplace(
     _ensure_private_directory(marketplace)
     _ensure_private_directory(marketplace / ".agents" / "plugins")
     _ensure_private_directory(marketplace / ".claude-plugin")
+    _ensure_private_directory(marketplace / ".codex")
     _ensure_private_directory(marketplace / "plugins")
+    _ensure_private_directory(marketplace / "scripts")
     _copy_regular_file_with_deadline(
         source_root / ".agents" / "plugins" / "marketplace.json",
         marketplace / ".agents" / "plugins" / "marketplace.json",
@@ -2110,6 +2112,16 @@ def _materialize_marketplace(
         source_root / ".claude-plugin" / "marketplace.json",
         marketplace / ".claude-plugin" / "marketplace.json",
     )
+    _copy_regular_file_with_deadline(
+        source_root / ".codex" / "adaptive-subagents.toml",
+        marketplace / ".codex" / "adaptive-subagents.toml",
+    )
+    installer = marketplace / "scripts" / "install_adaptive_subagents.py"
+    _copy_regular_file_with_deadline(
+        source_root / "scripts" / "install_adaptive_subagents.py",
+        installer,
+    )
+    installer.chmod(0o500)
     _copy_private_tree(source_root / "plugins" / _PLUGIN_NAME, plugin_root)
     _bind_python_entrypoints(plugin_root / "bin")
     config_root = plugin_root / "config"
@@ -2145,6 +2157,15 @@ def _materialize_marketplace(
                 )
     runtime_vector_root = marketplace / "docs" / "contracts" / "vectors"
     _ensure_private_directory(runtime_vector_root)
+    for name in _CONFIG_CONTRACT_VECTOR_FILES:
+        source = source_root / "docs" / "contracts" / "vectors" / name
+        destination = runtime_vector_root / name
+        _copy_regular_file_with_deadline(source, destination)
+        if destination.read_bytes() != source.read_bytes():
+            _fail(
+                "RUNTIME_VECTOR_COPY_MISMATCH",
+                f"вектор скопирован неверно: {name}",
+            )
     for name in _RUNTIME_VECTOR_FILES:
         source = source_root / "docs" / "contracts" / "vectors" / name
         destination = runtime_vector_root / name
@@ -2162,11 +2183,14 @@ def _validate_source_catalog_identity_v2(source_root: Path) -> None:
     canonical = source_root / ".codex" / "adaptive-subagents.toml"
     config_root = source_root / "plugins" / _PLUGIN_NAME / "config"
     bundled = config_root / "adaptive-subagents.toml"
+    materialized_capsule = _is_materialized_capsule_source_v2(source_root)
     for path in (
         config_root / "contracts",
         config_root / "bundled-catalog-v1.json",
     ):
         if os.path.lexists(path):
+            if materialized_capsule:
+                continue
             _fail(
                 "SOURCE_GENERATED_PATH_CONFLICT",
                 f"исходное дерево занимает зарезервированный путь: {path}",
@@ -2186,6 +2210,60 @@ def _validate_source_catalog_identity_v2(source_root: Path) -> None:
             "SOURCE_CATALOG_MISMATCH",
             "корневая и встроенная копии каталога моделей различаются",
         )
+
+
+def _is_materialized_capsule_source_v2(source_root: Path) -> bool:
+    plugin_config = source_root / "plugins" / _PLUGIN_NAME / "config"
+    contracts = plugin_config / "contracts"
+    bundled_catalog = plugin_config / "bundled-catalog-v1.json"
+    installer = source_root / "scripts" / "install_adaptive_subagents.py"
+    try:
+        root_info = os.lstat(source_root)
+        installer_info = os.lstat(installer)
+        bundled_info = os.lstat(bundled_catalog)
+        if (
+            not stat.S_ISDIR(root_info.st_mode)
+            or stat.S_ISLNK(root_info.st_mode)
+            or root_info.st_uid != os.getuid()
+            or stat.S_IMODE(root_info.st_mode) != 0o700
+            or not stat.S_ISREG(installer_info.st_mode)
+            or stat.S_ISLNK(installer_info.st_mode)
+            or installer_info.st_uid != os.getuid()
+            or installer_info.st_nlink != 1
+            or stat.S_IMODE(installer_info.st_mode) != 0o500
+            or not stat.S_ISREG(bundled_info.st_mode)
+            or stat.S_ISLNK(bundled_info.st_mode)
+            or bundled_info.st_uid != os.getuid()
+            or bundled_info.st_nlink != 1
+            or stat.S_IMODE(bundled_info.st_mode) != 0o600
+            or not isinstance(
+                json.loads(bundled_catalog.read_text(encoding="utf-8")),
+                dict,
+            )
+            or not contracts.is_dir()
+            or contracts.is_symlink()
+            or {path.name for path in contracts.iterdir()}
+            != set(_CONFIG_CONTRACT_VECTOR_FILES)
+        ):
+            return False
+        for name in _CONFIG_CONTRACT_VECTOR_FILES:
+            cached = contracts / name
+            canonical = source_root / "docs" / "contracts" / "vectors" / name
+            for path in (cached, canonical):
+                info = os.lstat(path)
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or stat.S_ISLNK(info.st_mode)
+                    or info.st_uid != os.getuid()
+                    or info.st_nlink != 1
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                ):
+                    return False
+            if _sha256_file(cached) != _sha256_file(canonical):
+                return False
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    return True
 
 
 def _bind_python_entrypoints(bin_root: Path) -> None:
@@ -2225,6 +2303,9 @@ def _bind_python_entrypoints(bin_root: Path) -> None:
             continue
         found = True
         payload = entrypoint.read_bytes()
+        if payload.startswith(shebang):
+            entrypoint.chmod(0o500)
+            continue
         if not payload.startswith(portable):
             _fail(
                 "PYTHON_ENTRYPOINT_INVALID",

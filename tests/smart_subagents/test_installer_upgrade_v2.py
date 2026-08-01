@@ -30,6 +30,7 @@ from codex_smart_subagents.installer_upgrade_v2 import (  # noqa: E402
     build_persisted_upgrade_preparation_recovery_v2,
     build_upgrade_preparation_v2,
     execute_and_verify_upgrade_preparation_v2,
+    installer_source_digest_from_materialized_activation_v2,
     observe_upgrade_database_v2,
     prepared_manifest_from_upgrade_receipt_v2,
     prepare_upgrade_database_v2,
@@ -142,6 +143,9 @@ class InstallerUpgradePreparationV2Tests(unittest.TestCase):
             Path("plugins/codex-smart-subagents"),
         ):
             shutil.copytree(ROOT / relative, source_root / relative)
+        installer_path = source_root / "scripts" / "install_adaptive_subagents.py"
+        installer_path.parent.mkdir(mode=0o700)
+        shutil.copy2(ROOT / "scripts" / "install_adaptive_subagents.py", installer_path)
         installer = _load_installer()
         source_digest = installer._source_digest(
             installer.InstallLayout(
@@ -995,6 +999,77 @@ class InstallerUpgradePreparationV2Tests(unittest.TestCase):
             prepared.manifest_document["extensions"]["installerSourceDigest"],
         )
 
+    def test_capsule_reconstructs_exact_installer_source_digest(self) -> None:
+        proof = self.fixture.capture()
+        source_digest = self._source_digest()
+        preparation = build_upgrade_preparation_v2(
+            proof=proof,
+            operation_id="op2_" + "6" * 32,
+            source_root=ROOT,
+            codex_binary=self.fixture.codex_binary,
+            policy_bundle=self.fixture.policy,
+            snapshotter=self.fixture.snapshotter,
+            interface_executor=self.fixture.interface_executor,
+            source_digest=source_digest,
+        )
+        execute_and_verify_upgrade_preparation_v2(
+            proof=proof,
+            preparation=preparation,
+        )
+        intent = preparation.definition.activation_intent
+
+        self.assertEqual(
+            source_digest,
+            installer_source_digest_from_materialized_activation_v2(
+                activation_dir=intent.activation_dir,
+                codex_binary=intent.codex_binary,
+                source_locator=intent.source_locator,
+                snapshot_locator=intent.snapshot_locator,
+                snapshot_path=intent.snapshot_path,
+            ),
+        )
+
+    def test_capsule_installer_mutation_breaks_source_digest(self) -> None:
+        proof = self.fixture.capture()
+        preparation = build_upgrade_preparation_v2(
+            proof=proof,
+            operation_id="op2_" + "7" * 32,
+            source_root=ROOT,
+            codex_binary=self.fixture.codex_binary,
+            policy_bundle=self.fixture.policy,
+            snapshotter=self.fixture.snapshotter,
+            interface_executor=self.fixture.interface_executor,
+            source_digest=self._source_digest(),
+        )
+        original_materialize = installer_upgrade_v2._materialize_marketplace
+
+        def materialize_then_mutate_installer(**arguments) -> None:
+            original_materialize(**arguments)
+            installer = (
+                arguments["marketplace"]
+                / "scripts"
+                / "install_adaptive_subagents.py"
+            )
+            installer.chmod(0o700)
+            installer.write_bytes(installer.read_bytes() + b"\n")
+            installer.chmod(0o500)
+
+        with (
+            mock.patch.object(
+                installer_upgrade_v2,
+                "_materialize_marketplace",
+                side_effect=materialize_then_mutate_installer,
+            ),
+            self.assertRaisesRegex(
+                ValueError,
+                "sourceDigest differs from immutable candidate",
+            ),
+        ):
+            execute_and_verify_upgrade_preparation_v2(
+                proof=proof,
+                preparation=preparation,
+            )
+
     def test_preparation_rejects_source_digest_not_reproducible_from_candidate(
         self,
     ) -> None:
@@ -1040,6 +1115,9 @@ class InstallerUpgradePreparationV2Tests(unittest.TestCase):
             Path("plugins/codex-smart-subagents"),
         ):
             shutil.copytree(ROOT / relative, source_root / relative)
+        installer_path = source_root / "scripts" / "install_adaptive_subagents.py"
+        installer_path.parent.mkdir(mode=0o700)
+        shutil.copy2(ROOT / "scripts" / "install_adaptive_subagents.py", installer_path)
         source_digest = self._source_digest(source_root)
         preparation = build_upgrade_preparation_v2(
             proof=proof,

@@ -1826,6 +1826,9 @@ def installer_source_digest_from_materialized_activation_v2(
         ".codex/adaptive-subagents.toml": (
             plugin_root / "config" / "adaptive-subagents.toml"
         ),
+        "scripts/install_adaptive_subagents.py": (
+            marketplace / "scripts" / "install_adaptive_subagents.py"
+        ),
         **{
             f"docs/contracts/vectors/{name}": (
                 plugin_root / "config" / "contracts" / name

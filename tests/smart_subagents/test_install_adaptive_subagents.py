@@ -6,7 +6,9 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -398,6 +400,32 @@ class _InstallerBase(unittest.TestCase):
 
 
 class InstallerV2ContractTests(_InstallerBase):
+    def test_source_digest_includes_the_installer_entrypoint(self) -> None:
+        source_root = self.root / "digest-source"
+        for relative in (
+            Path(".agents"),
+            Path(".claude-plugin"),
+            Path(".codex"),
+            Path("docs/contracts"),
+            Path("plugins/codex-smart-subagents"),
+        ):
+            shutil.copytree(ROOT / relative, source_root / relative)
+        installer = source_root / "scripts" / "install_adaptive_subagents.py"
+        installer.parent.mkdir(mode=0o700)
+        shutil.copy2(INSTALLER_PATH, installer)
+        layout = self.installer.InstallLayout(
+            source_root=source_root,
+            codex_home=self.layout.codex_home,
+            bin_dir=self.layout.bin_dir,
+            codex_binary=self.layout.codex_binary,
+            state_home=self.layout.state_home,
+        )
+        before = self.installer._source_digest(layout)
+
+        installer.write_bytes(installer.read_bytes() + b"\n")
+
+        self.assertNotEqual(before, self.installer._source_digest(layout))
+
     def test_first_install_intent_is_durable_before_the_first_link(self) -> None:
         journal_path = (
             self.layout.manifest_root
@@ -1372,6 +1400,169 @@ class InstallerV2ContractTests(_InstallerBase):
 
 
 class InstallerV2ApplyTests(_InstallerBase):
+    def test_capsule_applies_upgrade_twice_without_the_live_source_tree(
+        self,
+    ) -> None:
+        from codex_smart_subagents.activation_materializer_v2 import (
+            _materialize_marketplace,
+        )
+
+        root = Path(
+            tempfile.mkdtemp(dir=ROOT.parent, prefix=".ce2-")
+        ).resolve()
+        self.addCleanup(shutil.rmtree, root, True)
+        codex_home = root / "c"
+        codex_home.mkdir(mode=0o700)
+        bin_dir = root / "b"
+        bin_dir.mkdir(mode=0o700)
+        state_home = root / "s"
+        codex_locator = shutil.which("codex")
+        self.assertIsNotNone(codex_locator)
+        codex_binary = Path(str(codex_locator)).resolve(strict=True)
+        layout = self.installer.InstallLayout(
+            source_root=ROOT,
+            codex_home=codex_home,
+            bin_dir=bin_dir,
+            codex_binary=codex_binary,
+            state_home=state_home,
+        )
+
+        def copy_source(destination: Path) -> None:
+            for relative in (
+                Path(".agents"),
+                Path(".claude-plugin"),
+                Path(".codex"),
+                Path("docs/contracts"),
+                Path("plugins/codex-smart-subagents"),
+            ):
+                shutil.copytree(ROOT / relative, destination / relative)
+            installer = destination / "scripts" / "install_adaptive_subagents.py"
+            installer.parent.mkdir(mode=0o700)
+            shutil.copy2(INSTALLER_PATH, installer)
+
+        def command(source_root: Path) -> list[str]:
+            return [
+                sys.executable,
+                "-B",
+                str(source_root / "scripts" / "install_adaptive_subagents.py"),
+                "--source-root",
+                str(source_root),
+                "--codex-home",
+                str(codex_home),
+                "--bin-dir",
+                str(bin_dir),
+                "--state-home",
+                str(state_home),
+                "--codex-binary",
+                str(codex_binary),
+                "--apply",
+                "--json",
+            ]
+
+        unrelated = root / "unrelated-workdir"
+        unrelated.mkdir(mode=0o700)
+        environment = {
+            **os.environ,
+            "PYTHONPATH": "",
+            "PYTHONNOUSERSITE": "1",
+        }
+        old_source = root / "old-source"
+        fixture_source = root / "fixture-source"
+        copy_source(old_source)
+        copy_source(fixture_source)
+        old_readme = old_source / "plugins" / "codex-smart-subagents" / "README.md"
+        old_readme.write_bytes(old_readme.read_bytes() + b"\nold fixture source\n")
+
+        initial = subprocess.run(
+            command(old_source),
+            cwd=unrelated,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        self.assertEqual(
+            0,
+            initial.returncode,
+            initial.stderr or initial.stdout,
+        )
+        initial_result = json.loads(initial.stdout)
+        self.assertEqual("installed", initial_result["status"])
+        self.assertEqual("READY", initial_result["readiness"])
+
+        capsule_activation = root / "capsule-activation"
+        capsule_source = capsule_activation / "marketplace"
+        capsule_plugin = (
+            capsule_source / "plugins" / "codex-smart-subagents"
+        )
+        capsule_activation.mkdir(mode=0o700)
+        _materialize_marketplace(
+            source_root=fixture_source,
+            marketplace=capsule_source,
+            plugin_root=capsule_plugin,
+            bundled_catalog={},
+        )
+        capsule_installer = (
+            capsule_source / "scripts" / "install_adaptive_subagents.py"
+        )
+        self.assertTrue(capsule_installer.is_file())
+
+        old_source.rename(root / "old-source-made-unavailable")
+        fixture_source.rename(root / "source-made-unavailable")
+        activations_root = layout.gateway_layout.managed_root / "activations"
+        before = set(activations_root.iterdir())
+
+        try:
+            first = subprocess.run(
+                command(capsule_source),
+                cwd=unrelated,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(0, first.returncode, first.stderr or first.stdout)
+            first_result = json.loads(first.stdout)
+
+            second = subprocess.run(
+                command(capsule_source),
+                cwd=unrelated,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(0, second.returncode, second.stderr or second.stdout)
+            second_result = json.loads(second.stdout)
+
+            self.assertEqual("upgraded", first_result["status"])
+            self.assertEqual("READY", first_result["readiness"])
+            self.assertEqual("unchanged", second_result["status"])
+            self.assertEqual("READY", second_result["readiness"])
+            self.assertEqual(
+                1,
+                len(set(activations_root.iterdir()) - before),
+            )
+            self.assertEqual(
+                first_result["extensions"]["doctor"]["activationId"],
+                second_result["extensions"]["doctor"]["activationId"],
+            )
+        finally:
+            admin = bin_dir / "codex-smart-subagents-admin"
+            if admin.exists():
+                subprocess.run(
+                    [str(admin), "stop"],
+                    cwd=unrelated,
+                    env={**environment, "CODEX_HOME": str(codex_home)},
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+
     def test_first_apply_waits_for_full_ready_then_registers_current_link(self) -> None:
         result, events = self.successful_first_apply()
 

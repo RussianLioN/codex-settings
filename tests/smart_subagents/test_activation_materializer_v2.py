@@ -28,6 +28,7 @@ from codex_smart_subagents.activation_gateway_v2 import (  # noqa: E402
 from codex_smart_subagents.activation_materializer_v2 import (  # noqa: E402
     ActivationMaterializationV2Error,
     ControllerCandidateV2,
+    _CONFIG_CONTRACT_VECTOR_FILES,
     _MCP_RUNTIME_SCHEMA_FILES,
     _RUNTIME_SCHEMA_FILES,
     _RUNTIME_VECTOR_FILES,
@@ -501,10 +502,10 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
             )
         installed_vectors = installed_marketplace / "docs" / "contracts" / "vectors"
         self.assertEqual(
-            set(_RUNTIME_VECTOR_FILES),
+            set(_RUNTIME_VECTOR_FILES) | set(_CONFIG_CONTRACT_VECTOR_FILES),
             {path.name for path in installed_vectors.iterdir()},
         )
-        for name in _RUNTIME_VECTOR_FILES:
+        for name in set(_RUNTIME_VECTOR_FILES) | set(_CONFIG_CONTRACT_VECTOR_FILES):
             self.assertEqual(
                 (ROOT / "docs" / "contracts" / "vectors" / name).read_bytes(),
                 (installed_vectors / name).read_bytes(),
@@ -553,6 +554,34 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
         failed = self._installed_tool_definitions(result, check=False)
         self.assertNotEqual(0, failed.returncode)
         self.assertIn("SCHEMA_DEPENDENCY_MISSING", failed.stderr)
+
+    def test_materialized_marketplace_is_a_self_contained_installer_source(
+        self,
+    ) -> None:
+        result = self._materialize()
+        source_root = result.activation_dir / "marketplace"
+
+        canonical_catalog = ROOT / ".codex" / "adaptive-subagents.toml"
+        self.assertEqual(
+            canonical_catalog.read_bytes(),
+            (source_root / ".codex" / "adaptive-subagents.toml").read_bytes(),
+        )
+        self.assertEqual(
+            canonical_catalog.read_bytes(),
+            (
+                source_root
+                / "plugins"
+                / "codex-smart-subagents"
+                / "config"
+                / "adaptive-subagents.toml"
+            ).read_bytes(),
+        )
+        installer = source_root / "scripts" / "install_adaptive_subagents.py"
+        self.assertEqual(
+            (ROOT / "scripts" / "install_adaptive_subagents.py").read_bytes(),
+            installer.read_bytes(),
+        )
+        self.assertEqual(0o500, stat.S_IMODE(installer.stat().st_mode))
 
     def test_manifest_tracks_immutable_artifacts_and_preserves_user_config(
         self,

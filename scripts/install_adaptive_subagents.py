@@ -44,7 +44,7 @@ from codex_smart_subagents.activation_transition_v2 import (  # noqa: E402
     capture_activation_transition_proof_v2,
 )
 from codex_smart_subagents.compatibility import (  # noqa: E402
-    VERIFIED_STABLE_CODEX_VERSIONS,
+    MINIMUM_STABLE_CODEX_VERSION,
     codex_version_supported,
     parse_stable_codex_version,
 )
@@ -164,9 +164,7 @@ _SUPPORTED_MAIN_RECOVERY_OPERATIONS_V2 = frozenset(
         ("uninstall", "uninstall"),
     }
 )
-_VERIFIED_CODEX_VERSION_TEXT = ", ".join(
-    sorted(VERIFIED_STABLE_CODEX_VERSIONS, key=parse_stable_codex_version)
-)
+_VERIFIED_CODEX_VERSION_TEXT = f">= {MINIMUM_STABLE_CODEX_VERSION}"
 class InstallError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(f"{code}: {message}")
@@ -3186,11 +3184,15 @@ def _validate_source_layout(layout: InstallLayout) -> None:
                 "SOURCE_ARTIFACT_UNSAFE",
                 f"исходный артефакт не является обычным файлом: {path}",
             )
-    for path in (
+    generated_paths = (
         layout.plugin_source / "config" / "contracts",
         layout.plugin_source / "config" / "bundled-catalog-v1.json",
-    ):
+    )
+    materialized_capsule = _is_materialized_capsule_source_v2(layout)
+    for path in generated_paths:
         if os.path.lexists(path):
+            if materialized_capsule:
+                continue
             raise InstallError(
                 "SOURCE_GENERATED_PATH_CONFLICT",
                 f"исходное дерево занимает зарезервированный путь: {path}",
@@ -3222,6 +3224,61 @@ def _validate_source_layout(layout: InstallLayout) -> None:
         raise InstallError("POLICY_BUNDLE_INVALID", str(exc)) from exc
 
 
+def _is_materialized_capsule_source_v2(layout: InstallLayout) -> bool:
+    root = layout.source_root
+    plugin_config = layout.plugin_source / "config"
+    contracts = plugin_config / "contracts"
+    bundled_catalog = plugin_config / "bundled-catalog-v1.json"
+    installer = root / "scripts" / "install_adaptive_subagents.py"
+    try:
+        root_info = os.lstat(root)
+        installer_info = os.lstat(installer)
+        bundled_info = os.lstat(bundled_catalog)
+        if (
+            not stat.S_ISDIR(root_info.st_mode)
+            or stat.S_ISLNK(root_info.st_mode)
+            or root_info.st_uid != os.getuid()
+            or stat.S_IMODE(root_info.st_mode) != 0o700
+            or not stat.S_ISREG(installer_info.st_mode)
+            or stat.S_ISLNK(installer_info.st_mode)
+            or installer_info.st_uid != os.getuid()
+            or installer_info.st_nlink != 1
+            or stat.S_IMODE(installer_info.st_mode) != 0o500
+            or not stat.S_ISREG(bundled_info.st_mode)
+            or stat.S_ISLNK(bundled_info.st_mode)
+            or bundled_info.st_uid != os.getuid()
+            or bundled_info.st_nlink != 1
+            or stat.S_IMODE(bundled_info.st_mode) != 0o600
+            or not isinstance(
+                json.loads(bundled_catalog.read_text(encoding="utf-8")),
+                dict,
+            )
+            or not contracts.is_dir()
+            or contracts.is_symlink()
+            or {path.name for path in contracts.iterdir()}
+            != set(_CONFIG_CONTRACT_VECTOR_FILES)
+        ):
+            return False
+        for name in _CONFIG_CONTRACT_VECTOR_FILES:
+            cached = contracts / name
+            canonical = root / "docs" / "contracts" / "vectors" / name
+            for path in (cached, canonical):
+                info = os.lstat(path)
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or stat.S_ISLNK(info.st_mode)
+                    or info.st_uid != os.getuid()
+                    or info.st_nlink != 1
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                ):
+                    return False
+            if file_digest(cached) != file_digest(canonical):
+                return False
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    return True
+
+
 def _load_policy_bundle_v2(layout: InstallLayout):
     return load_policy_bundle_v2(
         catalog_path=layout.catalog_source,
@@ -3235,10 +3292,18 @@ def _load_policy_bundle_v2(layout: InstallLayout):
 def _source_digest(layout: InstallLayout) -> str:
     files: dict[str, Path] = {}
     for path in _iter_source_tree(layout.plugin_source):
+        plugin_relative = path.relative_to(layout.plugin_source)
+        if plugin_relative == Path(
+            "config/bundled-catalog-v1.json"
+        ) or plugin_relative.is_relative_to(
+            Path("config/contracts")
+        ) or plugin_relative.is_relative_to(Path("config/runtime-schemas")):
+            continue
         files[path.relative_to(layout.source_root).as_posix()] = path
     for path in (
         layout.marketplace_source,
         layout.codex_marketplace_source,
+        layout.source_root / "scripts" / "install_adaptive_subagents.py",
         layout.installer_receipt_schema_source,
         layout.catalog_source,
         *layout.policy_source_paths,
@@ -3246,6 +3311,9 @@ def _source_digest(layout: InstallLayout) -> str:
         *layout.runtime_vector_paths,
     ):
         files[path.relative_to(layout.source_root).as_posix()] = path
+    interpreter = _bound_python_runtime_v2()
+    portable_shebang = b"#!/usr/bin/env python3\n"
+    bound_shebang = f"#!{interpreter} -B\n".encode("utf-8")
     digest = hashlib.sha256()
     for relative, path in sorted(
         files.items(), key=lambda item: item[0].encode("utf-8")
@@ -3256,12 +3324,25 @@ def _source_digest(layout: InstallLayout) -> str:
             raise InstallError("SOURCE_TREE_UNSAFE", f"особый объект: {path}")
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0x\0" if info.st_mode & stat.S_IXUSR else b"\0f\0")
-        digest.update(bytes.fromhex(file_digest(path)))
+        payload_sha256 = file_digest(path)
+        if (
+            info.st_mode & stat.S_IXUSR
+            and path.parent == layout.plugin_source / "bin"
+        ):
+            payload = path.read_bytes()
+            if payload.startswith(bound_shebang):
+                payload = portable_shebang + payload[len(bound_shebang) :]
+            elif not payload.startswith(portable_shebang):
+                raise InstallError(
+                    "PYTHON_ENTRYPOINT_INVALID",
+                    f"неизвестная исполняемая точка входа: {path.name}",
+                )
+            payload_sha256 = hashlib.sha256(payload).hexdigest()
+        digest.update(bytes.fromhex(payload_sha256))
     digest.update(b"\0codex-binary-v1\0")
     digest.update(str(layout.codex_binary).encode("utf-8"))
     digest.update(b"\0")
     digest.update(bytes.fromhex(file_digest(layout.codex_binary)))
-    interpreter = _bound_python_runtime_v2()
     digest.update(b"\0python-runtime-v1\0")
     digest.update(str(interpreter).encode("utf-8"))
     digest.update(b"\0")
