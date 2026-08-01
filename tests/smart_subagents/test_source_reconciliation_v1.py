@@ -353,6 +353,32 @@ class SourceReconciliationV1Tests(unittest.TestCase):
         self.assertEqual("ACCEPTED", accepted.outcome)
         self.assertEqual(2, self.process_calls)
 
+    def test_retry_after_never_opens_early_for_fractional_failure_time(self) -> None:
+        first = reconcile_source_drift_v1(
+            self.request(),
+            verify_accepted=self.no_accepted_activation,
+            run_process=self.temporary_failure,
+            now_epoch_seconds=lambda: 1000.9,
+        )
+        self.assertEqual(1301, first.retry_after_epoch_seconds)
+
+        paused = reconcile_source_drift_v1(
+            self.request(),
+            verify_accepted=self.no_accepted_activation,
+            run_process=self.must_not_run,
+            now_epoch_seconds=lambda: 1300.999,
+        )
+        accepted = reconcile_source_drift_v1(
+            self.request(),
+            verify_accepted=self.accepted_activation,
+            run_process=self.accepted_process,
+            now_epoch_seconds=lambda: 1301,
+        )
+
+        self.assertEqual(first, paused)
+        self.assertEqual("ACCEPTED", accepted.outcome)
+        self.assertEqual(2, self.process_calls)
+
     def test_retry_window_starts_after_the_failed_process_finishes(self) -> None:
         observed_time = [1000]
 

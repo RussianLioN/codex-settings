@@ -818,7 +818,7 @@ def _absolute_path(value: object, name: str) -> None:
         raise ValueError(f"{name} must be an absolute Path")
 
 
-def _epoch_second(value: object) -> int:
+def _epoch_seconds(value: object) -> float:
     if (
         isinstance(value, bool)
         or not isinstance(value, (int, float))
@@ -826,11 +826,15 @@ def _epoch_second(value: object) -> int:
         or float(value) < 0
     ):
         raise ValueError("now_epoch_seconds returned an invalid value")
-    return int(value)
+    return float(value)
+
+
+def _epoch_second(value: object) -> int:
+    return math.floor(_epoch_seconds(value))
 
 
 def _retry_after(now_epoch_seconds: Callable[[], int | float]) -> int:
-    return _epoch_second(now_epoch_seconds()) + _RETRY_SECONDS
+    return math.ceil(_epoch_seconds(now_epoch_seconds())) + _RETRY_SECONDS
 
 
 __all__ = [
