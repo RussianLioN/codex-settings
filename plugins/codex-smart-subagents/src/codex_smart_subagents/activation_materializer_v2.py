@@ -2187,6 +2187,7 @@ def _validate_source_catalog_identity_v2(source_root: Path) -> None:
     for path in (
         config_root / "contracts",
         config_root / "bundled-catalog-v1.json",
+        config_root / "runtime-schemas",
     ):
         if os.path.lexists(path):
             if materialized_capsule:
@@ -2215,12 +2216,14 @@ def _validate_source_catalog_identity_v2(source_root: Path) -> None:
 def _is_materialized_capsule_source_v2(source_root: Path) -> bool:
     plugin_config = source_root / "plugins" / _PLUGIN_NAME / "config"
     contracts = plugin_config / "contracts"
+    runtime_schemas = plugin_config / "runtime-schemas"
     bundled_catalog = plugin_config / "bundled-catalog-v1.json"
     installer = source_root / "scripts" / "install_adaptive_subagents.py"
     try:
         root_info = os.lstat(source_root)
         installer_info = os.lstat(installer)
         bundled_info = os.lstat(bundled_catalog)
+        runtime_schemas_info = os.lstat(runtime_schemas)
         if (
             not stat.S_ISDIR(root_info.st_mode)
             or stat.S_ISLNK(root_info.st_mode)
@@ -2244,11 +2247,32 @@ def _is_materialized_capsule_source_v2(source_root: Path) -> bool:
             or contracts.is_symlink()
             or {path.name for path in contracts.iterdir()}
             != set(_CONFIG_CONTRACT_VECTOR_FILES)
+            or not stat.S_ISDIR(runtime_schemas_info.st_mode)
+            or stat.S_ISLNK(runtime_schemas_info.st_mode)
+            or runtime_schemas_info.st_uid != os.getuid()
+            or stat.S_IMODE(runtime_schemas_info.st_mode) != 0o700
+            or {path.name for path in runtime_schemas.iterdir()}
+            != set(_MCP_RUNTIME_SCHEMA_FILES)
         ):
             return False
         for name in _CONFIG_CONTRACT_VECTOR_FILES:
             cached = contracts / name
             canonical = source_root / "docs" / "contracts" / "vectors" / name
+            for path in (cached, canonical):
+                info = os.lstat(path)
+                if (
+                    not stat.S_ISREG(info.st_mode)
+                    or stat.S_ISLNK(info.st_mode)
+                    or info.st_uid != os.getuid()
+                    or info.st_nlink != 1
+                    or stat.S_IMODE(info.st_mode) != 0o600
+                ):
+                    return False
+            if _sha256_file(cached) != _sha256_file(canonical):
+                return False
+        for name in _MCP_RUNTIME_SCHEMA_FILES:
+            cached = runtime_schemas / name
+            canonical = source_root / "docs" / "contracts" / "schemas" / name
             for path in (cached, canonical):
                 info = os.lstat(path)
                 if (

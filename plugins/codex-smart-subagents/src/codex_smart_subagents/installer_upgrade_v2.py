@@ -1824,7 +1824,7 @@ def installer_source_digest_from_materialized_activation_v2(
             marketplace / ".claude-plugin" / "marketplace.json"
         ),
         ".codex/adaptive-subagents.toml": (
-            plugin_root / "config" / "adaptive-subagents.toml"
+            marketplace / ".codex" / "adaptive-subagents.toml"
         ),
         "scripts/install_adaptive_subagents.py": (
             marketplace / "scripts" / "install_adaptive_subagents.py"

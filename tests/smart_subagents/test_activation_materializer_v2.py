@@ -282,6 +282,7 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
         for reserved in (
             Path("config/contracts/extra.txt"),
             Path("config/bundled-catalog-v1.json"),
+            Path("config/runtime-schemas/extra.schema.json"),
         ):
             with self.subTest(reserved=reserved):
                 source_root = self.root / ("source-" + reserved.name)
@@ -582,6 +583,51 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
             installer.read_bytes(),
         )
         self.assertEqual(0o500, stat.S_IMODE(installer.stat().st_mode))
+
+    def test_materialized_capsule_source_rejects_runtime_schema_drift(
+        self,
+    ) -> None:
+        result = self._materialize()
+        source_root = result.activation_dir / "marketplace"
+        cached = (
+            source_root
+            / "plugins"
+            / "codex-smart-subagents"
+            / "config"
+            / "runtime-schemas"
+        )
+        schema = cached / _MCP_RUNTIME_SCHEMA_FILES[0]
+        original = schema.read_bytes()
+        extra = cached / "extra.schema.json"
+
+        mutations = (
+            (
+                "changed",
+                lambda: schema.write_bytes(original + b"\n"),
+                lambda: schema.write_bytes(original),
+            ),
+            (
+                "extra",
+                lambda: extra.write_bytes(b"{}\n"),
+                extra.unlink,
+            ),
+        )
+        for name, mutate, restore in mutations:
+            with self.subTest(mutation=name):
+                mutate()
+                try:
+                    with self.assertRaises(
+                        ActivationMaterializationV2Error
+                    ) as captured:
+                        activation_materializer_v2._validate_source_catalog_identity_v2(
+                            source_root
+                        )
+                    self.assertEqual(
+                        "SOURCE_GENERATED_PATH_CONFLICT",
+                        captured.exception.code,
+                    )
+                finally:
+                    restore()
 
     def test_manifest_tracks_immutable_artifacts_and_preserves_user_config(
         self,

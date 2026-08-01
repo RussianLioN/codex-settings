@@ -786,7 +786,68 @@ class InstallerV2ContractTests(_InstallerBase):
         with self.assertRaises(self.installer.InstallError) as caught:
             self.installer._validate_source_layout(alternate)
         self.assertEqual("SOURCE_GENERATED_PATH_CONFLICT", caught.exception.code)
+        generated_catalog.unlink()
+
+        generated_runtime_schema = (
+            alternate.plugin_source
+            / "config"
+            / "runtime-schemas"
+            / "extra.schema.json"
+        )
+        generated_runtime_schema.parent.mkdir()
+        generated_runtime_schema.write_bytes(b"{}\n")
+        with self.assertRaises(self.installer.InstallError) as caught:
+            self.installer._validate_source_layout(alternate)
+        self.assertEqual("SOURCE_GENERATED_PATH_CONFLICT", caught.exception.code)
         self.assertFalse(alternate.gateway_layout.managed_root.exists())
+
+    def test_materialized_capsule_rejects_runtime_schema_drift(self) -> None:
+        from codex_smart_subagents.activation_materializer_v2 import (
+            _MCP_RUNTIME_SCHEMA_FILES,
+            _materialize_marketplace,
+        )
+
+        activation = self.root / "capsule-activation"
+        source_root = activation / "marketplace"
+        plugin_root = source_root / "plugins" / "codex-smart-subagents"
+        activation.mkdir(mode=0o700)
+        _materialize_marketplace(
+            source_root=ROOT,
+            marketplace=source_root,
+            plugin_root=plugin_root,
+            bundled_catalog={},
+        )
+        layout = dataclasses.replace(self.layout, source_root=source_root)
+        self.installer._validate_source_layout(layout)
+        cached = plugin_root / "config" / "runtime-schemas"
+        schema = cached / _MCP_RUNTIME_SCHEMA_FILES[0]
+        original = schema.read_bytes()
+        extra = cached / "extra.schema.json"
+
+        mutations = (
+            (
+                "changed",
+                lambda: schema.write_bytes(original + b"\n"),
+                lambda: schema.write_bytes(original),
+            ),
+            (
+                "extra",
+                lambda: extra.write_bytes(b"{}\n"),
+                extra.unlink,
+            ),
+        )
+        for name, mutate, restore in mutations:
+            with self.subTest(mutation=name):
+                mutate()
+                try:
+                    with self.assertRaises(self.installer.InstallError) as caught:
+                        self.installer._validate_source_layout(layout)
+                    self.assertEqual(
+                        "SOURCE_GENERATED_PATH_CONFLICT",
+                        caught.exception.code,
+                    )
+                finally:
+                    restore()
 
     def test_update_launcher_plan_is_derived_from_receipt_and_candidate(self) -> None:
         self.publish_fake_activation()

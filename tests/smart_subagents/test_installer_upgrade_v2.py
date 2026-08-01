@@ -1070,6 +1070,42 @@ class InstallerUpgradePreparationV2Tests(unittest.TestCase):
                 preparation=preparation,
             )
 
+    def test_capsule_root_catalog_mutation_breaks_source_digest(self) -> None:
+        proof = self.fixture.capture()
+        source_digest = self._source_digest()
+        preparation = build_upgrade_preparation_v2(
+            proof=proof,
+            operation_id="op2_" + "8" * 32,
+            source_root=ROOT,
+            codex_binary=self.fixture.codex_binary,
+            policy_bundle=self.fixture.policy,
+            snapshotter=self.fixture.snapshotter,
+            interface_executor=self.fixture.interface_executor,
+            source_digest=source_digest,
+        )
+        execute_and_verify_upgrade_preparation_v2(
+            proof=proof,
+            preparation=preparation,
+        )
+        intent = preparation.definition.activation_intent
+        catalog = (
+            intent.activation_dir
+            / "marketplace"
+            / ".codex"
+            / "adaptive-subagents.toml"
+        )
+        catalog.write_bytes(catalog.read_bytes() + b"\n# changed\n")
+
+        reconstructed = installer_source_digest_from_materialized_activation_v2(
+            activation_dir=intent.activation_dir,
+            codex_binary=intent.codex_binary,
+            source_locator=intent.source_locator,
+            snapshot_locator=intent.snapshot_locator,
+            snapshot_path=intent.snapshot_path,
+        )
+
+        self.assertNotEqual(source_digest, reconstructed)
+
     def test_preparation_rejects_source_digest_not_reproducible_from_candidate(
         self,
     ) -> None:

@@ -38,6 +38,7 @@ from codex_smart_subagents.activation_materializer_v2 import (  # noqa: E402
     _CONFIG_CONTRACT_VECTOR_FILES,
     _RUNTIME_SCHEMA_FILES,
     _RUNTIME_VECTOR_FILES,
+    _is_materialized_capsule_source_v2 as _capsule_source_is_exact_v2,
     cleanup_accepted_activation_v2,
 )
 from codex_smart_subagents.activation_transition_v2 import (  # noqa: E402
@@ -3187,6 +3188,7 @@ def _validate_source_layout(layout: InstallLayout) -> None:
     generated_paths = (
         layout.plugin_source / "config" / "contracts",
         layout.plugin_source / "config" / "bundled-catalog-v1.json",
+        layout.plugin_source / "config" / "runtime-schemas",
     )
     materialized_capsule = _is_materialized_capsule_source_v2(layout)
     for path in generated_paths:
@@ -3225,58 +3227,7 @@ def _validate_source_layout(layout: InstallLayout) -> None:
 
 
 def _is_materialized_capsule_source_v2(layout: InstallLayout) -> bool:
-    root = layout.source_root
-    plugin_config = layout.plugin_source / "config"
-    contracts = plugin_config / "contracts"
-    bundled_catalog = plugin_config / "bundled-catalog-v1.json"
-    installer = root / "scripts" / "install_adaptive_subagents.py"
-    try:
-        root_info = os.lstat(root)
-        installer_info = os.lstat(installer)
-        bundled_info = os.lstat(bundled_catalog)
-        if (
-            not stat.S_ISDIR(root_info.st_mode)
-            or stat.S_ISLNK(root_info.st_mode)
-            or root_info.st_uid != os.getuid()
-            or stat.S_IMODE(root_info.st_mode) != 0o700
-            or not stat.S_ISREG(installer_info.st_mode)
-            or stat.S_ISLNK(installer_info.st_mode)
-            or installer_info.st_uid != os.getuid()
-            or installer_info.st_nlink != 1
-            or stat.S_IMODE(installer_info.st_mode) != 0o500
-            or not stat.S_ISREG(bundled_info.st_mode)
-            or stat.S_ISLNK(bundled_info.st_mode)
-            or bundled_info.st_uid != os.getuid()
-            or bundled_info.st_nlink != 1
-            or stat.S_IMODE(bundled_info.st_mode) != 0o600
-            or not isinstance(
-                json.loads(bundled_catalog.read_text(encoding="utf-8")),
-                dict,
-            )
-            or not contracts.is_dir()
-            or contracts.is_symlink()
-            or {path.name for path in contracts.iterdir()}
-            != set(_CONFIG_CONTRACT_VECTOR_FILES)
-        ):
-            return False
-        for name in _CONFIG_CONTRACT_VECTOR_FILES:
-            cached = contracts / name
-            canonical = root / "docs" / "contracts" / "vectors" / name
-            for path in (cached, canonical):
-                info = os.lstat(path)
-                if (
-                    not stat.S_ISREG(info.st_mode)
-                    or stat.S_ISLNK(info.st_mode)
-                    or info.st_uid != os.getuid()
-                    or info.st_nlink != 1
-                    or stat.S_IMODE(info.st_mode) != 0o600
-                ):
-                    return False
-            if file_digest(cached) != file_digest(canonical):
-                return False
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return False
-    return True
+    return _capsule_source_is_exact_v2(layout.source_root)
 
 
 def _load_policy_bundle_v2(layout: InstallLayout):
