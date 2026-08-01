@@ -31,6 +31,7 @@ from codex_smart_subagents.finite_file_lock_v2 import (  # noqa: E402
 )
 from codex_smart_subagents.source_reconciliation_v1 import (  # noqa: E402
     SourceReconciliationAcceptanceV1,
+    SourceReconciliationContinuationProhibitedV1,
     SourceReconciliationRequestV1,
     reconcile_source_drift_v1,
 )
@@ -395,6 +396,37 @@ class SourceReconciliationV1Tests(unittest.TestCase):
 
         self.assertEqual("RETRY_AFTER", result.outcome)
         self.assertEqual(1480, result.retry_after_epoch_seconds)
+
+    def test_process_cleanup_prohibition_is_never_downgraded_to_retry(self) -> None:
+        def cleanup_not_proven(*_args: object, **_kwargs: object) -> object:
+            raise SourceReconciliationContinuationProhibitedV1()
+
+        with self.assertRaises(SourceReconciliationContinuationProhibitedV1):
+            reconcile_source_drift_v1(
+                self.request(),
+                verify_accepted=self.no_accepted_activation,
+                run_process=cleanup_not_proven,
+                now_epoch_seconds=lambda: 1000,
+            )
+
+        self.assertFalse(
+            (self.state_home / "source-reconciliation-v1.json").exists()
+        )
+
+    def test_ordinary_process_exception_remains_retryable(self) -> None:
+        def spawn_failed(*_args: object, **_kwargs: object) -> object:
+            raise OSError("installer spawn failed")
+
+        result = reconcile_source_drift_v1(
+            self.request(),
+            verify_accepted=self.no_accepted_activation,
+            run_process=spawn_failed,
+            now_epoch_seconds=lambda: 1000,
+        )
+
+        self.assertEqual("RETRY_AFTER", result.outcome)
+        self.assertEqual("SOURCE_RECONCILIATION_PROCESS_FAILED", result.reason_code)
+        self.assertEqual(1300, result.retry_after_epoch_seconds)
 
     def test_busy_reconciliation_lock_is_retryable_without_a_process(self) -> None:
         timeout = FileLockTimeoutV2(

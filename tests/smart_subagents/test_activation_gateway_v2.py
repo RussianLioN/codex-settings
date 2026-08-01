@@ -65,6 +65,9 @@ from codex_smart_subagents.operation_deadline_v2 import (  # noqa: E402
     OperationDeadlineV2,
     scoped_current_deadline_v2,
 )
+from codex_smart_subagents.source_reconciliation_v1 import (  # noqa: E402
+    SourceReconciliationContinuationProhibitedV1,
+)
 from integration_runtime_v2 import (  # noqa: E402
     HookTurnContextV2,
     IntegrationConfigV2,
@@ -2092,6 +2095,143 @@ class SourceReconciliationGatewayV1Tests(unittest.TestCase):
                 max_output_bytes=1024 * 1024,
                 environment={},
             )
+
+    def test_process_adapter_closes_continuation_on_cleanup_required(self) -> None:
+        cleanup_error: Exception | None = None
+
+        def cleanup_required(**kwargs):
+            nonlocal cleanup_error
+            cleanup_error = (
+                gateway_module.supervised_subprocess_v2.
+                SupervisedCommandCleanupRequiredV2(
+                    cleanup_obligation={"obligationId": "private-obligation"},
+                    supervisor=kwargs["supervisor"],
+                )
+            )
+            raise cleanup_error
+
+        with (
+            patch.object(
+                gateway_module.supervised_subprocess_v2,
+                "run_supervised_command_v2",
+                side_effect=cleanup_required,
+            ),
+            self.assertRaises(
+                SourceReconciliationContinuationProhibitedV1
+            ) as caught,
+        ):
+            gateway_module._run_source_reconciliation_process_v1(
+                (str(Path(sys.executable).resolve(strict=True)), "-c", "pass"),
+                timeout_seconds=180.0,
+                max_output_bytes=1024 * 1024,
+                environment={},
+            )
+
+        self.assertIs(cleanup_error, caught.exception.__cause__)
+        self.assertEqual(
+            "SOURCE_RECONCILIATION_CONTINUATION_PROHIBITED",
+            str(caught.exception),
+        )
+
+    def test_process_adapter_closes_on_other_outstanding_group_obligations(
+        self,
+    ) -> None:
+        outstanding = (
+            gateway_module.operation_process_group_supervisor_v2.
+            OutstandingProcessCleanupObligationV2(("private-obligation",))
+        )
+        supervisor_type = (
+            gateway_module.operation_process_group_supervisor_v2.
+            OperationProcessGroupSupervisorV2
+        )
+
+        with (
+            patch.object(
+                gateway_module.supervised_subprocess_v2,
+                "run_supervised_command_v2",
+                side_effect=OSError("spawn result is unavailable"),
+            ),
+            patch.object(
+                supervisor_type,
+                "assert_operation_quiescent",
+                side_effect=outstanding,
+            ) as quiescence,
+            self.assertRaises(
+                SourceReconciliationContinuationProhibitedV1
+            ) as caught,
+        ):
+            gateway_module._run_source_reconciliation_process_v1(
+                (str(Path(sys.executable).resolve(strict=True)), "-c", "pass"),
+                timeout_seconds=180.0,
+                max_output_bytes=1024 * 1024,
+                environment={},
+            )
+
+        quiescence.assert_called_once_with()
+        self.assertIs(outstanding, caught.exception.__cause__)
+
+    def test_process_adapter_rethrows_spawn_error_after_proven_quiescence(
+        self,
+    ) -> None:
+        supervisor_type = (
+            gateway_module.operation_process_group_supervisor_v2.
+            OperationProcessGroupSupervisorV2
+        )
+
+        with (
+            patch.object(
+                gateway_module.supervised_subprocess_v2,
+                "run_supervised_command_v2",
+                side_effect=OSError("spawn failed"),
+            ),
+            patch.object(
+                supervisor_type,
+                "assert_operation_quiescent",
+                return_value=None,
+            ) as quiescence,
+            self.assertRaisesRegex(OSError, "spawn failed"),
+        ):
+            gateway_module._run_source_reconciliation_process_v1(
+                (str(Path(sys.executable).resolve(strict=True)), "-c", "pass"),
+                timeout_seconds=180.0,
+                max_output_bytes=1024 * 1024,
+                environment={},
+            )
+
+        quiescence.assert_called_once_with()
+
+    def test_process_adapter_closes_when_quiescence_proof_itself_fails(
+        self,
+    ) -> None:
+        proof_error = OSError("group observation is unavailable")
+        supervisor_type = (
+            gateway_module.operation_process_group_supervisor_v2.
+            OperationProcessGroupSupervisorV2
+        )
+
+        with (
+            patch.object(
+                gateway_module.supervised_subprocess_v2,
+                "run_supervised_command_v2",
+                side_effect=OSError("spawn failed"),
+            ),
+            patch.object(
+                supervisor_type,
+                "assert_operation_quiescent",
+                side_effect=proof_error,
+            ),
+            self.assertRaises(
+                SourceReconciliationContinuationProhibitedV1
+            ) as caught,
+        ):
+            gateway_module._run_source_reconciliation_process_v1(
+                (str(Path(sys.executable).resolve(strict=True)), "-c", "pass"),
+                timeout_seconds=180.0,
+                max_output_bytes=1024 * 1024,
+                environment={},
+            )
+
+        self.assertIs(proof_error, caught.exception.__cause__)
 
 
 class ActivationResolverRuntimeTests(unittest.TestCase):

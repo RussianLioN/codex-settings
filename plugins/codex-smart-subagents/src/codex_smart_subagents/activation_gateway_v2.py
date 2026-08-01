@@ -1927,6 +1927,10 @@ def _run_source_reconciliation_process_v1(
 ):
     """Выполнить установщик в отдельной надзираемой группе процесса."""
 
+    from .source_reconciliation_v1 import (
+        SourceReconciliationContinuationProhibitedV1,
+    )
+
     if (
         isinstance(timeout_seconds, bool)
         or not isinstance(timeout_seconds, (int, float))
@@ -1951,24 +1955,47 @@ def _run_source_reconciliation_process_v1(
     supervisor = (
         operation_process_group_supervisor_v2.OperationProcessGroupSupervisorV2()
     )
-    with (
-        operation_deadline_v2.scoped_current_deadline_v2(deadline),
-        operation_process_group_supervisor_v2.
-        scoped_current_process_group_supervisor_v2(supervisor),
-    ):
-        result = supervised_subprocess_v2.run_supervised_command_v2(
-            argv=argv,
-            label="source-reconciliation-installer",
-            stdin=b"",
-            local_timeout_seconds=180.0,
-            cleanup_wait_seconds=5.0,
-            max_output_bytes=1024 * 1024,
-            env=dict(environment),
-            deadline=deadline,
-            supervisor=supervisor,
-        )
-    supervisor.assert_operation_quiescent()
+    try:
+        with (
+            operation_deadline_v2.scoped_current_deadline_v2(deadline),
+            operation_process_group_supervisor_v2.
+            scoped_current_process_group_supervisor_v2(supervisor),
+        ):
+            result = supervised_subprocess_v2.run_supervised_command_v2(
+                argv=argv,
+                label="source-reconciliation-installer",
+                stdin=b"",
+                local_timeout_seconds=180.0,
+                cleanup_wait_seconds=5.0,
+                max_output_bytes=1024 * 1024,
+                env=dict(environment),
+                deadline=deadline,
+                supervisor=supervisor,
+            )
+    except supervised_subprocess_v2.SupervisedCommandCleanupRequiredV2 as error:
+        raise SourceReconciliationContinuationProhibitedV1() from error
+    except Exception:
+        _require_source_reconciliation_quiescence_v1(supervisor)
+        raise
+    _require_source_reconciliation_quiescence_v1(supervisor)
     return result
+
+
+def _require_source_reconciliation_quiescence_v1(
+    supervisor: (
+        operation_process_group_supervisor_v2.OperationProcessGroupSupervisorV2
+    ),
+) -> None:
+    """Преобразовать только недоказанную тишину в запрет продолжения."""
+
+    from .source_reconciliation_v1 import (
+        SourceReconciliationContinuationProhibitedV1,
+    )
+
+    try:
+        supervisor.assert_operation_quiescent()
+    except Exception as error:
+        raise SourceReconciliationContinuationProhibitedV1() from error
 
 
 def _read_reconciliation_manifest_v1(

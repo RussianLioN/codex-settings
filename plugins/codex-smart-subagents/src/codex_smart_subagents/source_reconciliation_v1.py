@@ -197,6 +197,13 @@ class SourceReconciliationResultV1:
             raise ValueError("RETRY_AFTER result requires an epoch second")
 
 
+class SourceReconciliationContinuationProhibitedV1(RuntimeError):
+    """Адаптер процесса не доказал исчезновение группы установщика."""
+
+    def __init__(self) -> None:
+        super().__init__("SOURCE_RECONCILIATION_CONTINUATION_PROHIBITED")
+
+
 class _ReceiptInvalidV1(ValueError):
     pass
 
@@ -350,6 +357,8 @@ def _run_once(
             timeout_seconds=_PROCESS_TIMEOUT_SECONDS,
             max_output_bytes=_MAX_PROCESS_OUTPUT_BYTES,
         )
+    except SourceReconciliationContinuationProhibitedV1:
+        raise
     except Exception:
         return _persist_retry(
             directory_descriptor,
@@ -840,6 +849,7 @@ def _retry_after(now_epoch_seconds: Callable[[], int | float]) -> int:
 __all__ = [
     "RunProcessV1",
     "SourceReconciliationAcceptanceV1",
+    "SourceReconciliationContinuationProhibitedV1",
     "SourceReconciliationRequestV1",
     "SourceReconciliationResultV1",
     "reconcile_source_drift_v1",

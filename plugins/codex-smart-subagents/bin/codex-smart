@@ -39,6 +39,7 @@ from codex_smart_subagents.launcher import (  # noqa: E402
     run_launcher,
 )
 from codex_smart_subagents.source_reconciliation_v1 import (  # noqa: E402
+    SourceReconciliationContinuationProhibitedV1,
     SourceReconciliationResultV1,
     reconcile_source_drift_v1,
 )
@@ -193,6 +194,13 @@ def main() -> int:
                             gateway_layout=gateway_layout,
                             environment=environment,
                         )
+                    except SourceReconciliationContinuationProhibitedV1:
+                        print(
+                            "codex-smart: SOURCE_UPDATE_CLEANUP_REQUIRED; "
+                            "запуск остановлен",
+                            file=sys.stderr,
+                        )
+                        return 69
                     except Exception:
                         print(
                             "codex-smart: SOURCE_UPDATE_RETRY_AFTER; "

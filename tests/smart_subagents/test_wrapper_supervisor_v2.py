@@ -26,6 +26,9 @@ from codex_smart_subagents.launcher import (  # noqa: E402
     classify_managed_invocation,
     run_launcher,
 )
+from codex_smart_subagents.source_reconciliation_v1 import (  # noqa: E402
+    SourceReconciliationContinuationProhibitedV1,
+)
 
 
 def _ordinary(executable: Path, reason: str = "HEALTH_UNAVAILABLE") -> GatewayDecision:
@@ -227,6 +230,46 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
             error.getvalue(),
         )
         self.assertNotIn("private updater failure", error.getvalue())
+
+    def test_cleanup_prohibition_returns_69_without_launch_or_details(self) -> None:
+        decision = self._ready_snapshot_decision()
+        error = StringIO()
+
+        def prohibited(**_kwargs):
+            raise SourceReconciliationContinuationProhibitedV1()
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"CODEX_HOME": str(self.codex_home)},
+                clear=True,
+            ),
+            mock.patch.object(sys, "argv", [str(WRAPPER), "задача"]),
+            mock.patch.object(
+                os,
+                "execve",
+                side_effect=lambda *_args: self.fail("execve was called"),
+            ),
+            mock.patch.dict(
+                self.globals,
+                {
+                    "v2_gateway_state_present": lambda _layout: True,
+                    "_prepare_v2_decision": lambda **_kwargs: decision,
+                    "_reconcile_source_drift": prohibited,
+                    "run_permanent_gateway": lambda *_args, **_kwargs: self.fail(
+                        "permanent gateway was called"
+                    ),
+                },
+            ),
+            redirect_stderr(error),
+        ):
+            self.assertEqual(69, self.globals["main"]())
+
+        self.assertEqual(
+            "codex-smart: SOURCE_UPDATE_CLEANUP_REQUIRED; запуск остановлен\n",
+            error.getvalue(),
+        )
+        self.assertNotIn("CONTINUATION_PROHIBITED", error.getvalue())
 
     def test_restart_guard_never_runs_reconciler_twice(self) -> None:
         decision = self._ready_snapshot_decision()
