@@ -3,12 +3,14 @@ from __future__ import annotations
 import copy
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import unittest
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from jsonschema import Draft202012Validator
@@ -42,12 +44,18 @@ from codex_smart_subagents.activation_transition_v2 import (  # noqa: E402
     shutdown_current_activation_v2,
     stage_upgrade_activation_v2,
 )
+from codex_smart_subagents.activation_preparation_v2 import (  # noqa: E402
+    ActivationPreparationExecutorV2,
+)
 import codex_smart_subagents.activation_transition_v2 as transition_v2  # noqa: E402
 from codex_smart_subagents.health_bootstrap_v2 import (  # noqa: E402
     bootstrap_health_activation_v2,
 )
 from codex_smart_subagents.policy_bundle_v2 import (  # noqa: E402
     load_policy_bundle_v2,
+)
+from codex_smart_subagents.installer_upgrade_v2 import (  # noqa: E402
+    build_upgrade_preparation_v2,
 )
 from codex_smart_subagents.lifecycle_controller_protocol_v2 import (  # noqa: E402
     LifecycleControllerCommandProofV2,
@@ -578,6 +586,94 @@ class ActivationTransitionV2Tests(unittest.TestCase):
             str(self.codex_binary),
             proof.installer_receipt_document["codexBinary"],
         )
+
+    def test_preparation_receipt_reuses_historical_proof_after_controller_change(
+        self,
+    ) -> None:
+        from tests.smart_subagents.test_install_adaptive_subagents import (
+            INSTALLER_PATH,
+            load_script,
+        )
+
+        installer = load_script(
+            "installer_historical_transition_proof_under_test",
+            INSTALLER_PATH,
+        )
+        install_layout = installer.InstallLayout(
+            source_root=ROOT,
+            codex_home=self.codex_home,
+            bin_dir=self.operator_bin,
+            codex_binary=self.codex_binary,
+            state_home=self.binding.state_home,
+        )
+        self.codex_binary.chmod(0o700)
+        self.codex_binary.write_bytes(b"#!/bin/sh\nexit 42\n")
+        self.codex_binary.chmod(0o500)
+        historical = self.capture()
+        operation_id = "op2_" + "d" * 32
+        source_digest = installer._source_digest(install_layout)
+        preparation = build_upgrade_preparation_v2(
+            proof=historical,
+            operation_id=operation_id,
+            source_root=ROOT,
+            codex_binary=self.codex_binary,
+            policy_bundle=self.policy,
+            snapshotter=self.snapshotter,
+            interface_executor=self.interface_executor,
+            source_digest=source_digest,
+        )
+        first_receipt = ActivationPreparationExecutorV2(
+            definition=preparation.definition,
+            callbacks=preparation.callbacks,
+        ).execute()
+        database_info_before = historical.database_path.stat()
+        self.runtime.close()
+        connection = sqlite3.connect(historical.database_path)
+        try:
+            connection.execute(
+                "update controller_state "
+                "set control_epoch = control_epoch + 1"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        database_info_after = historical.database_path.stat()
+        self.assertEqual(
+            (database_info_before.st_dev, database_info_before.st_ino),
+            (database_info_after.st_dev, database_info_after.st_ino),
+        )
+        current = SimpleNamespace(
+            installation_id=historical.installation_id,
+            activation_id=historical.activation_id,
+            current_operation_id=historical.current_operation_id,
+            codex_home=historical.codex_home,
+            state_home=historical.state_home,
+            database_path=historical.database_path,
+            installer_receipt_path=historical.installer_receipt_path,
+        )
+
+        reused = installer._reuse_persisted_upgrade_transition_proof_v2(
+            install_layout,
+            proof=current,
+            operation_id=operation_id,
+        )
+
+        self.assertEqual(historical.proof_fingerprint, reused.proof_fingerprint)
+        repeated_preparation = build_upgrade_preparation_v2(
+            proof=reused,
+            operation_id=operation_id,
+            source_root=ROOT,
+            codex_binary=self.codex_binary,
+            policy_bundle=self.policy,
+            snapshotter=self.snapshotter,
+            interface_executor=self.interface_executor,
+            source_digest=source_digest,
+        )
+        repeated_receipt = ActivationPreparationExecutorV2(
+            definition=repeated_preparation.definition,
+            callbacks=repeated_preparation.callbacks,
+        ).execute()
+        self.assertEqual(first_receipt, repeated_receipt)
 
     def test_capture_rejects_foreign_lexical_codex_path_with_same_bytes(
         self,

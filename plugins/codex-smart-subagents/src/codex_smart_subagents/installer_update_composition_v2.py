@@ -2900,7 +2900,7 @@ def build_update_matched_active_definition_v2(
     )
     from .candidate_ready_channel_v2 import CandidateSpawnActionV2
     from .installer_update_controller_ports_v2 import (
-        observe_controller_database_v2,
+        observe_controller_database_state_v2,
     )
     from .installer_update_operation_v2 import UPDATE_MATCHED_ACTIVE_STEPS_V2
     from .installer_upgrade_v2 import (
@@ -2970,7 +2970,9 @@ def build_update_matched_active_definition_v2(
         prepared=prepared_manifest,
     )
     database_binding = build_upgrade_database_binding_v2(preparation_receipt)
-    controller_before = observe_controller_database_v2(proof.database_path)
+    controller_before, controller_state = observe_controller_database_state_v2(
+        proof.database_path
+    )
     controller_definitions = build_update_controller_step_definitions_v2(
         proof=proof,
         preparation_receipt=preparation_receipt,
@@ -2986,7 +2988,7 @@ def build_update_matched_active_definition_v2(
         operation_id=operation_id,
         shutdown_command_id=str(shutdown_definition.command_id),
         state_home=proof.state_home,
-        controller_state=proof.controller_row,
+        controller_state=controller_state,
     )
     shutdown_cleanup_definition = build_shutdown_socket_cleanup_step_definition_v2(
         plan=shutdown_cleanup_plan,

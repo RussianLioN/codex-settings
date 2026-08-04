@@ -1855,9 +1855,17 @@ class InstallerV2RepeatTests(_InstallerBase):
         self,
     ) -> None:
         events: list[str] = []
+        proof = SimpleNamespace(
+            activation_id=self.activation_id,
+            controller_row={"control_epoch": 4},
+        )
+        binding = SimpleNamespace(
+            activation_id=self.activation_id,
+            controller_row={"control_epoch": 4},
+        )
         persisted = SimpleNamespace(
             state=self.installer.GatewayState.READY,
-            runtime_binding=object(),
+            runtime_binding=binding,
             source_drift=object(),
         )
         resolver = mock.Mock()
@@ -1865,7 +1873,7 @@ class InstallerV2RepeatTests(_InstallerBase):
 
         def capture(**_kwargs):
             events.append("capture")
-            raise RuntimeError("stop after drift proof")
+            return proof
 
         with (
             mock.patch.object(
@@ -1890,9 +1898,232 @@ class InstallerV2RepeatTests(_InstallerBase):
                 "_try_reconcile_pending_committed_upgrade_v2",
                 return_value=None,
             ),
-            self.assertRaisesRegex(RuntimeError, "stop after drift proof"),
         ):
-            self.installer._upgrade_install(
+            result = self.installer._capture_upgrade_transition_proof_v2(
+                self.layout,
+                extra_environment=None,
+            )
+
+        self.assertIs(proof, result.proof)
+        self.assertTrue(result.source_drift)
+        self.assertEqual(2, resolver.resolve_persisted_activation.call_count)
+        self.assertEqual(["capture"], events)
+
+    def test_drift_disappearing_during_capture_restores_supervision(self) -> None:
+        proof = SimpleNamespace(
+            activation_id=self.activation_id,
+            controller_row={"control_epoch": 4},
+        )
+        binding = SimpleNamespace(
+            activation_id=self.activation_id,
+            controller_row={"control_epoch": 4},
+        )
+        drifted = SimpleNamespace(
+            state=self.installer.GatewayState.READY,
+            runtime_binding=binding,
+            source_drift=object(),
+        )
+        steady = SimpleNamespace(
+            state=self.installer.GatewayState.READY,
+            runtime_binding=binding,
+            source_drift=None,
+        )
+        resolver = mock.Mock()
+        resolver.resolve_persisted_activation.side_effect = [drifted, steady]
+
+        with (
+            mock.patch.object(
+                self.installer,
+                "ActivationResolver",
+                return_value=resolver,
+            ),
+            mock.patch.object(
+                self.installer,
+                "capture_activation_transition_proof_v2",
+                return_value=proof,
+            ) as capture,
+            mock.patch.object(
+                self.installer,
+                "_supervise_existing",
+                return_value=self.ready_decision(),
+            ) as supervise,
+        ):
+            result = self.installer._capture_upgrade_transition_proof_v2(
+                self.layout,
+                extra_environment=None,
+            )
+
+        self.assertIs(proof, result.proof)
+        self.assertFalse(result.source_drift)
+        self.assertEqual(2, capture.call_count)
+        supervise.assert_called_once_with(
+            self.layout,
+            extra_environment=None,
+        )
+
+    def test_drift_recovery_uses_the_prepared_immutable_candidate(self) -> None:
+        candidate = self.root / "candidate"
+        plugin_root = (
+            candidate
+            / "marketplace"
+            / "plugins"
+            / self.installer.PLUGIN_NAME
+        )
+        proof = SimpleNamespace(activation_id=self.activation_id)
+        receipt = SimpleNamespace(
+            activation_intent=SimpleNamespace(activation_dir=candidate),
+        )
+        decision = dataclasses.replace(
+            self.ready_decision(),
+            runtime_binding=SimpleNamespace(activation_id=self.activation_id),
+            source_drift=object(),
+        )
+
+        with mock.patch.object(
+            self.installer,
+            "_supervise_existing",
+            return_value=decision,
+        ) as supervise:
+            observed = self.installer._recover_drifted_controller_from_candidate_v2(
+                self.layout,
+                proof=proof,
+                preparation_receipt=receipt,
+                extra_environment={"TEST_BOUNDARY": "closed"},
+            )
+
+        self.assertIs(decision, observed)
+        supervise.assert_called_once_with(
+            self.layout,
+            extra_environment={"TEST_BOUNDARY": "closed"},
+            plugin_root=plugin_root,
+        )
+
+    def test_drift_recovery_rejects_foreign_runtime_binding(self) -> None:
+        candidate = self.root / "candidate"
+        proof = SimpleNamespace(activation_id=self.activation_id)
+        receipt = SimpleNamespace(
+            activation_intent=SimpleNamespace(activation_dir=candidate),
+        )
+        decision = dataclasses.replace(
+            self.ready_decision(),
+            runtime_binding=SimpleNamespace(
+                activation_id="act2_" + "f" * 64,
+            ),
+            source_drift=object(),
+        )
+
+        with (
+            mock.patch.object(
+                self.installer,
+                "_supervise_existing",
+                return_value=decision,
+            ),
+            self.assertRaises(self.installer.InstallError) as captured,
+        ):
+            self.installer._recover_drifted_controller_from_candidate_v2(
+                self.layout,
+                proof=proof,
+                preparation_receipt=receipt,
+                extra_environment=None,
+            )
+
+        self.assertEqual(
+            "DRIFT_CONTROLLER_RECOVERY_INVALID",
+            captured.exception.code,
+        )
+
+    def test_upgrade_orders_historical_proof_recovery_before_composition(
+        self,
+    ) -> None:
+        events: list[str] = []
+        current_proof = SimpleNamespace(
+            installation_id=self.installation_id,
+            current_operation_id=self.operation_id,
+            activation_id=self.activation_id,
+        )
+        historical_proof = SimpleNamespace(name="historical-proof")
+        preparation = SimpleNamespace(name="preparation")
+        preparation_receipt = SimpleNamespace(name="preparation-receipt")
+
+        def capture(*_args, **_kwargs):
+            events.append("capture")
+            return self.installer._UpgradeTransitionCaptureV2(
+                proof=current_proof,
+                source_drift=True,
+            )
+
+        def reuse(_layout, *, proof, operation_id):
+            self.assertIs(current_proof, proof)
+            self.assertTrue(operation_id.startswith("op2_"))
+            events.append("reuse-historical-proof")
+            return historical_proof
+
+        def build(**kwargs):
+            self.assertIs(historical_proof, kwargs["proof"])
+            events.append("build-preparation")
+            return preparation
+
+        def prepare(**kwargs):
+            self.assertIs(historical_proof, kwargs["proof"])
+            self.assertIs(preparation, kwargs["preparation"])
+            events.append("verify-preparation")
+            return preparation_receipt
+
+        def recover(_layout, **kwargs):
+            self.assertIs(historical_proof, kwargs["proof"])
+            self.assertIs(preparation_receipt, kwargs["preparation_receipt"])
+            events.append("recover-controller")
+
+        def compose(_layout, **kwargs):
+            self.assertIs(historical_proof, kwargs["proof"])
+            self.assertIs(preparation, kwargs["preparation"])
+            self.assertIs(preparation_receipt, kwargs["preparation_receipt"])
+            events.append("compose")
+            return SimpleNamespace(attempt_id="att2_test")
+
+        with (
+            mock.patch.object(
+                self.installer,
+                "_try_reconcile_pending_committed_upgrade_v2",
+                return_value=None,
+            ),
+            mock.patch.object(
+                self.installer,
+                "_capture_upgrade_transition_proof_v2",
+                side_effect=capture,
+            ),
+            mock.patch.object(
+                self.installer,
+                "_reuse_persisted_upgrade_transition_proof_v2",
+                side_effect=reuse,
+            ),
+            mock.patch.object(
+                self.installer,
+                "build_upgrade_preparation_v2",
+                side_effect=build,
+            ),
+            mock.patch.object(
+                self.installer,
+                "execute_and_verify_upgrade_preparation_v2",
+                side_effect=prepare,
+            ),
+            mock.patch.object(
+                self.installer,
+                "_recover_drifted_controller_from_candidate_v2",
+                side_effect=recover,
+            ),
+            mock.patch.object(
+                self.installer,
+                "_execute_fresh_update_composition_v2",
+                side_effect=compose,
+            ),
+            mock.patch.object(
+                self.installer,
+                "_try_reconcile_committed_upgrade_v2",
+                return_value={"sourceDigest": "a" * 64},
+            ),
+        ):
+            result = self.installer._upgrade_install(
                 self.layout,
                 previous_receipt={},
                 source_digest="a" * 64,
@@ -1900,8 +2131,18 @@ class InstallerV2RepeatTests(_InstallerBase):
                 extra_environment=None,
             )
 
-        resolver.resolve_persisted_activation.assert_called_once_with()
-        self.assertEqual(["capture"], events)
+        self.assertEqual(
+            [
+                "capture",
+                "reuse-historical-proof",
+                "build-preparation",
+                "verify-preparation",
+                "recover-controller",
+                "compose",
+            ],
+            events,
+        )
+        self.assertEqual("upgraded", result["status"])
 
     def test_upgrade_recovers_current_controller_before_preparation(self) -> None:
         events: list[str] = []

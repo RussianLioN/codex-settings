@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -53,6 +54,9 @@ from codex_smart_subagents.activation_preparation_v2 import (  # noqa: E402
 )
 from codex_smart_subagents.installer_upgrade_v2 import (  # noqa: E402
     build_upgrade_preparation_v2,
+)
+from codex_smart_subagents.installer_update_controller_ports_v2 import (  # noqa: E402
+    observe_controller_database_state_v2,
 )
 from tests.smart_subagents.test_installer_entrypoint_v2 import (  # noqa: E402
     _load_installer,
@@ -1495,14 +1499,42 @@ class InstallerUpdateFullDefinitionV2Tests(unittest.TestCase):
         )["fixtures"]["automaton"]
         registry = LifecyclePlanRegistryV2.from_document(automaton)
 
-        plans = build_update_matched_active_definition_v2(
-            registry=registry,
-            proof=proof,
-            preparation=preparation,
-            preparation_receipt=receipt,
-            registry_plan=registry_plan,
-            launcher_plan=launcher_plan,
-            candidate_action=candidate_action,
+        fresh_controller, fresh_controller_row = (
+            observe_controller_database_state_v2(proof.database_path)
+        )
+        from codex_smart_subagents.shutdown_socket_cleanup_v2 import (
+            build_shutdown_socket_cleanup_plan_v2,
+        )
+
+        with (
+            mock.patch(
+                "codex_smart_subagents.installer_update_controller_ports_v2."
+                "observe_controller_database_state_v2",
+                return_value=(fresh_controller, fresh_controller_row),
+            ) as controller_observer,
+            mock.patch(
+                "codex_smart_subagents.shutdown_socket_cleanup_v2."
+                "build_shutdown_socket_cleanup_plan_v2",
+                wraps=build_shutdown_socket_cleanup_plan_v2,
+            ) as cleanup_builder,
+        ):
+            plans = build_update_matched_active_definition_v2(
+                registry=registry,
+                proof=proof,
+                preparation=preparation,
+                preparation_receipt=receipt,
+                registry_plan=registry_plan,
+                launcher_plan=launcher_plan,
+                candidate_action=candidate_action,
+            )
+        controller_observer.assert_called_once_with(proof.database_path)
+        self.assertEqual(
+            fresh_controller,
+            plans.controller_definitions["maintenance_begin"].before,
+        )
+        self.assertIs(
+            fresh_controller_row,
+            cleanup_builder.call_args.kwargs["controller_state"],
         )
         self.assertFalse(
             plans.controller_definitions["maintenance_resume"]

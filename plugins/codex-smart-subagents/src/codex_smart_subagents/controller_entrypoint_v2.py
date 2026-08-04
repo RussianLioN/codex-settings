@@ -43,6 +43,7 @@ _FIRST_INSTALL_OPERATION_ENVIRONMENT = "CODEX_V2_FIRST_INSTALL_OPERATION_ID"
 _FIRST_INSTALLATION_ENVIRONMENT = "CODEX_V2_FIRST_INSTALLATION_ID"
 _OPERATION_ID_PATTERN = re.compile(r"^op2_[0-9a-f]{32}$")
 _INSTALLATION_ID_PATTERN = re.compile(r"^ins2_[0-9a-f]{32}$")
+_PLUGIN_RELATIVE_PATH = Path("plugins") / "codex-smart-subagents"
 
 
 @dataclass
@@ -143,6 +144,7 @@ def load_controller_entrypoint_config_v2(
             "CODEX_HOME не задан абсолютным путём",
         )
     codex_home = Path(raw_home).resolve(strict=True)
+    entrypoint_plugin_root = plugin_root.resolve(strict=True)
     present = [bool(environment.get(name)) for name in _BOOTSTRAP_ENVIRONMENT]
     if any(present) and not all(present):
         raise ControllerEntrypointV2Error(
@@ -184,30 +186,45 @@ def load_controller_entrypoint_config_v2(
                 "BOOTSTRAP_ENVIRONMENT_INCOMPLETE",
                 "первичный запуск требует оба идентификатора первой установки",
             )
+        runtime_plugin_root = entrypoint_plugin_root
     else:
-        source_root = plugin_root.resolve(strict=True)
-        wrapper = (plugin_root / "bin" / "codex-smart").resolve(strict=True)
+        resolver_wrapper = (
+            entrypoint_plugin_root / "bin" / "codex-smart"
+        ).resolve(strict=True)
         layout = GatewayLayout.for_codex_home(codex_home)
         if recovery_decision_provider is None:
             decision = ActivationResolver(
                 layout=layout,
-                wrapper=wrapper,
+                wrapper=resolver_wrapper,
                 snapshot_verifier=_default_snapshot_verifier,
             ).resolve_persisted_activation()
         else:
             if not callable(recovery_decision_provider):
                 raise TypeError("recovery_decision_provider must be callable")
-            decision = recovery_decision_provider(layout=layout, wrapper=wrapper)
+            decision = recovery_decision_provider(
+                layout=layout,
+                wrapper=resolver_wrapper,
+            )
         try:
             # sourceLocator связывает argv[0] лексически. Раскрытие управляемой
             # ссылки заставляет восстановление сравнить физическую цель с
             # сохранённым путём и отвергнуть тот же исполняемый файл Codex.
             codex_binary = Path(decision.executable).expanduser().absolute()
-            state_home = Path(decision.runtime_binding.state_home)
+            binding = decision.runtime_binding
+            state_home = Path(binding.state_home)
+            marketplace_path = Path(binding.marketplace_path)
+            expected_plugin_root = marketplace_path / _PLUGIN_RELATIVE_PATH
+            runtime_plugin_root = expected_plugin_root.resolve(strict=True)
+            if runtime_plugin_root != expected_plugin_root.absolute():
+                raise ValueError("persisted plugin root contains a symbolic link")
+            source_root = runtime_plugin_root
+            wrapper = (
+                runtime_plugin_root / "bin" / "codex-smart"
+            ).resolve(strict=True)
         except (AttributeError, OSError, TypeError, ValueError) as exc:
             raise ControllerEntrypointV2Error(
                 "RECOVERY_EXECUTABLE_UNAVAILABLE",
-                "принятая активация не дала обычный исполняемый файл",
+                "принятая активация не дала полный рабочий набор путей",
             ) from exc
         expected_state_home = environment.get(_STATE_HOME_ENVIRONMENT)
         if expected_state_home:
@@ -254,7 +271,7 @@ def load_controller_entrypoint_config_v2(
     runtime_environment["PATH"] = os.defpath
     return ControllerEntrypointConfigV2(
         source_root=source_root,
-        plugin_root=plugin_root.resolve(strict=True),
+        plugin_root=runtime_plugin_root,
         codex_home=codex_home,
         state_home=state_home,
         codex_binary=codex_binary,

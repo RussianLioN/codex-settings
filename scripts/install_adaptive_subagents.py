@@ -174,6 +174,12 @@ class InstallError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class _UpgradeTransitionCaptureV2:
+    proof: Any
+    source_drift: bool
+
+
+@dataclass(frozen=True)
 class _MarketplaceSourceContract:
     plugin_version: str
     plugin_source_path: str
@@ -1036,10 +1042,11 @@ def _upgrade_install(
             return reconciled
         previous_receipt = _load_installer_receipt(layout.installer_receipt_path)
 
-    proof = _capture_upgrade_transition_proof_v2(
+    transition = _capture_upgrade_transition_proof_v2(
         layout,
         extra_environment=extra_environment,
     )
+    proof = transition.proof
     codex_binary_sha256 = file_digest(layout.codex_binary)
     operation_id = _update_operation_id_v2(
         installation_id=proof.installation_id,
@@ -1048,6 +1055,11 @@ def _upgrade_install(
         source_digest=source_digest,
         codex_binary_path=layout.codex_binary,
         codex_binary_sha256=codex_binary_sha256,
+    )
+    proof = _reuse_persisted_upgrade_transition_proof_v2(
+        layout,
+        proof=proof,
+        operation_id=operation_id,
     )
     preparation = build_upgrade_preparation_v2(
         proof=proof,
@@ -1061,6 +1073,13 @@ def _upgrade_install(
         proof=proof,
         preparation=preparation,
     )
+    if transition.source_drift:
+        _recover_drifted_controller_from_candidate_v2(
+            layout,
+            proof=proof,
+            preparation_receipt=preparation_receipt,
+            extra_environment=extra_environment,
+        )
     run = _execute_fresh_update_composition_v2(
         layout,
         proof=proof,
@@ -1662,23 +1681,24 @@ def _capture_upgrade_transition_proof_v2(
     layout: InstallLayout,
     *,
     extra_environment: Mapping[str, str] | None,
-):
-    """Получить доказательство перехода, не требуя устаревший контроллер.
+) -> _UpgradeTransitionCaptureV2:
+    """Получить доказательство до восстановления устаревшего контроллера.
 
-    При доказанном изменении внешнего Codex старая активация уже не может
-    честно достичь полной готовности на новом двоичном файле. В этом одном
-    случае достаточно полной проверки сохранённой активации без живого
-    контроллера; само доказательство перехода немедленно повторяет проверку.
-    Для всех остальных обновлений сохраняется прежний порядок: сначала
-    восстановление полной готовности, затем захват доказательства.
+    При доказанном изменении внешнего Codex сначала фиксируется полная
+    статическая проверка принятой активации. Её собственный неизменяемый код
+    может предшествовать поддержке такого дрейфа, поэтому живой контроллер
+    позднее восстанавливается уже проверенным кодом подготовленного кандидата,
+    но на снимке Codex и политике прежней активации. Для остальных обновлений
+    сохраняется прежний порядок: полная готовность, затем доказательство.
     """
 
+    resolver = ActivationResolver(
+        layout=layout.gateway_layout,
+        wrapper=layout.launcher_path,
+    )
     persisted = None
     try:
-        persisted = ActivationResolver(
-            layout=layout.gateway_layout,
-            wrapper=layout.launcher_path,
-        ).resolve_persisted_activation()
+        persisted = resolver.resolve_persisted_activation()
     except operation_deadline_v2.OperationDeadlineExceededV2:
         raise
     except Exception:
@@ -1692,21 +1712,139 @@ def _capture_upgrade_transition_proof_v2(
         and persisted.runtime_binding is not None
         and persisted.source_drift is not None
     ):
-        return capture_activation_transition_proof_v2(
+        proof = capture_activation_transition_proof_v2(
             codex_home=layout.codex_home,
             wrapper=layout.launcher_path,
             installer_receipt_path=layout.installer_receipt_path,
         )
+        try:
+            confirmed = resolver.resolve_persisted_activation()
+        except operation_deadline_v2.OperationDeadlineExceededV2:
+            raise
+        except Exception:
+            confirmed = None
+        confirmed_binding = (
+            None if confirmed is None else confirmed.runtime_binding
+        )
+        if (
+            confirmed is not None
+            and confirmed.state is GatewayState.READY
+            and confirmed.source_drift is not None
+            and confirmed_binding is not None
+            and confirmed_binding.activation_id == proof.activation_id
+            and dict(confirmed_binding.controller_row) == dict(proof.controller_row)
+        ):
+            return _UpgradeTransitionCaptureV2(
+                proof=proof,
+                source_drift=True,
+            )
 
     _supervise_existing(
         layout,
         extra_environment=extra_environment,
     )
-    return capture_activation_transition_proof_v2(
-        codex_home=layout.codex_home,
-        wrapper=layout.launcher_path,
-        installer_receipt_path=layout.installer_receipt_path,
+    return _UpgradeTransitionCaptureV2(
+        proof=capture_activation_transition_proof_v2(
+            codex_home=layout.codex_home,
+            wrapper=layout.launcher_path,
+            installer_receipt_path=layout.installer_receipt_path,
+        ),
+        source_drift=False,
     )
+
+
+def _reuse_persisted_upgrade_transition_proof_v2(
+    layout: InstallLayout,
+    *,
+    proof: Any,
+    operation_id: str,
+) -> Any:
+    """Сохранить исходный proof завершённой подготовки после перезапуска.
+
+    Восстановление мёртвого контроллера меняет только строку controller_state.
+    Если питание пропало до основного журнала, завершённая prep-квитанция
+    остаётся единственным источником исходного proof для той же операции.
+    """
+
+    from codex_smart_subagents.activation_preparation_v2 import (
+        ActivationPreparationReceiptV2,
+    )
+    from codex_smart_subagents.activation_transition_rehydration_v2 import (
+        rehydrate_activation_transition_proof_v2,
+    )
+
+    receipt_path = (
+        layout.gateway_layout.receipts_root
+        / proof.installation_id
+        / f"{operation_id}.preparation.json"
+    )
+    if not os.path.lexists(receipt_path):
+        return proof
+    try:
+        receipt = ActivationPreparationReceiptV2.from_path(receipt_path)
+        snapshot = receipt.transition_proof_snapshot
+        if snapshot is None or snapshot.operation_id != operation_id:
+            raise ValueError("preparation receipt has no matching proof snapshot")
+        historical = rehydrate_activation_transition_proof_v2(snapshot)
+    except operation_deadline_v2.OperationDeadlineExceededV2:
+        raise
+    except Exception as exc:
+        raise InstallError(
+            "UPDATE_PREPARATION_PROOF_INVALID",
+            str(exc),
+        ) from exc
+    stable_identity = (
+        "installation_id",
+        "activation_id",
+        "current_operation_id",
+        "codex_home",
+        "state_home",
+        "database_path",
+        "installer_receipt_path",
+    )
+    if any(
+        getattr(historical, name) != getattr(proof, name)
+        for name in stable_identity
+    ):
+        raise InstallError(
+            "UPDATE_PREPARATION_PROOF_INVALID",
+            "prep-квитанция относится к другой принятой активации",
+        )
+    return historical
+
+
+def _recover_drifted_controller_from_candidate_v2(
+    layout: InstallLayout,
+    *,
+    proof: Any,
+    preparation_receipt: Any,
+    extra_environment: Mapping[str, str] | None,
+) -> GatewayDecision:
+    """Восстановить прежнюю личность контроллера из готового кандидата."""
+
+    plugin_root = (
+        preparation_receipt.activation_intent.activation_dir
+        / "marketplace"
+        / "plugins"
+        / PLUGIN_NAME
+    )
+    decision = _supervise_existing(
+        layout,
+        extra_environment=extra_environment,
+        plugin_root=plugin_root,
+    )
+    if (
+        decision.state is not GatewayState.READY
+        or decision.activation_id != proof.activation_id
+        or decision.runtime_binding is None
+        or decision.runtime_binding.activation_id != proof.activation_id
+        or decision.source_drift is None
+    ):
+        raise InstallError(
+            "DRIFT_CONTROLLER_RECOVERY_INVALID",
+            "кандидат не восстановил точную прежнюю активацию",
+        )
+    return decision
 
 
 def _try_reconcile_committed_upgrade_v2(
@@ -2171,19 +2309,22 @@ def _supervise_existing(
     layout: InstallLayout,
     *,
     extra_environment: Mapping[str, str] | None = None,
+    plugin_root: Path | None = None,
 ) -> GatewayDecision:
     resolver = ActivationResolver(
         layout=layout.gateway_layout,
         wrapper=layout.launcher_path,
     )
     try:
-        plugin_root = layout.installed_plugin_root.resolve(strict=True)
+        selected_plugin_root = (
+            layout.installed_plugin_root if plugin_root is None else plugin_root
+        ).resolve(strict=True)
         supervisor = ControllerSupervisorV2(
             resolver=resolver,
             manifest_path=layout.gateway_layout.manifest_path,
             state_home=layout.state_home,
             codex_home=layout.codex_home,
-            plugin_root=plugin_root,
+            plugin_root=selected_plugin_root,
             source_environment=(
                 os.environ if extra_environment is None else extra_environment
             ),

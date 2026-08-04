@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -126,6 +127,16 @@ class ControllerEntrypointV2Tests(unittest.TestCase):
             wrapper=self.wrapper,
             environment={"HOME": str(self.root), "TMPDIR": "/tmp"},
         )
+
+    def _accepted_plugin_tree(self) -> tuple[Path, Path]:
+        marketplace = self.root / "accepted-marketplace"
+        plugin_root = marketplace / "plugins" / "codex-smart-subagents"
+        bin_directory = plugin_root / "bin"
+        bin_directory.mkdir(parents=True, mode=0o700)
+        wrapper = bin_directory / "codex-smart"
+        wrapper.write_text("#!/bin/sh\n", encoding="utf-8")
+        wrapper.chmod(0o500)
+        return marketplace, plugin_root
 
     def test_start_composes_health_provider_production_and_command_socket(self) -> None:
         decision = _decision(self.state_home)
@@ -357,31 +368,57 @@ class ControllerEntrypointV2Tests(unittest.TestCase):
 
         self.assertEqual(str(real_tmp), config.environment["TMPDIR"])
 
-    def test_recovery_config_uses_persisted_ordinary_executable(self) -> None:
+    def test_recovery_config_uses_persisted_activation_runtime_tree(self) -> None:
+        marketplace, accepted_plugin_root = self._accepted_plugin_tree()
+        provider_calls: list[dict[str, object]] = []
+
+        def persisted_decision(**kwargs):
+            provider_calls.append(kwargs)
+            return SimpleNamespace(
+                executable=self.codex,
+                runtime_binding=SimpleNamespace(
+                    state_home=self.state_home,
+                    marketplace_path=marketplace,
+                ),
+            )
+
         config = load_controller_entrypoint_config_v2(
             plugin_root=PLUGIN_ROOT,
             environment={"CODEX_HOME": str(self.codex_home)},
-            recovery_decision_provider=lambda **_kwargs: SimpleNamespace(
-                executable=self.codex,
-                runtime_binding=SimpleNamespace(state_home=self.state_home),
-            ),
+            recovery_decision_provider=persisted_decision,
         )
-        self.assertEqual(PLUGIN_ROOT, config.source_root)
+
+        self.assertEqual(
+            [
+                {
+                    "layout": mock.ANY,
+                    "wrapper": (PLUGIN_ROOT / "bin" / "codex-smart").resolve(),
+                }
+            ],
+            provider_calls,
+        )
+        self.assertEqual(accepted_plugin_root, config.source_root)
+        self.assertEqual(accepted_plugin_root, config.plugin_root)
         self.assertEqual(self.codex, config.codex_binary)
         self.assertEqual(
-            (PLUGIN_ROOT / "bin" / "codex-smart").resolve(), config.wrapper
+            (accepted_plugin_root / "bin" / "codex-smart").resolve(),
+            config.wrapper,
         )
 
     def test_recovery_config_preserves_persisted_lexical_codex_path(self) -> None:
         selected_codex = self.root / "selected-recovery-codex"
         selected_codex.symlink_to(self.codex.name)
+        marketplace, _accepted_plugin_root = self._accepted_plugin_tree()
 
         config = load_controller_entrypoint_config_v2(
             plugin_root=PLUGIN_ROOT,
             environment={"CODEX_HOME": str(self.codex_home)},
             recovery_decision_provider=lambda **_kwargs: SimpleNamespace(
                 executable=selected_codex,
-                runtime_binding=SimpleNamespace(state_home=self.state_home),
+                runtime_binding=SimpleNamespace(
+                    state_home=self.state_home,
+                    marketplace_path=marketplace,
+                ),
             ),
         )
 

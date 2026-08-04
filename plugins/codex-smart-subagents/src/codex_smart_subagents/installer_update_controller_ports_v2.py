@@ -1033,6 +1033,15 @@ def observe_controller_database_v2(database_path: Path) -> ProjectionV2:
     return _read_controller_database(database_path).controller
 
 
+def observe_controller_database_state_v2(
+    database_path: Path,
+) -> tuple[ProjectionV2, Mapping[str, Any]]:
+    """Одним стабильным чтением получить проекцию и исходную строку контроллера."""
+
+    observation = _read_controller_database(database_path)
+    return observation.controller, copy.deepcopy(dict(observation.row))
+
+
 def observe_stopped_controller_database_v2(database_path: Path) -> ProjectionV2:
     """Получить точный остановленный orphan, ожидающий нового кандидата."""
 
@@ -2497,6 +2506,7 @@ __all__ = [
     "build_shutdown_controller_step_ports_v2",
     "build_update_controller_step_ports_v2",
     "observe_controller_database_v2",
+    "observe_controller_database_state_v2",
     "observe_stopped_controller_database_v2",
     "observe_runtime_quiescence_database_v2",
 ]

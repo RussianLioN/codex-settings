@@ -32,6 +32,7 @@ from codex_smart_subagents.installer_update_controller_ports_v2 import (  # noqa
     InstallerUpdateControllerPortsV2Error,
     build_update_controller_step_ports_v2,
     observe_controller_database_v2,
+    observe_controller_database_state_v2,
     observe_runtime_quiescence_database_v2,
 )
 from codex_smart_subagents.durable_process_ownership_v2 import (  # noqa: E402
@@ -1376,6 +1377,28 @@ class InstallerUpdateControllerPortsV2Tests(unittest.TestCase):
             self.assertEqual({0}, set(quiescence.value["workCounts"].values()))
         finally:
             listener.close()
+
+    def test_controller_database_state_observer_uses_one_stable_read(self) -> None:
+        from codex_smart_subagents import installer_update_controller_ports_v2 as ports
+
+        row = {"control_epoch": 7}
+        observation = SimpleNamespace(
+            controller=self.accepting,
+            row=row,
+        )
+        with mock.patch.object(
+            ports,
+            "_read_controller_database",
+            return_value=observation,
+        ) as reader:
+            controller, controller_row = observe_controller_database_state_v2(
+                self.current_database
+            )
+
+        reader.assert_called_once_with(self.current_database)
+        self.assertIs(self.accepting, controller)
+        self.assertEqual(row, controller_row)
+        self.assertIsNot(row, controller_row)
 
     def test_controller_database_connect_preserves_exact_root_deadline(self) -> None:
         deadline_error = OperationDeadlineExceededV2(
