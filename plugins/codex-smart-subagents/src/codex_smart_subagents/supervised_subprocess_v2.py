@@ -362,6 +362,8 @@ def _collect_bounded_output(
                         written = os.write(
                             stdin_fd, stdin[stdin_offset : stdin_offset + 65536]
                         )
+                    except (BlockingIOError, InterruptedError):
+                        continue
                     except (BrokenPipeError, OSError):
                         _close_stdin(selector, process, stdin_fd)
                         continue

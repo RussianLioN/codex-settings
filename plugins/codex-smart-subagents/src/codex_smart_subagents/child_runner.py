@@ -608,6 +608,8 @@ def _collect_bounded_output(
             if descriptor == stdin_fd:
                 try:
                     written = os.write(stdin_fd, prompt[prompt_offset:])
+                except (BlockingIOError, InterruptedError):
+                    continue
                 except (BrokenPipeError, OSError):
                     _close_stdin(selector, process, stdin_fd)
                     stdin_open = False

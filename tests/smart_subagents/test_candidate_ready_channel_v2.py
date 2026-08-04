@@ -1396,8 +1396,10 @@ class CandidateReadyChannelV2Tests(unittest.TestCase):
             "'cwd': os.getcwd(), 'keys': sorted(os.environ), "
             "'tokenHash': hashlib.sha256(os.environ["
             "'CODEX_V2_CANDIDATE_READINESS_TOKEN'].encode()).hexdigest()}\n"
-            "target.write_text(json.dumps(value), encoding='utf-8')\n"
-            "target.chmod(0o600)\n"
+            "staged = target.with_suffix('.json.tmp')\n"
+            "staged.write_text(json.dumps(value), encoding='utf-8')\n"
+            "staged.chmod(0o600)\n"
+            "os.replace(staged, target)\n"
             "while True: time.sleep(0.05)\n",
             encoding="utf-8",
         )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 import signal
 import subprocess
@@ -8,6 +9,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -144,6 +146,54 @@ class SupervisedSubprocessV2Tests(unittest.TestCase):
         self.assertEqual(7, result.returncode)
         self.assertEqual(b"PAYLOAD", result.stdout)
         self.assertEqual(b"problem", result.stderr)
+
+    def test_retries_stdin_after_nonblocking_backpressure(self) -> None:
+        payload = b"supervised-stdin-" * 512
+        original_write = os.write
+        writes = 0
+        stdin_descriptor: int | None = None
+
+        def throttled_write(descriptor: int, chunk: bytes) -> int:
+            nonlocal stdin_descriptor, writes
+            if stdin_descriptor is None and bytes(chunk).startswith(
+                payload[:32]
+            ):
+                stdin_descriptor = descriptor
+            if descriptor == stdin_descriptor:
+                writes += 1
+                if writes == 1:
+                    return original_write(descriptor, chunk[:32])
+                if writes == 2:
+                    raise BlockingIOError(errno.EAGAIN, "temporary backpressure")
+            return original_write(descriptor, chunk)
+
+        deadline = OperationDeadlineV2.start(
+            operation="apply",
+            timeout_seconds=3,
+            timeout_code="APPLY_OPERATION_DEADLINE_EXCEEDED",
+        )
+        with patch.object(
+            supervised_subprocess_v2.os,
+            "write",
+            side_effect=throttled_write,
+        ):
+            result = run_supervised_command_v2(
+                argv=(
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())",
+                ),
+                label="backpressure-command",
+                stdin=payload,
+                local_timeout_seconds=1,
+                cleanup_wait_seconds=0.5,
+                max_output_bytes=len(payload) + 1024,
+                deadline=deadline,
+                supervisor=OperationProcessGroupSupervisorV2(),
+            )
+
+        self.assertEqual(payload, result.stdout)
+        self.assertGreaterEqual(writes, 3)
 
     def test_output_limit_softly_terminates_the_exact_group(self) -> None:
         supervisor = OperationProcessGroupSupervisorV2()

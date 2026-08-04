@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -261,6 +262,42 @@ class ChildRunnerTests(unittest.TestCase):
         self.assertFalse(marker.exists())
         self.assertEqual(1, len(self.canary.calls))
         self.assertEqual(self.profile.sha256, self.canary.calls[0].profile_sha256)
+
+    def test_retries_stdin_after_nonblocking_backpressure(self) -> None:
+        prompt = "Проверь полный ввод после временной занятости канала. " * 64
+        encoded_prompt = prompt.encode("utf-8")
+        original_write = os.write
+        writes = 0
+        stdin_descriptor: int | None = None
+
+        def throttled_write(descriptor: int, payload: bytes) -> int:
+            nonlocal stdin_descriptor, writes
+            if stdin_descriptor is None and bytes(payload).startswith(
+                encoded_prompt[:32]
+            ):
+                stdin_descriptor = descriptor
+            if descriptor == stdin_descriptor:
+                writes += 1
+                if writes == 1:
+                    return original_write(descriptor, payload[:32])
+                if writes == 2:
+                    raise BlockingIOError(errno.EAGAIN, "temporary backpressure")
+            return original_write(descriptor, payload)
+
+        with patch(
+            "codex_smart_subagents.child_runner.os.write",
+            side_effect=throttled_write,
+        ):
+            result = self.runner.run(self.request(prompt=prompt))
+
+        self.assertTrue(result.succeeded)
+        invocation = json.loads(
+            (self.layout.work_dir / "fake-codex-invocation.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(prompt, invocation["prompt"])
+        self.assertGreaterEqual(writes, 3)
 
     def test_stages_auth_and_otel_without_exposing_token_in_argv(self) -> None:
         source_auth = self.base / "source-auth.json"
