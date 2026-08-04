@@ -1869,10 +1869,31 @@ class ActivationResolverTests(unittest.TestCase):
             decision.source_drift.observed_sha256,
         )
 
-    def test_missing_captured_source_path_closes_managed_activation(self) -> None:
+    def test_missing_captured_source_path_keeps_ready_on_bound_snapshot(self) -> None:
         self.fixture.set_captured_source_path(
             self.fixture.root / "missing-captured-codex"
         )
+        self.fixture.replace_live_codex(b"compatible-new-codex")
+
+        decision = self.fixture.resolver().resolve_persisted_activation()
+
+        self.assertIs(GatewayState.READY, decision.state)
+        self.assertEqual(self.fixture.snapshot_path, decision.executable)
+        self.assertIsNotNone(decision.source_drift)
+        assert decision.source_drift is not None
+        self.assertEqual(self.fixture.live_codex, decision.source_drift.lexical_path)
+        self.assertEqual(self.fixture.live_codex, decision.source_drift.resolved_path)
+        self.assertEqual(
+            hashlib.sha256(b"compatible-new-codex").hexdigest(),
+            decision.source_drift.observed_sha256,
+        )
+        self.assertEqual(
+            self.fixture.source_sha256,
+            decision.source_drift.expected_sha256,
+        )
+
+    def test_missing_current_lexical_source_closes_managed_activation(self) -> None:
+        self.fixture.live_codex.unlink()
 
         decision = self.fixture.resolver().resolve()
 
@@ -1954,6 +1975,37 @@ class SourceReconciliationGatewayV1Tests(unittest.TestCase):
             self.fixture.operator_links["codex-smart"],
             stable_wrapper,
         )
+
+    def test_request_accepts_missing_historical_captured_source(self) -> None:
+        self.fixture.set_captured_source_path(
+            self.fixture.root / "purged-codex-version"
+        )
+        decision = self.fixture.resolver().resolve_persisted_activation()
+
+        request, _stable_wrapper = (
+            gateway_module._build_source_reconciliation_request_v1(
+                decision=decision,
+                gateway_layout=self.fixture.layout,
+                python_executable=Path(sys.executable).resolve(strict=True),
+            )
+        )
+
+        self.assertIs(decision.source_drift, request.drift)
+
+    def test_request_rejects_source_changed_after_gateway_decision(self) -> None:
+        self.fixture.replace_live_codex(b"compatible-new-codex")
+        decision = self.fixture.resolver().resolve_persisted_activation()
+        self.fixture.replace_live_codex(b"changed-again-before-process")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "SOURCE_RECONCILIATION_REQUEST_INVALID",
+        ):
+            gateway_module._build_source_reconciliation_request_v1(
+                decision=decision,
+                gateway_layout=self.fixture.layout,
+                python_executable=Path(sys.executable).resolve(strict=True),
+            )
 
     def test_request_rejects_links_without_one_absolute_shared_bin_directory(
         self,

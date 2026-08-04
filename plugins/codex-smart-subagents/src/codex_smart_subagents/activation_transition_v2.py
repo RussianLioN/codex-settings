@@ -1532,7 +1532,10 @@ def capture_activation_transition_proof_v2(
         layout=layout,
         installation_id=installation_id,
         binding=binding,
-        executable=decision.executable,
+        expected_codex_binary=_absolute_path(
+            Path(str(manifest["sourceLocator"]["lexicalPath"])),
+            "INSTALLER_RECEIPT_INVALID",
+        ),
     )
 
     manifest_file = _file_projection(layout.manifest_path)
@@ -2575,7 +2578,7 @@ def _validate_installer_receipt(
     layout: GatewayLayout,
     installation_id: str,
     binding,
-    executable: Path,
+    expected_codex_binary: Path,
 ) -> None:
     expected_keys = {
         "schemaVersion",
@@ -2610,11 +2613,11 @@ def _validate_installer_receipt(
     ):
         _fail("INSTALLER_RECEIPT_INVALID", "квитанция владения имеет иную форму")
     try:
-        if Path(str(value["codexBinary"])).resolve(strict=True) != executable.resolve(
-            strict=True
-        ) or layout.marketplace_link.resolve(strict=True) != Path(
-            str(value["registeredMarketplacePath"])
-        ).resolve(strict=True):
+        if (
+            value["codexBinary"] != str(expected_codex_binary)
+            or layout.marketplace_link.resolve(strict=True)
+            != Path(str(value["registeredMarketplacePath"])).resolve(strict=True)
+        ):
             _fail("INSTALLER_RECEIPT_FOREIGN", "квитанция принадлежит иной установке")
     except OSError as exc:
         _fail("INSTALLER_RECEIPT_INVALID", str(exc))

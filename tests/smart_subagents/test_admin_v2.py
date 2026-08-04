@@ -649,6 +649,7 @@ class AdminV2Tests(unittest.TestCase):
             reason_code="READY",
             executable=self.root / "codex",
             runtime_binding=proven.binding,
+            source_drift=None,
         )
         with (
             patch(
@@ -666,6 +667,72 @@ class AdminV2Tests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual("READY", result["code"])
 
+    def test_status_accepts_lexical_receipt_while_drift_runs_on_snapshot(
+        self,
+    ) -> None:
+        proven = self.create_proven_state(with_route=True)
+        self.prepare_receipt_artifacts()
+        self.write_valid_receipt()
+        snapshot = self.root / "codex-snapshot"
+        snapshot.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        snapshot.chmod(0o700)
+        decision = SimpleNamespace(
+            state=GatewayState.READY,
+            reason_code="READY",
+            executable=snapshot,
+            runtime_binding=proven.binding,
+            source_drift=SimpleNamespace(lexical_path=self.root / "codex"),
+        )
+        with (
+            patch(
+                "codex_smart_subagents.admin_state_v2.ActivationResolver.resolve_persisted_activation",
+                return_value=decision,
+            ),
+            patch(
+                "codex_smart_subagents.admin_v2._probe_live_controller",
+                return_value=(True, "READY"),
+            ),
+        ):
+            code, result = self.invoke("status")
+
+        self.assertEqual(0, code)
+        self.assertTrue(result["ok"])
+        self.assertEqual("READY", result["code"])
+
+    def test_status_refuses_foreign_lexical_codex_alias(self) -> None:
+        proven = self.create_proven_state()
+        self.prepare_receipt_artifacts()
+        receipt_path = self.write_valid_receipt()
+        foreign = self.root / "foreign-codex"
+        foreign.symlink_to(self.root / "codex")
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        receipt["codexBinary"] = str(foreign)
+        receipt_path.write_text(
+            json.dumps(receipt, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        receipt_path.chmod(0o600)
+        decision = SimpleNamespace(
+            state=GatewayState.READY,
+            reason_code="READY",
+            executable=self.root / "codex",
+            runtime_binding=proven.binding,
+            source_drift=None,
+        )
+        with patch(
+            "codex_smart_subagents.admin_state_v2.ActivationResolver.resolve_persisted_activation",
+            return_value=decision,
+        ):
+            code, result = self.invoke("status")
+
+        self.assertEqual(4, code)
+        self.assertFalse(result["ok"])
+        self.assertEqual("V2_STATE_UNCONFIRMED", result["code"])
+        self.assertEqual(
+            "INSTALLER_RECEIPT_MISMATCH",
+            result["data"]["reasonCode"],
+        )
+
     def test_status_refuses_receipt_bound_to_another_state_home(self) -> None:
         proven = self.create_proven_state()
         self.prepare_receipt_artifacts()
@@ -682,6 +749,7 @@ class AdminV2Tests(unittest.TestCase):
             reason_code="READY",
             executable=self.root / "codex",
             runtime_binding=proven.binding,
+            source_drift=None,
         )
         with patch(
             "codex_smart_subagents.admin_state_v2.ActivationResolver.resolve_persisted_activation",

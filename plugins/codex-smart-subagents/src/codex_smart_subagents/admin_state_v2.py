@@ -153,7 +153,17 @@ def load_proven_state_v2(config: AdminConfigV2) -> ProvenAdminStateV2:
             {"reasonCode": decision.reason_code},
         )
     try:
-        _verify_receipt_binding(config, receipt, decision.executable, binding)
+        expected_codex_binary = (
+            decision.source_drift.lexical_path
+            if decision.source_drift is not None
+            else decision.executable
+        )
+        _verify_receipt_binding(
+            config,
+            receipt,
+            expected_codex_binary,
+            binding,
+        )
     except (OSError, RuntimeError, ValueError) as exc:
         raise AdminV2Error(
             EXIT_UNSAFE,
@@ -544,7 +554,7 @@ def _require_installer_receipt(config: AdminConfigV2) -> dict[str, Any]:
 def _verify_receipt_binding(
     config: AdminConfigV2,
     receipt: Mapping[str, Any],
-    executable: Path,
+    expected_codex_binary: Path,
     binding: GatewayRuntimeBindingV2,
 ) -> None:
     marketplace_link = config.layout.marketplace_link
@@ -556,8 +566,7 @@ def _verify_receipt_binding(
         or receipt["stateHome"] != str(binding.state_home)
         or receipt["marketplacePath"] != str(marketplace_link)
         or receipt["registeredMarketplacePath"] != str(binding.marketplace_path)
-        or Path(str(receipt["codexBinary"])).resolve(strict=True)
-        != executable.resolve(strict=True)
+        or receipt["codexBinary"] != str(expected_codex_binary)
         or marketplace_link.resolve(strict=True)
         != binding.marketplace_path.resolve(strict=True)
     ):

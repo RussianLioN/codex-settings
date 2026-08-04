@@ -491,6 +491,38 @@ class ActivationTransitionV2Tests(unittest.TestCase):
             self.capture()
         self.assertEqual("INSTALLER_RECEIPT_INVALID", malformed.exception.code)
 
+    def test_capture_accepts_source_drift_on_bound_snapshot(self) -> None:
+        self.codex_binary.chmod(0o700)
+        self.codex_binary.write_bytes(b"#!/bin/sh\nexit 42\n")
+        self.codex_binary.chmod(0o500)
+
+        proof = self.capture()
+
+        self.assertTrue(proof.complete)
+        self.assertEqual(
+            str(self.codex_binary),
+            proof.installer_receipt_document["codexBinary"],
+        )
+
+    def test_capture_rejects_foreign_lexical_codex_path_with_same_bytes(
+        self,
+    ) -> None:
+        foreign = self.root / "foreign-codex-path"
+        foreign.symlink_to(self.codex_binary)
+        installer = json.loads(
+            self.installer_receipt_path.read_text(encoding="utf-8")
+        )
+        installer["codexBinary"] = str(foreign)
+        self.installer_receipt_path.write_text(
+            json.dumps(installer, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(ActivationTransitionV2Error) as captured:
+            self.capture()
+
+        self.assertEqual("INSTALLER_RECEIPT_FOREIGN", captured.exception.code)
+
     def test_reverify_after_journal_detects_foreign_link_inode(self) -> None:
         proof = self.capture()
         operation_id = "op2_" + "1" * 32

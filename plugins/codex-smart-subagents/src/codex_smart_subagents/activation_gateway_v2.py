@@ -658,13 +658,18 @@ class ActivationResolver:
         )
         expected = _sha256(source["sourceObservedSha256"], "SOURCE_CHANGED")
         try:
-            resolved = lexical.resolve(strict=True)
-            captured_resolved = captured.resolve(strict=True)
-            observed = _hash_file(resolved)
+            resolved = _verified_external_executable_v1(
+                lexical,
+                code="SOURCE_CHANGED",
+            )
+            observed = _stable_external_file_sha256_v1(
+                resolved,
+                executable=True,
+                code="SOURCE_CHANGED",
+            )
             if (
-                resolved == captured_resolved
+                resolved == captured
                 and observed == expected
-                and os.access(resolved, os.X_OK)
                 and resolved != self.wrapper.resolve()
             ):
                 return lexical, None
@@ -1765,10 +1770,29 @@ def _build_source_reconciliation_request_v1(
         )
     source = manifest["sourceLocator"]
     snapshot = manifest["codexSnapshot"]
+    current_lexical = _absolute_path(
+        source["lexicalPath"],
+        "SOURCE_RECONCILIATION_REQUEST_INVALID",
+    )
+    try:
+        current_resolved = _verified_external_executable_v1(
+            current_lexical,
+            code="SOURCE_RECONCILIATION_REQUEST_INVALID",
+        )
+        current_observed = _stable_external_file_sha256_v1(
+            current_resolved,
+            executable=True,
+            code="SOURCE_RECONCILIATION_REQUEST_INVALID",
+        )
+    except (OSError, RuntimeError) as exc:
+        raise _ProofError(
+            "SOURCE_RECONCILIATION_REQUEST_INVALID",
+            str(exc),
+        ) from exc
     if (
-        source["lexicalPath"] != str(decision.source_drift.lexical_path)
-        or Path(str(source["resolvedPathAtCapture"])).resolve(strict=True)
-        != decision.source_drift.resolved_path
+        current_lexical != decision.source_drift.lexical_path
+        or current_resolved != decision.source_drift.resolved_path
+        or current_observed != decision.source_drift.observed_sha256
         or source["sourceObservedSha256"]
         != decision.source_drift.expected_sha256
         or snapshot["sha256"] != decision.source_drift.expected_sha256
