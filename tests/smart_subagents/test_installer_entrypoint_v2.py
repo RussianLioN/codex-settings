@@ -407,7 +407,11 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
             self.assertEqual(PREVIOUS_ID, result["previousActivationId"])
             self.assertEqual(OPERATION_ID, result["operationId"])
             self.assertEqual(2, problems.call_count)
-            supervise.assert_called_once()
+            supervise.assert_called_once_with(
+                layout,
+                extra_environment={"TEST_BOUNDARY": "closed"},
+                plugin_root=layout.plugin_source,
+            )
             reconcile_receipt.assert_called_once()
             archive_receipt.assert_called_once_with(
                 layout,

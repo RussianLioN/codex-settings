@@ -1925,6 +1925,7 @@ def _try_reconcile_committed_upgrade_v2(
     decision = _supervise_existing(
         layout,
         extra_environment=extra_environment,
+        plugin_root=layout.plugin_source,
     )
     if decision.state is not GatewayState.READY:
         raise InstallError(
