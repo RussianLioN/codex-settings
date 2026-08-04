@@ -1854,6 +1854,86 @@ class ActivationResolverTests(unittest.TestCase):
             binding.controller_row["controller_identity"],
         )
 
+    def test_ready_activation_is_independent_from_ordinary_fallback_capsule(
+        self,
+    ) -> None:
+        fallback_source = self.fixture.root / "independent-fallback-source"
+        fallback_source.write_bytes(b"independent ordinary Codex\n")
+        fallback_source.chmod(0o500)
+        fallback_snapshot = self.fixture.root / "independent-fallback-snapshot"
+        fallback_snapshot.write_bytes(fallback_source.read_bytes())
+        fallback_snapshot.chmod(0o500)
+        fallback_sha256 = hashlib.sha256(fallback_source.read_bytes()).hexdigest()
+        _write_json(
+            self.fixture.layout.fallback_path,
+            {
+                "schemaVersion": 2,
+                "sourceLocator": {
+                    "lexicalPath": str(fallback_source),
+                    "resolvedPathAtCapture": str(fallback_source),
+                    "argv0Policy": "lexical",
+                    "sourceObservedSha256": fallback_sha256,
+                },
+                "backupSnapshot": {
+                    "absolutePath": str(fallback_snapshot),
+                    "sha256": fallback_sha256,
+                },
+                "extensions": {},
+            },
+        )
+
+        decision = self.fixture.resolver().resolve()
+        persisted = self.fixture.resolver().resolve_persisted_activation()
+
+        self.assertEqual(GatewayState.READY, decision.state, decision.reason_code)
+        self.assertEqual(self.fixture.source, decision.executable)
+        self.assertEqual(self.fixture.activation_id, decision.activation_id)
+        self.assertEqual(GatewayState.READY, persisted.state, persisted.reason_code)
+        self.assertEqual(self.fixture.source, persisted.executable)
+        self.assertEqual(self.fixture.activation_id, persisted.activation_id)
+
+    def test_persisted_activation_requires_an_executable_fallback_capsule(
+        self,
+    ) -> None:
+        _write_json(
+            self.fixture.layout.fallback_path,
+            {
+                "schemaVersion": 2,
+                "sourceLocator": {
+                    "lexicalPath": str(
+                        self.fixture.root / "missing-fallback-source"
+                    ),
+                    "resolvedPathAtCapture": str(
+                        self.fixture.root / "missing-fallback-source"
+                    ),
+                    "argv0Policy": "lexical",
+                    "sourceObservedSha256": "0" * 64,
+                },
+                "backupSnapshot": {
+                    "absolutePath": str(
+                        self.fixture.root / "missing-fallback-snapshot"
+                    ),
+                    "sha256": "0" * 64,
+                },
+                "extensions": {},
+            },
+        )
+
+        with self.assertRaisesRegex(GatewayUnavailable, "FALLBACK_UNAVAILABLE"):
+            self.fixture.resolver().resolve_persisted_activation()
+
+    def test_manifest_snapshot_must_match_activation_identity(self) -> None:
+        self.fixture.manifest["codexSnapshot"] = {
+            "absolutePath": str(self.fixture.snapshot),
+            "sha256": "0" * 64,
+        }
+        _write_json(self.fixture.layout.manifest_path, self.fixture.manifest)
+
+        decision = self.fixture.resolver().resolve()
+
+        self.assertEqual(GatewayState.ORDINARY, decision.state)
+        self.assertEqual("ACTIVATION_INVALID", decision.reason_code)
+
     def test_source_change_keeps_valid_activation_ready_on_snapshot(self) -> None:
         self.fixture.replace_live_codex(b"compatible-new-codex")
 

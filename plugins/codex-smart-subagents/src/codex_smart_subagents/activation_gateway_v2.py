@@ -385,6 +385,7 @@ class ActivationResolver:
     def resolve_persisted_activation(self) -> GatewayDecision:
         """Доказывает принятую активацию без требования живого контроллера."""
 
+        self._resolve_fallback()
         return self._resolve_ready(require_live_controller=False)
 
     def _resolve_ready(
@@ -412,20 +413,9 @@ class ActivationResolver:
                 state_home = _absolute_path(manifest["stateHome"], "MANIFEST_INVALID")
                 _verify_directory(state_home, private=True, code="STATE_HOME_INVALID")
 
-                source_locator, fallback_snapshot = self._fallback_records()
-                if manifest["sourceLocator"] != source_locator:
-                    raise _ProofError(
-                        "MANIFEST_BINDING_MISMATCH",
-                        "manifest source locator differs from fallback capsule",
-                    )
-                if manifest["codexSnapshot"] != fallback_snapshot:
-                    raise _ProofError(
-                        "MANIFEST_BINDING_MISMATCH",
-                        "manifest snapshot differs from fallback capsule",
-                    )
                 executable, source_drift = self._verify_ready_source(
-                    source_locator,
-                    fallback_snapshot,
+                    manifest["sourceLocator"],
+                    manifest["codexSnapshot"],
                 )
 
                 active = manifest["activeActivation"]
@@ -598,25 +588,6 @@ class ActivationResolver:
         except (OSError, sqlite3.Error, EvidenceError, SchemaProjectionError) as exc:
             raise _ProofError("ACTIVATION_PROOF_FAILED", str(exc)) from exc
 
-    def _fallback_records(self) -> tuple[dict[str, object], dict[str, object]]:
-        capsule = _read_owned_json(
-            self.layout.fallback_path,
-            expected_mode=0o600,
-            code="FALLBACK_INVALID",
-        )
-        _exact_keys(
-            capsule,
-            {"schemaVersion", "sourceLocator", "backupSnapshot", "extensions"},
-            "FALLBACK_INVALID",
-        )
-        if capsule["schemaVersion"] != 2 or capsule["extensions"] != {}:
-            raise _ProofError("FALLBACK_INVALID", "fallback capsule is invalid")
-        source = capsule["sourceLocator"]
-        backup = capsule["backupSnapshot"]
-        _validate_source_locator(source, "FALLBACK_INVALID")
-        _validate_snapshot_locator(backup, "FALLBACK_INVALID")
-        return source, backup
-
     def _validate_manifest(self, manifest: dict[str, object]) -> None:
         _exact_keys(manifest, _MANIFEST_KEYS, "MANIFEST_INVALID")
         constants = {
@@ -765,6 +736,11 @@ class ActivationResolver:
         ):
             raise _ProofError("ACTIVATION_TREE_MISMATCH", "activation tree changed")
         _validate_snapshot_locator(identity["codexSnapshot"], "ACTIVATION_INVALID")
+        if identity["codexSnapshot"] != manifest["codexSnapshot"]:
+            raise _ProofError(
+                "ACTIVATION_INVALID",
+                "activation snapshot differs from manifest",
+            )
         database = identity["database"]
         _exact_keys(
             database,
