@@ -1851,8 +1851,67 @@ class InstallerV2ApplyTests(_InstallerBase):
 
 
 class InstallerV2RepeatTests(_InstallerBase):
+    def test_upgrade_with_proven_source_drift_captures_before_supervision(
+        self,
+    ) -> None:
+        events: list[str] = []
+        persisted = SimpleNamespace(
+            state=self.installer.GatewayState.READY,
+            runtime_binding=object(),
+            source_drift=object(),
+        )
+        resolver = mock.Mock()
+        resolver.resolve_persisted_activation.return_value = persisted
+
+        def capture(**_kwargs):
+            events.append("capture")
+            raise RuntimeError("stop after drift proof")
+
+        with (
+            mock.patch.object(
+                self.installer,
+                "ActivationResolver",
+                return_value=resolver,
+            ),
+            mock.patch.object(
+                self.installer,
+                "_supervise_existing",
+                side_effect=AssertionError(
+                    "proven source drift must not require the old controller"
+                ),
+            ),
+            mock.patch.object(
+                self.installer,
+                "capture_activation_transition_proof_v2",
+                side_effect=capture,
+            ),
+            mock.patch.object(
+                self.installer,
+                "_try_reconcile_pending_committed_upgrade_v2",
+                return_value=None,
+            ),
+            self.assertRaisesRegex(RuntimeError, "stop after drift proof"),
+        ):
+            self.installer._upgrade_install(
+                self.layout,
+                previous_receipt={},
+                source_digest="a" * 64,
+                codex_version="0.146.0",
+                extra_environment=None,
+            )
+
+        resolver.resolve_persisted_activation.assert_called_once_with()
+        self.assertEqual(["capture"], events)
+
     def test_upgrade_recovers_current_controller_before_preparation(self) -> None:
         events: list[str] = []
+        persisted = SimpleNamespace(
+            state=self.installer.GatewayState.READY,
+            runtime_binding=object(),
+            source_drift=None,
+        )
+        resolver = mock.Mock()
+        resolver.resolve_persisted_activation.return_value = persisted
 
         def supervise(*_args, **_kwargs):
             events.append("supervise")
@@ -1863,6 +1922,11 @@ class InstallerV2RepeatTests(_InstallerBase):
             raise RuntimeError("stop after ordering proof")
 
         with (
+            mock.patch.object(
+                self.installer,
+                "ActivationResolver",
+                return_value=resolver,
+            ),
             mock.patch.object(
                 self.installer,
                 "_supervise_existing",
@@ -1888,6 +1952,7 @@ class InstallerV2RepeatTests(_InstallerBase):
                 extra_environment=None,
             )
 
+        resolver.resolve_persisted_activation.assert_called_once_with()
         self.assertEqual(["supervise", "capture"], events)
 
     def test_apply_resumes_first_install_after_registration_before_receipt(

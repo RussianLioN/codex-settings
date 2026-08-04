@@ -1036,14 +1036,9 @@ def _upgrade_install(
             return reconciled
         previous_receipt = _load_installer_receipt(layout.installer_receipt_path)
 
-    _supervise_existing(
+    proof = _capture_upgrade_transition_proof_v2(
         layout,
         extra_environment=extra_environment,
-    )
-    proof = capture_activation_transition_proof_v2(
-        codex_home=layout.codex_home,
-        wrapper=layout.launcher_path,
-        installer_receipt_path=layout.installer_receipt_path,
     )
     codex_binary_sha256 = file_digest(layout.codex_binary)
     operation_id = _update_operation_id_v2(
@@ -1661,6 +1656,57 @@ def _try_reconcile_pending_committed_upgrade_v2(
             "принятая активация не согласована по зафиксированному sourceDigest",
         )
     return result
+
+
+def _capture_upgrade_transition_proof_v2(
+    layout: InstallLayout,
+    *,
+    extra_environment: Mapping[str, str] | None,
+):
+    """Получить доказательство перехода, не требуя устаревший контроллер.
+
+    При доказанном изменении внешнего Codex старая активация уже не может
+    честно достичь полной готовности на новом двоичном файле. В этом одном
+    случае достаточно полной проверки сохранённой активации без живого
+    контроллера; само доказательство перехода немедленно повторяет проверку.
+    Для всех остальных обновлений сохраняется прежний порядок: сначала
+    восстановление полной готовности, затем захват доказательства.
+    """
+
+    persisted = None
+    try:
+        persisted = ActivationResolver(
+            layout=layout.gateway_layout,
+            wrapper=layout.launcher_path,
+        ).resolve_persisted_activation()
+    except operation_deadline_v2.OperationDeadlineExceededV2:
+        raise
+    except Exception:
+        # Это только распознавание узкого загрузочного случая. Если
+        # сохранённая активация не доказана, действует прежний супервизор.
+        persisted = None
+
+    if (
+        persisted is not None
+        and persisted.state is GatewayState.READY
+        and persisted.runtime_binding is not None
+        and persisted.source_drift is not None
+    ):
+        return capture_activation_transition_proof_v2(
+            codex_home=layout.codex_home,
+            wrapper=layout.launcher_path,
+            installer_receipt_path=layout.installer_receipt_path,
+        )
+
+    _supervise_existing(
+        layout,
+        extra_environment=extra_environment,
+    )
+    return capture_activation_transition_proof_v2(
+        codex_home=layout.codex_home,
+        wrapper=layout.launcher_path,
+        installer_receipt_path=layout.installer_receipt_path,
+    )
 
 
 def _try_reconcile_committed_upgrade_v2(

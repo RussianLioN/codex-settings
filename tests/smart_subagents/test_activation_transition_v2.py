@@ -504,6 +504,81 @@ class ActivationTransitionV2Tests(unittest.TestCase):
             proof.installer_receipt_document["codexBinary"],
         )
 
+    def test_installer_upgrade_uses_real_drift_proof_without_old_controller(
+        self,
+    ) -> None:
+        from tests.smart_subagents.test_install_adaptive_subagents import (
+            INSTALLER_PATH,
+            load_script,
+        )
+
+        installer = load_script(
+            "installer_real_source_drift_transition_under_test",
+            INSTALLER_PATH,
+        )
+        install_layout = installer.InstallLayout(
+            source_root=ROOT,
+            codex_home=self.codex_home,
+            bin_dir=self.operator_bin,
+            codex_binary=self.codex_binary,
+            state_home=self.binding.state_home,
+        )
+        previous_receipt = json.loads(
+            self.installer_receipt_path.read_text(encoding="utf-8")
+        )
+        self.codex_binary.chmod(0o700)
+        self.codex_binary.write_bytes(b"#!/bin/sh\nexit 42\n")
+        self.codex_binary.chmod(0o500)
+        observed: dict[str, object] = {}
+
+        def stop_after_proof(**arguments):
+            observed["proof"] = arguments["proof"]
+            raise RuntimeError("stop after real drift proof")
+
+        with (
+            mock.patch(
+                "codex_smart_subagents.activation_gateway_v2."
+                "_default_snapshot_verifier",
+                return_value=None,
+            ),
+            mock.patch.object(
+                installer,
+                "_try_reconcile_pending_committed_upgrade_v2",
+                return_value=None,
+            ),
+            mock.patch.object(
+                installer,
+                "_supervise_existing",
+                side_effect=AssertionError(
+                    "source drift must not require the old controller"
+                ),
+            ),
+            mock.patch.object(
+                installer,
+                "build_upgrade_preparation_v2",
+                side_effect=stop_after_proof,
+            ),
+            self.assertRaisesRegex(RuntimeError, "stop after real drift proof"),
+        ):
+            installer._upgrade_install(
+                install_layout,
+                previous_receipt=previous_receipt,
+                source_digest="b" * 64,
+                codex_version="0.146.0",
+                extra_environment=None,
+            )
+
+        proof = observed["proof"]
+        self.assertTrue(proof.complete)
+        self.assertEqual(
+            self.runtime.materialization.activation_id,
+            proof.activation_id,
+        )
+        self.assertEqual(
+            str(self.codex_binary),
+            proof.installer_receipt_document["codexBinary"],
+        )
+
     def test_capture_rejects_foreign_lexical_codex_path_with_same_bytes(
         self,
     ) -> None:
