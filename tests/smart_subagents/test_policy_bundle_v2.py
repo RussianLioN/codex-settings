@@ -142,6 +142,73 @@ class PolicyBundleV2Tests(unittest.TestCase):
             bundle.router.policy_fingerprint,
         )
 
+    def test_current_loader_preserves_a_verified_schema1_policy(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        catalog_path = root / "adaptive-subagents.toml"
+        catalog = self.catalog.read_text(encoding="utf-8")
+        catalog = catalog.replace("schema_version = 2", "schema_version = 1", 1)
+        catalog = catalog.replace(
+            '[coordinator]\nselection = "first-verified-available"\n'
+            "candidates = [\n"
+            '  { model = "gpt-5.6-sol", reasoning_effort = "medium" },\n'
+            '  { model = "gpt-5.6-terra", reasoning_effort = "medium" },\n'
+            "]",
+            '[coordinator]\nmodel = "gpt-5.6-terra"\n'
+            'reasoning_effort = "medium"',
+            1,
+        )
+        catalog = catalog.replace(
+            'reasoning_efforts = ["medium", "high", "xhigh", "max"]',
+            'reasoning_efforts = ["high", "xhigh", "max"]',
+            1,
+        )
+        catalog_path.write_text(catalog, encoding="utf-8")
+
+        def schema1_coordinator(value: dict[str, object]) -> None:
+            policy = value["policy"]
+            assert isinstance(policy, dict)
+            policy["coordinator"] = {
+                "model": "gpt-5.6-terra",
+                "reasoningEffort": "medium",
+            }
+            canonical = json.dumps(
+                policy,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            value["canonicalUtf8"] = canonical
+            import hashlib
+
+            domain = value["domain"]
+            assert isinstance(domain, str)
+            value["fingerprint"] = hashlib.sha256(
+                domain.encode("utf-8") + b"\0" + canonical.encode("utf-8")
+            ).hexdigest()
+
+        routing_temporary, routing_path = self._mutated_json(
+            self.routing,
+            schema1_coordinator,
+        )
+        self.addCleanup(routing_temporary.cleanup)
+
+        bundle = self._load(
+            catalog_path=catalog_path,
+            routing_vector_path=routing_path,
+        )
+
+        self.assertEqual(2, bundle.schema_version)
+        self.assertEqual(
+            ({"model": "gpt-5.6-terra", "reasoningEffort": "medium"},),
+            bundle.coordinator_candidates,
+        )
+        self.assertEqual(
+            bundle.routing_policy_snapshot["fingerprint"],
+            bundle.router.policy_fingerprint,
+        )
+
     def test_coordinator_only_sol_medium_never_expands_child_pairs(self) -> None:
         bundle = self._load()
         coordinator_only = {

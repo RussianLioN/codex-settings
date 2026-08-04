@@ -196,7 +196,12 @@ def load_policy_bundle_v2(
     except ContractError as exc:
         _fail("ROUTING_POLICY_SNAPSHOT_INVALID", str(exc))
 
-    if policy["coordinator"] != coordinator_contract:
+    expected_policy_coordinator = (
+        coordinator
+        if verified_catalog.schema_version == 1
+        else coordinator_contract
+    )
+    if policy["coordinator"] != expected_policy_coordinator:
         _fail("COORDINATOR_POLICY_DRIFT")
 
     catalog_pairs = {
