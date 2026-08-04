@@ -458,7 +458,10 @@ raise AssertionError("requested SIGKILL boundary was not reached")
                         cwd=ROOT,
                         capture_output=True,
                         text=True,
-                        timeout=30,
+                        # The final boundary completes the whole first install
+                        # before terminating; retain bounded headroom when the
+                        # complete test suite is competing for CPU time.
+                        timeout=60,
                         check=False,
                     )
                     self.assertEqual(
