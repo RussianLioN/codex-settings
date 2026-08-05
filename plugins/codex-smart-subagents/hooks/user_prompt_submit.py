@@ -29,6 +29,7 @@ from integration_runtime import (  # noqa: E402
     write_hook_output,
 )
 from integration_runtime_v2 import (  # noqa: E402
+    FreshActivationProviderV2,
     HOOK_TOTAL_BUDGET_SECONDS as HOOK_TOTAL_BUDGET_SECONDS_V2,
     IntegrationConfigV2,
     TurnContextStoreV2,
@@ -36,6 +37,12 @@ from integration_runtime_v2 import (  # noqa: E402
     require_current_user_mcp_policy_v2,
     require_live_controller_v2,
     require_mcp_contract_v2,
+)
+from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
+    ProjectIdentityV2,
+    RootIdentityV2,
+    RootSessionLeaseStoreV2,
+    system_process_marker_reader_v2,
 )
 
 
@@ -197,7 +204,20 @@ def _handle_v2(
             deadline=deadline,
         )
         TurnContextStoreV2(config).save(record)
+        resume_instruction = _bind_resume_instruction_v2(
+            config,
+            record,
+            environ,
+        )
     except Exception:
+        if environ.get("CODEX_SMART_LAUNCH_KIND") == "resume":
+            return {
+                "continue": False,
+                "stopReason": (
+                    "MANAGED_RESUME_UNAVAILABLE: присоединение умного "
+                    "маршрута не доказано"
+                ),
+            }
         return {
             "continue": True,
             "systemMessage": (
@@ -206,7 +226,7 @@ def _handle_v2(
             ),
         }
 
-    text = (
+    text = resume_instruction or (
         "Умный режим версии 2 активен для этого хода. Сначала вызови "
         "smart_plan ровно один раз и передай только смысловые признаки, миссии, "
         "зависимости и требуемые результаты. Если ответ предписывает обычное "
@@ -217,6 +237,58 @@ def _handle_v2(
         "инструментам пути, команды, переменные окружения или сведения доступа."
     )
     return hook_context("UserPromptSubmit", text)
+
+
+def _bind_resume_instruction_v2(
+    config: IntegrationConfigV2,
+    record: Any,
+    environ: Mapping[str, str],
+) -> str | None:
+    if environ.get("CODEX_SMART_LAUNCH_KIND") != "resume":
+        return None
+    root = RootIdentityV2(
+        pid=int(environ.get("CODEX_SMART_ROOT_PID", "")),
+        process_start_marker=environ.get("CODEX_SMART_ROOT_START_MARKER", ""),
+    )
+    binding = FreshActivationProviderV2(config).runtime_binding()
+    project = ProjectIdentityV2(
+        repo_root=record.repo_root,
+        base_sha=record.base_sha,
+        worktree_fingerprint=record.worktree_fingerprint,
+        compatibility_fingerprint=binding.compatibility_fingerprint,
+    )
+    lease = RootSessionLeaseStoreV2(
+        config.state_home,
+        process_marker_reader=system_process_marker_reader_v2,
+    ).bind_resume(
+        session_id=record.session_id,
+        shell_session_id=record.shell_session_id,
+        turn_id=record.turn_id,
+        root=root,
+        project=project,
+    )
+    attachment = lease.attachment
+    if attachment is None or attachment.state == "ACKNOWLEDGED":
+        return None
+    candidate = attachment.candidate
+    if candidate.start_request_id is None:
+        continuation = (
+            "Сначала вызови route_start для routeId="
+            f"{candidate.route_id} и nodeId={candidate.node_id}, затем smart_wait "
+            "до конечного состояния."
+        )
+    else:
+        continuation = (
+            "Сначала вызови smart_wait для startRequestId="
+            f"{candidate.start_request_id} до конечного состояния."
+        )
+    return (
+        "Возобновлён умный маршрут предыдущего хода. "
+        + continuation
+        + " До его конечного состояния smart_plan запрещён. После получения "
+        "и проверки старого результата вызови smart_plan ровно один раз для нового "
+        "запроса пользователя; модель и уровень рассуждений выберет контроллер."
+    )
 
 
 def main() -> int:

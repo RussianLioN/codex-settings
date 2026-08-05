@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
@@ -43,12 +44,14 @@ _SUBCOMMANDS = frozenset(
         "mcp-server",
         "plugin",
         "remote-control",
-        "resume",
         "review",
         "sandbox",
         "unarchive",
         "update",
     }
+)
+_RESUME_BOOLEAN_OPTIONS = frozenset(
+    {"--last", "--all", "--include-non-interactive"}
 )
 _SUPPORTED_VALUE_OPTIONS = frozenset({"-C", "--cd", "-i", "--image"})
 _SUPPORTED_BOOLEAN_OPTIONS = frozenset(
@@ -107,10 +110,18 @@ class LauncherError(RuntimeError):
         return f"{self.code}: {self.message}"
 
 
+class InvocationKind(str, Enum):
+    MANAGED_NEW = "managed-new"
+    MANAGED_RESUME = "managed-resume"
+    NATIVE_SERVICE = "native-service"
+    REJECTED_MANAGED = "rejected-managed"
+
+
 @dataclass(frozen=True)
 class InvocationDecision:
     adaptive: bool
     reason: str
+    kind: InvocationKind = InvocationKind.REJECTED_MANAGED
 
 
 @dataclass(frozen=True)
@@ -157,7 +168,7 @@ def is_native_ultra_invocation(arguments: Sequence[str]) -> bool:
 
 
 def classify_invocation(arguments: Sequence[str]) -> InvocationDecision:
-    """Enable only an unambiguous new local interactive session."""
+    """Classify an unambiguous new or resumed local interactive session."""
 
     positional: list[str] = []
     root_positional: list[str] = []
@@ -191,6 +202,9 @@ def classify_invocation(arguments: Sequence[str]) -> InvocationDecision:
         if token in _SUPPORTED_BOOLEAN_OPTIONS:
             index += 1
             continue
+        if token in _RESUME_BOOLEAN_OPTIONS:
+            index += 1
+            continue
         matched_boolean = next(
             (
                 option
@@ -208,11 +222,19 @@ def classify_invocation(arguments: Sequence[str]) -> InvocationDecision:
             index += 1
             continue
         long_name = token.split("=", 1)[0] if token.startswith("--") else ""
+        if token in {"-h", "-V"} or long_name in {"--help", "--version"}:
+            return InvocationDecision(
+                False,
+                f"service control {token}",
+                InvocationKind.NATIVE_SERVICE,
+            )
         if long_name in _BYPASS_LONG_OPTIONS:
-            return InvocationDecision(False, f"explicit control {long_name}")
-        if token in {"-h", "-V"} or any(
-            token.startswith(prefix) for prefix in _BYPASS_SHORT_PREFIXES
-        ):
+            return InvocationDecision(
+                False,
+                f"explicit control {long_name}",
+                InvocationKind.REJECTED_MANAGED,
+            )
+        if any(token.startswith(prefix) for prefix in _BYPASS_SHORT_PREFIXES):
             return InvocationDecision(False, f"explicit control {token}")
         if token.startswith("-") and token != "-":
             return InvocationDecision(False, f"unknown option {token}")
@@ -220,11 +242,37 @@ def classify_invocation(arguments: Sequence[str]) -> InvocationDecision:
         root_positional.append(token)
         index += 1
 
+    if root_positional and root_positional[0] == "resume":
+        if len(positional) > 3:
+            return InvocationDecision(
+                False,
+                "resume accepts at most session and prompt positionals",
+                InvocationKind.REJECTED_MANAGED,
+            )
+        return InvocationDecision(
+            True,
+            "supported resumed interactive invocation",
+            InvocationKind.MANAGED_RESUME,
+        )
+    if any(token in _RESUME_BOOLEAN_OPTIONS for token in arguments):
+        return InvocationDecision(
+            False,
+            "resume selector without resume subcommand",
+            InvocationKind.REJECTED_MANAGED,
+        )
     if len(positional) > 1:
         return InvocationDecision(False, "multiple positional arguments")
     if root_positional and root_positional[0] in _SUBCOMMANDS:
-        return InvocationDecision(False, f"subcommand {root_positional[0]}")
-    return InvocationDecision(True, "supported interactive invocation")
+        return InvocationDecision(
+            False,
+            f"subcommand {root_positional[0]}",
+            InvocationKind.NATIVE_SERVICE,
+        )
+    return InvocationDecision(
+        True,
+        "supported interactive invocation",
+        InvocationKind.MANAGED_NEW,
+    )
 
 
 def parse_managed_invocation(arguments: Sequence[str]) -> ManagedInvocation:

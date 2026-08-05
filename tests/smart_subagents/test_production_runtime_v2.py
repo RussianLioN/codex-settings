@@ -209,6 +209,34 @@ class ProductionRuntimeV2Tests(unittest.TestCase):
         with self.assertRaises(ProductionRuntimeV2Error):
             database_identity_from_binding_v2(malformed)
 
+    def test_managed_resume_rejects_invalid_root_identity(self) -> None:
+        class Provider:
+            def runtime_binding(self):
+                return self_binding
+
+        self_binding = self.binding
+        policy = SimpleNamespace(router=SimpleNamespace(evaluate=lambda value: value))
+        module = sys.modules[build_production_runtime_v2.__module__]
+        with (
+            patch.object(module, "load_policy_bundle_v2", return_value=policy),
+            patch.object(module, "_read_bundled_catalog", return_value={}),
+            self.assertRaisesRegex(
+                ProductionRuntimeV2Error,
+                "MANAGED_ROOT_IDENTITY_UNAVAILABLE",
+            ),
+        ):
+            build_production_runtime_v2(
+                provider=Provider(),
+                environment={
+                    "HOME": str(Path(self.temporary.name).resolve()),
+                    "TMPDIR": str(Path(self.temporary.name).resolve()),
+                    "CODEX_SMART_LAUNCH_KIND": "resume",
+                    "CODEX_SMART_ROOT_PID": "not-a-pid",
+                    "CODEX_SMART_ROOT_START_MARKER": "process-start",
+                },
+                dispatcher_factory=lambda *_args: object(),
+            )
+
     def test_build_recovers_queued_starts_before_server_becomes_ready(self) -> None:
         events: list[object] = []
         context = RequestContextV2(

@@ -16,6 +16,7 @@ PLUGIN_ROOT = REPO / "plugins" / "codex-smart-subagents"
 sys.path.insert(0, str(PLUGIN_ROOT / "src"))
 
 from codex_smart_subagents.launcher import (  # noqa: E402
+    InvocationKind,
     LauncherError,
     apply_coordinator_defaults,
     build_adaptive_environment,
@@ -50,7 +51,6 @@ class InvocationClassificationTests(unittest.TestCase):
             ["exec", "task"],
             ["e", "task"],
             ["review"],
-            ["resume"],
             ["fork"],
             ["app"],
             ["cloud"],
@@ -75,6 +75,54 @@ class InvocationClassificationTests(unittest.TestCase):
             with self.subTest(arguments=arguments):
                 decision = classify_invocation(arguments)
                 self.assertFalse(decision.adaptive)
+
+    def test_resume_forms_are_managed_and_identified_separately(self) -> None:
+        cases = (
+            ["resume"],
+            ["resume", "--last"],
+            ["resume", "--all"],
+            ["resume", "--include-non-interactive"],
+            ["--search", "resume", "--all"],
+            ["-C", "/tmp/project", "resume", "--last"],
+            ["resume", "019f8085-defa-74e2-a203-be3e09f22bb1"],
+            ["resume", "named-session", "продолжай"],
+            ["resume", "named-session", "--image=screen.png", "продолжай"],
+        )
+
+        for arguments in cases:
+            with self.subTest(arguments=arguments):
+                decision = classify_managed_invocation(arguments)
+                self.assertTrue(decision.adaptive, decision.reason)
+                self.assertIs(InvocationKind.MANAGED_RESUME, decision.kind)
+
+    def test_new_interactive_invocation_has_new_session_kind(self) -> None:
+        decision = classify_managed_invocation(["проверь"])
+        self.assertTrue(decision.adaptive)
+        self.assertIs(InvocationKind.MANAGED_NEW, decision.kind)
+
+    def test_resume_rejects_extra_positionals_and_competing_controls(self) -> None:
+        cases = (
+            ["resume", "one", "two", "three"],
+            ["resume", "--profile", "fast"],
+            ["resume", "--oss"],
+            ["resume", "--local-provider", "ollama"],
+            ["resume", "--remote", "ws://127.0.0.1:1234"],
+            ["resume", "--enable", "multi_agent"],
+            ["resume", "-c", "sandbox_mode=\"read-only\""],
+        )
+
+        for arguments in cases:
+            with self.subTest(arguments=arguments):
+                decision = classify_managed_invocation(arguments)
+                self.assertFalse(decision.adaptive)
+                self.assertIs(InvocationKind.REJECTED_MANAGED, decision.kind)
+
+    def test_resume_help_and_version_remain_native_service_calls(self) -> None:
+        for arguments in (["resume", "--help"], ["resume", "--version"]):
+            with self.subTest(arguments=arguments):
+                decision = classify_managed_invocation(arguments)
+                self.assertFalse(decision.adaptive)
+                self.assertIs(InvocationKind.NATIVE_SERVICE, decision.kind)
 
     def test_missing_supported_flag_value_bypasses_without_rewriting_error(self) -> None:
         for arguments in (["-C"], ["--cd"], ["-i"], ["--image"]):

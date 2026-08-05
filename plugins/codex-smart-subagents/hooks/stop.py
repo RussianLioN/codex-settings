@@ -25,12 +25,20 @@ from integration_runtime import (  # noqa: E402
     write_hook_output,
 )
 from integration_runtime_v2 import (  # noqa: E402
+    FreshActivationProviderV2,
     HOOK_TOTAL_BUDGET_SECONDS as HOOK_TOTAL_BUDGET_SECONDS_V2,
     HookTurnContextV2,
     IntegrationConfigV2,
     TurnContextStoreV2,
     durable_stop_smart_turn_state_v2,
     require_current_user_mcp_policy_v2,
+)
+from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
+    ProjectIdentityV2,
+    RootIdentityV2,
+    RootSessionLeaseStoreV2,
+    route_is_terminal_v2,
+    system_process_marker_reader_v2,
 )
 
 
@@ -109,6 +117,12 @@ def handle(
                 deadline=deadline,
             )
             if outcome in {"different-turn", "complete"}:
+                if outcome == "complete":
+                    _acknowledge_resume_result_v2(
+                        config_v2,
+                        store_v2.load(),
+                        environ,
+                    )
                 return None
             if outcome in {"bounded-plan", "bounded-route"}:
                 message = (
@@ -210,6 +224,52 @@ def handle(
                 "Stop не считает это доказательством отмены."
             ),
         }
+
+
+def _acknowledge_resume_result_v2(
+    config: IntegrationConfigV2,
+    record: HookTurnContextV2,
+    environ: Mapping[str, str],
+) -> None:
+    if environ.get("CODEX_SMART_LAUNCH_KIND") != "resume":
+        return
+    root = RootIdentityV2(
+        pid=int(environ.get("CODEX_SMART_ROOT_PID", "")),
+        process_start_marker=environ.get("CODEX_SMART_ROOT_START_MARKER", ""),
+    )
+    binding = FreshActivationProviderV2(config).runtime_binding()
+    store = RootSessionLeaseStoreV2(
+        config.state_home,
+        process_marker_reader=system_process_marker_reader_v2,
+    )
+    lease = store.load(record.session_id)
+    if lease is None or lease.attachment is None:
+        return
+    route_id = lease.attachment.candidate.route_id
+    if not route_is_terminal_v2(binding.database_path, route_id):
+        return
+    project = ProjectIdentityV2(
+        repo_root=record.repo_root,
+        base_sha=record.base_sha,
+        worktree_fingerprint=record.worktree_fingerprint,
+        compatibility_fingerprint=binding.compatibility_fingerprint,
+    )
+    if not store.authorize_route(
+        route_id=route_id,
+        session_id=record.session_id,
+        shell_session_id=record.shell_session_id,
+        turn_id=record.turn_id,
+        root=root,
+        project=project,
+    ):
+        return
+    store.acknowledge_result(
+        session_id=record.session_id,
+        shell_session_id=record.shell_session_id,
+        turn_id=record.turn_id,
+        root=root,
+        route_id=route_id,
+    )
 
 
 def main() -> int:

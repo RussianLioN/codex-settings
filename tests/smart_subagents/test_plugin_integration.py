@@ -130,24 +130,36 @@ class PluginMetadataTests(unittest.TestCase):
             "CODEX_SMART_GATEWAY_PATH",
             "CODEX_SMART_ACTIVATION_ID",
             "CODEX_SMART_GATE_FINGERPRINT",
+            "CODEX_SMART_LAUNCH_KIND",
+            "CODEX_SMART_ROOT_PID",
+            "CODEX_SMART_ROOT_START_MARKER",
             "CODEX_SMART_MCP_SESSION_NONCE",
             "CODEX_SMART_USER_MCP_POLICY_PROOF",
         ):
             self.assertIn(name, server["env_vars"])
 
-    def test_hook_config_has_only_supported_turn_events(self) -> None:
+    def test_hook_config_has_smart_turn_and_session_lifecycle_events(self) -> None:
         hooks = json.loads(
             (PLUGIN_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8")
         )
-        self.assertEqual({"UserPromptSubmit", "Stop"}, set(hooks["hooks"]))
+        self.assertEqual(
+            {"SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"},
+            set(hooks["hooks"]),
+        )
+        session_start = hooks["hooks"]["SessionStart"][0]
+        self.assertEqual("startup|resume|clear|compact", session_start["matcher"])
+        start_command = session_start["hooks"][0]
         prompt = hooks["hooks"]["UserPromptSubmit"][0]["hooks"][0]
         stop = hooks["hooks"]["Stop"][0]["hooks"][0]
+        session_end = hooks["hooks"]["SessionEnd"][0]["hooks"][0]
+        self.assertIn("session-start", start_command["command"])
         self.assertEqual("command", prompt["type"])
         self.assertIn("$PLUGIN_ROOT", prompt["command"])
         self.assertEqual(2, prompt["timeout"])
         self.assertEqual("command", stop["type"])
         self.assertIn("$PLUGIN_ROOT", stop["command"])
         self.assertLessEqual(stop["timeout"], 2)
+        self.assertIn("session-end", session_end["command"])
 
     def test_bundled_entrypoints_are_executable_regular_files(self) -> None:
         for relative in (
@@ -827,6 +839,8 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("nodes: [", text)
         self.assertIn("const planInput", text)
         self.assertIn("smart_plan(planInput)", text)
+        self.assertIn("При умном возобновлении", text)
+        self.assertIn("не вызывай новый `smart_plan`", text)
         self.assertIn(
             "никогда не присваивай его переменной `routinginput`",
             normalized_text.lower(),

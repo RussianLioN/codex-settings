@@ -1,5 +1,18 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$PLUGIN_ROOT/bin/codex-smart-subagents-hook\" session-start",
+            "timeout": 2,
+            "statusMessage": "Проверка умного сеанса проекта"
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [
@@ -20,6 +33,18 @@
             "command": "\"$PLUGIN_ROOT/bin/codex-smart-subagents-hook\" stop",
             "timeout": 2,
             "statusMessage": "Проверка состояния умного маршрута"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$PLUGIN_ROOT/bin/codex-smart-subagents-hook\" session-end",
+            "timeout": 2,
+            "statusMessage": "Освобождение умного сеанса проекта"
           }
         ]
       }

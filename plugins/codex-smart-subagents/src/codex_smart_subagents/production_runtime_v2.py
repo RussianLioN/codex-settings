@@ -16,7 +16,7 @@ from .mcp_server_v2 import MCPServerV2
 from .policy_bundle_v2 import PolicyBundleV2, load_policy_bundle_v2
 from .recovery_suite_v2 import RecoverySuiteV2
 from .runtime_recovery_v2 import prepare_attempts_root_v2
-from .smart_service_v2 import SmartServiceV2
+from .smart_service_v2 import SmartServiceV2, SmartServiceV2Error
 from .smart_turn_runtime_v2 import SmartTurnRuntimeV2
 from .state_store_v2 import (
     AcceptingControllerV2,
@@ -24,6 +24,13 @@ from .state_store_v2 import (
     QueuedStartDispatchV2,
     RequestContextV2,
     SmartStoreV2,
+)
+from .resume_session_v2 import (
+    ProjectIdentityV2,
+    RootIdentityV2,
+    RootSessionLeaseStoreV2,
+    route_is_terminal_v2,
+    system_process_marker_reader_v2,
 )
 
 
@@ -121,10 +128,65 @@ def build_production_runtime_v2(
     )
     database_identity = database_identity_from_binding_v2(binding)
     controller = accepting_controller_from_binding_v2(binding)
+    resume_store: RootSessionLeaseStoreV2 | None = None
+    resume_root: RootIdentityV2 | None = None
+    launch_kind = environment.get("CODEX_SMART_LAUNCH_KIND")
+    try:
+        if launch_kind in {"startup", "resume"}:
+            resume_root = RootIdentityV2(
+                pid=int(environment["CODEX_SMART_ROOT_PID"]),
+                process_start_marker=environment["CODEX_SMART_ROOT_START_MARKER"],
+            )
+            resume_store = RootSessionLeaseStoreV2(
+                binding.state_home,
+                process_marker_reader=system_process_marker_reader_v2,
+            )
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        raise ProductionRuntimeV2Error(
+            "MANAGED_ROOT_IDENTITY_UNAVAILABLE"
+        ) from exc
+
+    def project_for_context(context: RequestContextV2) -> ProjectIdentityV2:
+        return ProjectIdentityV2(
+            repo_root=context.repo_root,
+            base_sha=context.base_sha,
+            worktree_fingerprint=context.worktree_fingerprint,
+            compatibility_fingerprint=context.compatibility_fingerprint,
+        )
+
+    def authorize_resumed_route(
+        route_id: str,
+        current: RequestContextV2,
+        original: RequestContextV2,
+    ) -> bool:
+        if resume_store is None or resume_root is None:
+            return False
+        lease = resume_store.load(current.session_id)
+        attachment = None if lease is None else lease.attachment
+        if (
+            attachment is None
+            or attachment.candidate.original_shell_session_id
+            != original.shell_session_id
+            or attachment.candidate.original_session_id != original.session_id
+            or attachment.candidate.original_turn_id != original.turn_id
+        ):
+            return False
+        return resume_store.authorize_route(
+            route_id=route_id,
+            session_id=current.session_id,
+            shell_session_id=current.shell_session_id,
+            turn_id=current.turn_id,
+            root=resume_root,
+            project=project_for_context(current),
+        )
+
     store = SmartStoreV2(
         binding.database_path,
         database_identity=database_identity,
         controller=controller,
+        resume_authorizer=(
+            authorize_resumed_route if resume_store is not None else None
+        ),
     )
     dispatcher: StartDispatcherV2 | None = None
     try:
@@ -164,6 +226,36 @@ def build_production_runtime_v2(
                 raise ProductionRuntimeV2Error("ACTIVATION_BINDING_CHANGED")
             return fresh.control_epoch
 
+        def guard_resumed_plan(context: RequestContextV2) -> None:
+            if resume_store is None or resume_root is None:
+                return
+            lease = resume_store.load(context.session_id)
+            if lease is None or lease.attachment is None:
+                return
+            attachment = lease.attachment
+            if attachment.state == "ACKNOWLEDGED":
+                return
+            if not resume_store.authorize_route(
+                route_id=attachment.candidate.route_id,
+                session_id=context.session_id,
+                shell_session_id=context.shell_session_id,
+                turn_id=context.turn_id,
+                root=resume_root,
+                project=project_for_context(context),
+            ):
+                raise SmartServiceV2Error(
+                    "RESUME_ATTACHMENT_CHANGED",
+                    "присоединение умного маршрута изменилось",
+                )
+            if not route_is_terminal_v2(
+                binding.database_path,
+                attachment.candidate.route_id,
+            ):
+                raise SmartServiceV2Error(
+                    "RESUME_ROUTE_PENDING",
+                    "прежний маршрут должен завершиться до нового smart_plan",
+                )
+
         service = SmartServiceV2(
             store=store,
             policy_bundle=policy_bundle,
@@ -177,6 +269,7 @@ def build_production_runtime_v2(
             verify_snapshot_subject=verify_snapshot_subject,
             account_home=str(home),
             account_tmpdir=str(tmpdir),
+            resume_plan_guard=guard_resumed_plan,
         )
         runtime = SmartTurnRuntimeV2(service=service, store=store)
         dispatcher = (

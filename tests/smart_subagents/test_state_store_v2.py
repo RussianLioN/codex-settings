@@ -2217,6 +2217,95 @@ class SmartStoreV2Tests(unittest.TestCase):
         self.assertEqual(peer.node_id, second.node_id)
         self.assertEqual("ATTESTING", second.state)
 
+    def test_bound_resume_authorizer_can_read_old_start_without_rewriting_owner(self) -> None:
+        historical = request_context()
+        first_node = node()
+        peer = replace(node("node2_" + "b" * 32), ordinal=1)
+        binding = self.store.issue_turn_binding(
+            historical,
+            ttl_seconds=120,
+            now=NOW,
+        )
+        route_id = self.store.create_planned_route(
+            binding_id=binding.binding_id,
+            request_context=historical,
+            request_key="idem2_" + "c" * 32,
+            request_hash=HEX["record"],
+            catalog_generation="catalog-v2",
+            algorithm_version="q+p+v+o-v2",
+            disposition="DELEGATE",
+            expires_at=NOW + timedelta(minutes=15),
+            plan_output={"status": "PLANNED"},
+            nodes=(first_node, peer),
+            now=NOW + timedelta(seconds=1),
+        )
+        start = self.store.create_start_request(
+            route_id=route_id,
+            node_id=first_node.node_id,
+            request_context=historical,
+            deadline_at=NOW + timedelta(seconds=180),
+            now=NOW + timedelta(seconds=2),
+        )
+        current = replace(
+            historical,
+            shell_session_id="cas2_resumed",
+            turn_id="turn-resumed",
+        )
+        self.store.close()
+        self.store = SmartStoreV2(
+            self.path,
+            database_identity=database_identity(),
+            controller=controller(),
+            resume_authorizer=lambda candidate_route, candidate, stored: (
+                candidate_route == route_id
+                and candidate.session_id == stored.session_id
+                and candidate.repo_root == stored.repo_root
+            ),
+        )
+
+        status = self.store.read_start_status(
+            start.start_request_id,
+            current,
+            cursor=None,
+            page_size=20,
+        )
+
+        self.assertEqual("ATTESTING", status.state)
+        with closing(sqlite3.connect(self.path)) as connection:
+            stored_owner = connection.execute(
+                "select shell_session_id,session_id,turn_id from routes where route_id=?",
+                (route_id,),
+            ).fetchone()
+        self.assertEqual(
+            (
+                historical.shell_session_id,
+                historical.session_id,
+                historical.turn_id,
+            ),
+            stored_owner,
+        )
+
+        self.store.cancel_start_request(
+            start.start_request_id,
+            current,
+            idempotency_key="idem2_" + "d" * 32,
+            reason_code="SUPERSEDED",
+            now=NOW + timedelta(seconds=3),
+        )
+        resumed_start = self.store.create_start_request(
+            route_id=route_id,
+            node_id=peer.node_id,
+            request_context=current,
+            deadline_at=NOW + timedelta(seconds=181),
+            now=NOW + timedelta(seconds=4),
+        )
+        dispatch = next(
+            item
+            for item in self.store.queued_start_dispatches()
+            if item.start_request_id == resumed_start.start_request_id
+        )
+        self.assertEqual(historical, dispatch.request_context)
+
     def test_failed_node_terminalizes_unstarted_descendants_and_route(self) -> None:
         reader = node()
         validator = replace(

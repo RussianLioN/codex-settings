@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from .canonical_json import canonical_json_v1, domain_fingerprint
 from .graph import GraphError, TaskNode, validate_graph
@@ -380,11 +380,18 @@ class SmartStoreV2:
         database_identity: DatabaseIdentityV2,
         controller: AcceptingControllerV2,
         allow_prepared_empty_database: bool = False,
+        resume_authorizer: Callable[
+            [str, RequestContextV2, RequestContextV2], bool
+        ]
+        | None = None,
     ) -> None:
         self.path = path.expanduser()
         self._expected_database_identity = database_identity
         self._expected_controller = controller
         self._allow_prepared_empty_database = bool(allow_prepared_empty_database)
+        if resume_authorizer is not None and not callable(resume_authorizer):
+            raise TypeError("resume_authorizer must be callable")
+        self._resume_authorizer = resume_authorizer
         self._lock = threading.RLock()
         self._closed = False
         self._manifest = self._load_schema_manifest()
@@ -1654,6 +1661,7 @@ class SmartStoreV2:
                 self._fail("ROUTE_NODE_NOT_FOUND", "route or node does not exist")
             self._require_owner_values(
                 request_context,
+                route_id=route_id,
                 context_hash=str(row["route_context_hash"]),
                 context_json=str(row["route_context_json"]),
             )
@@ -3482,18 +3490,24 @@ class SmartStoreV2:
             ).fetchone()
             if route is None or target is None:
                 self._fail("ROUTE_NODE_NOT_FOUND", "route or node does not exist")
-            self._require_owner_values(
+            resumed_owner = self._require_owner_values(
                 request_context,
+                route_id=route_id,
                 context_hash=str(route["context_hash"]),
                 context_json=str(route["context_json"]),
                 error_code="ROUTE_OWNER_MISMATCH",
             )
-            if (
+            if not resumed_owner and (
                 route["shell_session_id"] != request_context.shell_session_id
                 or route["session_id"] != request_context.session_id
                 or route["turn_id"] != request_context.turn_id
             ):
                 self._fail("ROUTE_OWNER_MISMATCH", "route belongs to another turn")
+            durable_start_owner = (
+                _request_context_from_stored_json_v2(str(route["context_json"]))
+                if resumed_owner
+                else request_context
+            )
             intent_id = (
                 None
                 if idempotency_key is None
@@ -3693,9 +3707,9 @@ class SmartStoreV2:
                 (
                     start_request_id,
                     route_id,
-                    request_context.shell_session_id,
-                    request_context.session_id,
-                    request_context.turn_id,
+                    durable_start_owner.shell_session_id,
+                    durable_start_owner.session_id,
+                    durable_start_owner.turn_id,
                     _iso(created_at),
                     _iso(created_at),
                 ),
@@ -4665,28 +4679,36 @@ class SmartStoreV2:
         self,
         request_context: RequestContextV2,
         *,
+        route_id: str,
         context_hash: str,
         context_json: str,
         error_code: str = "START_OWNER_MISMATCH",
-    ) -> None:
+    ) -> bool:
         candidate, _, _ = self._validated_context(request_context)
         stored_context = _request_context_from_stored_json_v2(context_json)
         stored, expected_json, expected_hash = self._validated_context(stored_context)
+        if context_hash != expected_hash or context_json != expected_json:
+            self._fail("DATABASE_VALUE_INVALID", "stored route context is inconsistent")
         owner_fields = set(stored) - {"issuedControlEpoch"}
-        if (
-            context_hash != expected_hash
-            or context_json != expected_json
-            or any(candidate[name] != stored[name] for name in owner_fields)
-        ):
+        same_owner = all(candidate[name] == stored[name] for name in owner_fields)
+        if not same_owner:
+            if self._resume_authorizer is not None and self._resume_authorizer(
+                route_id,
+                request_context,
+                stored_context,
+            ):
+                self._require_accepting_controller(candidate["issuedControlEpoch"])
+                return True
             self._fail(error_code, "start request belongs to another turn")
         if candidate["issuedControlEpoch"] == stored["issuedControlEpoch"]:
-            return
+            return False
         if (
             candidate["issuedControlEpoch"]
             != self._expected_controller.control_epoch
         ):
             self._fail(error_code, "start request belongs to another turn")
         self._require_accepting_controller(candidate["issuedControlEpoch"])
+        return False
 
     def _start_owner_row_locked(
         self, start_request_id: str, request_context: RequestContextV2
@@ -4703,12 +4725,13 @@ class SmartStoreV2:
         ).fetchone()
         if row is None:
             self._fail("START_REQUEST_NOT_FOUND", "start request does not exist")
-        self._require_owner_values(
+        resumed_owner = self._require_owner_values(
             request_context,
+            route_id=str(row["route_id"]),
             context_hash=str(row["route_context_hash"]),
             context_json=str(row["route_context_json"]),
         )
-        if (
+        if not resumed_owner and (
             row["shell_session_id"] != request_context.shell_session_id
             or row["session_id"] != request_context.session_id
             or row["turn_id"] != request_context.turn_id

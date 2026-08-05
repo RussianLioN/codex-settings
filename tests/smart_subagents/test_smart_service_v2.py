@@ -316,6 +316,38 @@ class SmartServiceV2Tests(unittest.TestCase):
             ).fetchone()
         self.assertEqual(("gpt-5.6-luna", "low", None, None), stored)
 
+    def test_resume_guard_blocks_new_plan_before_binding_is_consumed(self) -> None:
+        def block(_context) -> None:
+            raise SmartServiceV2Error(
+                "RESUME_ROUTE_PENDING",
+                "прежний маршрут ещё не завершён",
+            )
+
+        guarded = SmartServiceV2(
+            store=self.store,
+            policy_bundle=self.bundle,
+            bundled_catalog_projection=BUNDLED_CATALOG_PROJECTION,
+            activation_gate_verifier=lambda gate: dict(gate),
+            clock=lambda: NOW,
+            interface_evidence=self.interface,
+            account_evidence_executor=self.account_executor,
+            verify_snapshot_subject=lambda _subject: None,
+            account_home="/private/home",
+            account_tmpdir="/private/tmp",
+            resume_plan_guard=block,
+        )
+        binding = guarded.issue_turn_binding(_context(), ttl_seconds=120)
+
+        with self.assertRaises(SmartServiceV2Error) as caught:
+            guarded.smart_plan(
+                binding_id=binding.binding_id,
+                request_context=_context(),
+                request_key="idem2_" + "f" * 32,
+                nodes=_single_plan_node(_routing_input()),
+            )
+
+        self.assertEqual("RESUME_ROUTE_PENDING", caught.exception.code)
+
     def test_minimal_public_input_is_enriched_before_one_router_evaluation(
         self,
     ) -> None:

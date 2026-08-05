@@ -10,8 +10,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = {
+    "session-start": ROOT / "hooks" / "session_start.py",
     "user-prompt-submit": ROOT / "hooks" / "user_prompt_submit.py",
     "stop": ROOT / "hooks" / "stop.py",
+    "session-end": ROOT / "hooks" / "session_end.py",
 }
 
 if len(sys.argv) != 2 or sys.argv[1] not in TARGETS:

@@ -124,7 +124,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
                     document.lower(),
                 )
 
-    def test_root_exposes_all_five_v2_flow_diagrams(self) -> None:
+    def test_root_exposes_all_six_v2_flow_diagrams(self) -> None:
         root = (REPO / "README.md").read_text(encoding="utf-8")
         flow_path = REPO / "docs/analysis/adaptive-subagents-v2-flow.md"
         flow = self.validator.parse_markdown(
@@ -133,6 +133,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
         anchors = (
             "полный-поток-запроса",
             "поток-пишущего-результата",
+            "возобновление-умного-маршрута",
             "обновление-откат-и-удаление-установки",
             "восстановление-временного-процесса-установщика",
             "восстановление-маршрута-после-прерывания",
@@ -150,9 +151,16 @@ class DocsNavigationValidatorTests(unittest.TestCase):
         mermaid = tuple(
             fence for fence in flow.fences if fence.language == "mermaid"
         )
-        self.assertEqual(5, len(mermaid))
+        self.assertEqual(6, len(mermaid))
         self.assertEqual(
-            ["flowchart TD"] * 5,
+            [
+                "flowchart TD",
+                "sequenceDiagram",
+                "flowchart TD",
+                "flowchart TD",
+                "flowchart TD",
+                "flowchart TD",
+            ],
             [
                 self.validator._first_content_line(fence.content)
                 for fence in mermaid
@@ -245,7 +253,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
         mermaid = tuple(
             fence for fence in flow.fences if fence.language == "mermaid"
         )
-        self.assertEqual(5, len(mermaid))
+        self.assertEqual(6, len(mermaid))
         first_diagram = mermaid[0].content
         for branch in (
             "model_reasoning_effort=ultra",
@@ -270,8 +278,42 @@ class DocsNavigationValidatorTests(unittest.TestCase):
         ):
             document = path.read_text(encoding="utf-8")
             with self.subTest(path=path.relative_to(REPO)):
-                self.assertIn("`UserPromptSubmit` и `Stop`", document)
+                self.assertIn(
+                    "`SessionStart`, `UserPromptSubmit`, `Stop` и `SessionEnd`",
+                    document,
+                )
                 self.assertNotIn("`userPromptSubmit` и `stop`", document)
+
+    def test_smart_resume_is_reachable_from_root_and_has_flow_diagram(self) -> None:
+        root = (REPO / "README.md").read_text(encoding="utf-8")
+        plugin = (
+            REPO / "plugins/codex-smart-subagents/README.md"
+        ).read_text(encoding="utf-8")
+        flow_source = (
+            REPO / "docs/analysis/adaptive-subagents-v2-flow.md"
+        ).read_text(encoding="utf-8")
+        flow = self.validator.parse_markdown(flow_source)
+
+        self.assertIn("Возобновить умный сеанс проекта", root)
+        self.assertIn(
+            "plugins/codex-smart-subagents/README.md#умное-возобновление-сеанса",
+            root,
+        )
+        self.assertIn("## Умное возобновление сеанса", plugin)
+        self.assertIn("codex resume --last", plugin)
+        self.assertIn("## Возобновление умного маршрута", flow_source)
+        resume_diagrams = [
+            fence.content
+            for fence in flow.fences
+            if fence.language == "mermaid" and "SessionStart(resume)" in fence.content
+        ]
+        self.assertEqual(1, len(resume_diagrams))
+        for value in (
+            "RESUME_OWNER_ACTIVE",
+            "smart_wait",
+            "ровно один новый smart_plan",
+        ):
+            self.assertIn(value, resume_diagrams[0])
 
     def test_current_guides_explain_all_four_smart_turn_tools(self) -> None:
         for path in (

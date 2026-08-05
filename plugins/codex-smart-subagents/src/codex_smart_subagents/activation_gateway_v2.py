@@ -27,12 +27,14 @@ from urllib.parse import quote
 from .canonical_json import CanonicalJsonError, canonical_json_bytes, domain_fingerprint
 from .catalog import Catalog, CatalogError
 from .codex_binary_snapshot import CODE_SIGNATURE_REQUIREMENT
+from .child_guard_v2 import system_process_start_marker_v2
 from .coordinator_selection_v2 import (
     coordinator_selection_from_health_v2,
     validate_coordinator_selection_document_v2,
 )
 from .evidence import EvidenceError, verify_interface_evidence
 from .launcher import (
+    InvocationKind,
     apply_coordinator_defaults,
     clean_ordinary_environment,
     is_native_ultra_invocation,
@@ -1539,6 +1541,22 @@ def run_permanent_gateway(
     source_environment = dict(os.environ if environment is None else environment)
     parsed_invocation = parse_managed_invocation(arguments)
     invocation = parsed_invocation.decision
+    root_end = (
+        len(arguments)
+        if parsed_invocation.separator_index is None
+        else parsed_invocation.separator_index
+    )
+    resume_requested = "resume" in arguments[:root_end]
+    if (
+        not invocation.adaptive
+        and invocation.kind is InvocationKind.REJECTED_MANAGED
+        and resume_requested
+    ):
+        raise ManagedLaunchUnavailable(
+            "MANAGED_RESUME_UNSUPPORTED",
+            "умное возобновление не поддерживает эти параметры; "
+            "для явного обхода используйте codex-native resume",
+        )
     if is_native_ultra_invocation(arguments) or not invocation.adaptive:
         executable = validate_real_binary(
             Path(
@@ -1637,6 +1655,21 @@ def run_permanent_gateway(
         "cas2_" + secrets.token_urlsafe(32)
     )
     adaptive_environment["CODEX_SMART_LAUNCHER_ACTIVE"] = "1"
+    adaptive_environment["CODEX_SMART_LAUNCH_KIND"] = (
+        "resume"
+        if parsed_invocation.decision.kind.value == "managed-resume"
+        else "startup"
+    )
+    root_pid = os.getpid()
+    try:
+        root_start_marker = system_process_start_marker_v2(root_pid)
+    except Exception as exc:
+        raise ManagedLaunchUnavailable(
+            "MANAGED_ROOT_IDENTITY_UNAVAILABLE",
+            "не удалось доказать личность корневого процесса",
+        ) from exc
+    adaptive_environment["CODEX_SMART_ROOT_PID"] = str(root_pid)
+    adaptive_environment["CODEX_SMART_ROOT_START_MARKER"] = root_start_marker
     adaptive_environment[MCP_SESSION_NONCE_ENV_V2] = (
         "mcpn2_" + secrets.token_hex(32)
     )
@@ -1661,7 +1694,6 @@ def run_permanent_gateway(
             decision.runtime_binding.state_home
         )
     separator_index = parsed_invocation.separator_index
-    root_end = len(arguments) if separator_index is None else separator_index
     rewritten_root = list(arguments[:root_end])
     if not parsed_invocation.coordinator_control:
         rewritten_root = apply_coordinator_defaults(

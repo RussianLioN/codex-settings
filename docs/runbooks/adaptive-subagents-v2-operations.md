@@ -229,8 +229,9 @@ python3 scripts/install_adaptive_subagents.py --apply --json
 ```
 
 В `/hooks` проверить источник
-`codex-smart-subagents@codex-settings-adaptive` и ровно две записи
-`UserPromptSubmit` и `Stop`, затем принять решение о доверии вручную.
+`codex-smart-subagents@codex-settings-adaptive` и четыре записи
+`SessionStart`, `UserPromptSubmit`, `Stop` и `SessionEnd`, затем принять
+решение о доверии вручную.
 Установщик не обходит это решение. После него завершить текущую сессию,
 запустить новую диагностику и только после фактического `readiness=READY`
 выполнять дымовую проверку:
@@ -455,8 +456,9 @@ codex plugin list --json
 python3 scripts/install_adaptive_subagents.py --doctor --json
 ```
 
-Затем проверить доверие к `UserPromptSubmit` и `Stop` через `/hooks` в новой
-сессии. Не нужно вручную дописывать таблицу MCP в `config.toml`: отсутствие
+Затем проверить доверие к `SessionStart`, `UserPromptSubmit`, `Stop` и
+`SessionEnd` через `/hooks` в новой сессии. Не нужно вручную дописывать
+таблицу MCP в `config.toml`: отсутствие
 пользовательского переопределения наследует строгие настройки установленного
 расширения.
 
@@ -465,6 +467,21 @@ python3 scripts/install_adaptive_subagents.py --doctor --json
 `clientNodeId`, `dependencyIds` и отдельный `routingInput`. Контроллер отдельно
 выбирает модель и уровень рассуждения для каждого узла. Пользователю не нужно
 вручную распределять Luna, Terra и Sol внутри маршрута.
+
+Возобновление выполняется той же повседневной командой:
+
+```bash
+codex resume --last
+```
+
+Штатный селектор Codex выбирает диалог, `SessionStart` проверяет аренду
+корневого процесса и проект, а первый `UserPromptSubmit` подтверждает точечное
+присоединение. `RESUME_OWNER_ACTIVE` означает, что прежний корневой процесс
+ещё жив; второй процесс не продолжает работу. При
+`RESUME_CONTEXT_MISMATCH`, `RESUME_COMPATIBILITY_MISMATCH` или
+`RESUME_OWNER_UNPROVED` старый маршрут остаётся неизменным, а диалог начинает
+новый умный ход. `MANAGED_RESUME_UNAVAILABLE` закрывает запуск, если аренду,
+контроллер или обработчики доказать не удалось.
 
 Общее решение относится ко всему графу. Если хотя бы один узел требует
 уточнения, возвращается `clarify`. Если решения узлов смешивают `direct` и

@@ -570,6 +570,27 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
         self.assertEqual(0, resolver.calls)
         self.assertEqual([], observed)
 
+    def test_unsupported_resume_fails_closed_without_native_execution(self) -> None:
+        executions: list[object] = []
+
+        with self.assertRaises(ManagedLaunchUnavailable) as raised:
+            run_permanent_gateway(
+                ["resume", "--profile", "fast"],
+                resolver=None,
+                wrapper=self.wrapper,
+                environment={
+                    "PATH": "/usr/bin",
+                    "CODEX_HOME": str(self.root),
+                    "CODEX_REAL_BIN": str(self.real),
+                },
+                managed_required=True,
+                execve=lambda *_arguments: executions.append(object()),
+            )
+
+        self.assertEqual("MANAGED_RESUME_UNSUPPORTED", raised.exception.code)
+        self.assertIn("codex-native resume", str(raised.exception))
+        self.assertEqual([], executions)
+
     def test_ultra_bypasses_gateway_without_a_resolver(self) -> None:
         original = [
             '-cmodel_reasoning_effort="ultra"',
@@ -760,6 +781,54 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
             environment["CODEX_SMART_MCP_SESSION_NONCE"],
             r"^mcpn2_[0-9a-f]{64}$",
         )
+
+    def test_ready_resume_uses_managed_path_and_marks_resume_launch(self) -> None:
+        decision = GatewayDecision(
+            state=GatewayState.READY,
+            reason_code="READY",
+            executable=self.real,
+            coordinator={
+                "model": "gpt-5.6-terra",
+                "reasoning_effort": "high",
+            },
+            activation_id="act2_" + "a" * 64,
+            gate_fingerprint="b" * 64,
+            activation_gate={
+                "manifestSemanticFingerprint": "c" * 64,
+                "activationReceiptFingerprint": "d" * 64,
+                "journalAbsenceProof": {},
+                "gateFingerprint": "b" * 64,
+            },
+            catalog_path=self.root / "adaptive-subagents.toml",
+        )
+        original = ["resume", "--last", "--", "продолжай"]
+
+        _path, argv, environment = self._execute(
+            decision,
+            original,
+            {"PATH": "/usr/bin"},
+            managed_required=True,
+        )
+
+        self.assertEqual(
+            (
+                str(self.real),
+                "resume",
+                "--last",
+                "--model",
+                "gpt-5.6-terra",
+                "-c",
+                'model_reasoning_effort="high"',
+                *self.ADAPTIVE_DIRECT_TOOL_ARGUMENTS,
+                *self.ADAPTIVE_DISABLED_FEATURE_ARGUMENTS,
+                "--",
+                "продолжай",
+            ),
+            argv,
+        )
+        self.assertEqual("resume", environment["CODEX_SMART_LAUNCH_KIND"])
+        self.assertEqual(str(os.getpid()), environment["CODEX_SMART_ROOT_PID"])
+        self.assertTrue(environment["CODEX_SMART_ROOT_START_MARKER"])
         self.assertIn("CODEX_SMART_USER_MCP_POLICY_PROOF", environment)
         policy_proof = json.loads(
             environment["CODEX_SMART_USER_MCP_POLICY_PROOF"]

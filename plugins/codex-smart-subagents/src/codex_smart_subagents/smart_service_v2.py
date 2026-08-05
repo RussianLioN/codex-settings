@@ -91,6 +91,7 @@ class SmartServiceV2:
         verify_snapshot_subject: Callable[[dict[str, Any]], None],
         account_home: str,
         account_tmpdir: str,
+        resume_plan_guard: Callable[[RequestContextV2], None] | None = None,
     ) -> None:
         self.store = store
         self.policy_bundle = policy_bundle
@@ -150,6 +151,9 @@ class SmartServiceV2:
         self.verify_snapshot_subject = verify_snapshot_subject
         self.account_home = account_home
         self.account_tmpdir = account_tmpdir
+        if resume_plan_guard is not None and not callable(resume_plan_guard):
+            raise TypeError("resume_plan_guard must be callable")
+        self.resume_plan_guard = resume_plan_guard
 
     def issue_turn_binding(
         self,
@@ -175,6 +179,8 @@ class SmartServiceV2:
         nodes: Sequence[Mapping[str, Any]],
     ) -> SmartPlanResultV2:
         self._verify_request_context(request_context)
+        if self.resume_plan_guard is not None:
+            self.resume_plan_guard(request_context)
         submitted_nodes = self._validated_plan_nodes(nodes)
         roles = [
             self._role(item["routingInput"]["roleTemplateId"])
