@@ -16,7 +16,6 @@ for component in ("scripts", "src"):
         sys.path.insert(0, path)
 
 from integration_runtime import (  # noqa: E402
-    HOOK_TOTAL_BUDGET_SECONDS,
     _git_identity,
     environment_is_active,
     read_hook_input,
@@ -36,6 +35,9 @@ from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
 )
 
 
+SESSION_START_TOTAL_BUDGET_SECONDS = 8.0
+
+
 def handle(payload: dict[str, Any], environ: Mapping[str, str]) -> dict[str, Any] | None:
     if not environment_is_active(environ) or payload.get("agent_id"):
         return None
@@ -47,7 +49,10 @@ def handle(payload: dict[str, Any], environ: Mapping[str, str]) -> dict[str, Any
             "continue": False,
             "stopReason": "MANAGED_RESUME_UNAVAILABLE: источник SessionStart неизвестен",
         }
-    deadline = time.monotonic() + HOOK_TOTAL_BUDGET_SECONDS
+    # Первый запуск после сна или обновления может читать активацию, базу и
+    # состояние Git с холодного диска. Короткий срок остальных хуков здесь
+    # создавал ложный отказ ровно на границе 1,75 секунды.
+    deadline = time.monotonic() + SESSION_START_TOTAL_BUDGET_SECONDS
     try:
         config = IntegrationConfigV2.from_environ(environ)
         require_current_user_mcp_policy_v2(config, environ)

@@ -60,6 +60,62 @@ def environment(state_home: Path) -> dict[str, str]:
 
 
 class SessionStartHookTests(unittest.TestCase):
+    def test_session_start_reserves_a_cold_start_budget(self) -> None:
+        module = load_module("session_start_cold_budget", "hooks/session_start.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            state_home = Path(tmp)
+            config = SimpleNamespace(
+                state_home=state_home,
+                shell_session_id="shell-session-1",
+            )
+            binding = SimpleNamespace(
+                database_path=state_home / "smart-subagents.sqlite3",
+                compatibility_fingerprint="a" * 64,
+            )
+            store = mock.Mock()
+            environ = {
+                "CODEX_SMART_LAUNCH_KIND": "startup",
+                "CODEX_SMART_ROOT_PID": "1234",
+                "CODEX_SMART_ROOT_START_MARKER": "darwin:1:2",
+            }
+            payload = {
+                "session_id": "codex-session-1",
+                "cwd": str(REPO),
+                "hook_event_name": "SessionStart",
+                "source": "startup",
+            }
+
+            with (
+                mock.patch.object(module, "environment_is_active", return_value=True),
+                mock.patch.object(module.time, "monotonic", return_value=100.0),
+                mock.patch.object(
+                    module.IntegrationConfigV2,
+                    "from_environ",
+                    return_value=config,
+                ),
+                mock.patch.object(module, "require_current_user_mcp_policy_v2"),
+                mock.patch.object(
+                    module,
+                    "pinned_resume_binding_v2",
+                    return_value=binding,
+                ) as pinned_binding,
+                mock.patch.object(
+                    module,
+                    "_git_identity",
+                    return_value=(str(REPO), "b" * 40, "c" * 64),
+                ),
+                mock.patch.object(
+                    module,
+                    "RootSessionLeaseStoreV2",
+                    return_value=store,
+                ),
+            ):
+                result = module.handle(payload, environ)
+
+            self.assertIsNone(result)
+            deadline = pinned_binding.call_args.kwargs["deadline"]
+            self.assertGreaterEqual(deadline - 100.0, 7.5)
+
     def test_startup_uses_bounded_pinned_binding_instead_of_full_resolver(
         self,
     ) -> None:
@@ -220,6 +276,7 @@ class PluginMetadataTests(unittest.TestCase):
         stop = hooks["hooks"]["Stop"][0]["hooks"][0]
         session_end = hooks["hooks"]["SessionEnd"][0]["hooks"][0]
         self.assertIn("session-start", start_command["command"])
+        self.assertGreaterEqual(start_command["timeout"], 9)
         self.assertEqual("command", prompt["type"])
         self.assertIn("$PLUGIN_ROOT", prompt["command"])
         self.assertEqual(2, prompt["timeout"])
