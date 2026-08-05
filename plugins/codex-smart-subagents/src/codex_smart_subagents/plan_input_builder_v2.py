@@ -42,7 +42,29 @@ def build_plan_input_v2(specification: Any) -> dict[str, Any]:
                 f"узел {item['clientNodeId']} ссылается на неизвестные зависимости: "
                 + ", ".join(missing)
             )
+    _validate_dependency_graph(result)
     return {"nodes": result}
+
+
+def _validate_dependency_graph(nodes: list[dict[str, Any]]) -> None:
+    remaining = {
+        item["clientNodeId"]: set(item["dependencyIds"]) for item in nodes
+    }
+    resolved: set[str] = set()
+    while remaining:
+        ready = sorted(
+            node_id
+            for node_id, dependencies in remaining.items()
+            if dependencies <= resolved
+        )
+        if not ready:
+            _fail(
+                "граф зависимостей содержит цикл: "
+                + ", ".join(sorted(remaining))
+            )
+        resolved.update(ready)
+        for node_id in ready:
+            del remaining[node_id]
 
 
 def _build_node(

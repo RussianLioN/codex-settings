@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import subprocess
 import sys
 import unittest
 from pathlib import Path
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,59 +26,63 @@ from codex_smart_subagents.public_routing_input_v2 import (  # noqa: E402
 )
 
 
+def _valid_spec() -> dict[str, Any]:
+    return {
+        "nodes": [
+            {
+                "clientNodeId": "simple-check",
+                "dependencyIds": [],
+                "taskText": "Ответить одним словом: проверка.",
+                "roleTemplateId": "researcher-v1",
+                "evidence": [
+                    {
+                        "evidenceRefId": "request",
+                        "kind": "user-request",
+                        "statement": "Пользователь просит ответить одним словом.",
+                    },
+                    {
+                        "evidenceRefId": "policy",
+                        "kind": "explicit-policy",
+                        "statement": "Независимое исполнение не требуется.",
+                    },
+                    {
+                        "evidenceRefId": "scope",
+                        "kind": "repository-file",
+                        "statement": "Работа состоит из одной простой единицы.",
+                    },
+                ],
+                "workShape": {
+                    "scopeUnits": 1,
+                    "workUnits": 1,
+                    "boundaries": 1,
+                    "workstreams": 1,
+                },
+                "delegation": {
+                    "objectivelyVerifiable": True,
+                    "independentWorkUnits": 0,
+                },
+                "contextEntries": [
+                    {
+                        "contextRefId": "request",
+                        "kind": "task-request",
+                        "evidenceRefIds": ["request"],
+                        "content": "Ответь одним словом: проверка.",
+                    },
+                    {
+                        "contextRefId": "scope",
+                        "kind": "source-excerpt",
+                        "evidenceRefIds": ["scope"],
+                        "content": "Один короткий ответ без изменения файлов.",
+                    },
+                ],
+            }
+        ]
+    }
+
+
 class PlanInputBuilderV2Tests(unittest.TestCase):
     def test_cli_builds_a_valid_plan_and_computes_integrity_fields(self) -> None:
-        spec = {
-            "nodes": [
-                {
-                    "clientNodeId": "simple-check",
-                    "dependencyIds": [],
-                    "taskText": "Ответить одним словом: проверка.",
-                    "roleTemplateId": "researcher-v1",
-                    "evidence": [
-                        {
-                            "evidenceRefId": "request",
-                            "kind": "user-request",
-                            "statement": "Пользователь просит ответить одним словом.",
-                        },
-                        {
-                            "evidenceRefId": "policy",
-                            "kind": "explicit-policy",
-                            "statement": "Независимое исполнение не требуется.",
-                        },
-                        {
-                            "evidenceRefId": "scope",
-                            "kind": "repository-file",
-                            "statement": "Работа состоит из одной простой единицы.",
-                        },
-                    ],
-                    "workShape": {
-                        "scopeUnits": 1,
-                        "workUnits": 1,
-                        "boundaries": 1,
-                        "workstreams": 1,
-                    },
-                    "delegation": {
-                        "objectivelyVerifiable": True,
-                        "independentWorkUnits": 0,
-                    },
-                    "contextEntries": [
-                        {
-                            "contextRefId": "request",
-                            "kind": "task-request",
-                            "evidenceRefIds": ["request"],
-                            "content": "Ответь одним словом: проверка.",
-                        },
-                        {
-                            "contextRefId": "scope",
-                            "kind": "source-excerpt",
-                            "evidenceRefIds": ["scope"],
-                            "content": "Один короткий ответ без изменения файлов.",
-                        },
-                    ],
-                }
-            ]
-        }
+        spec = _valid_spec()
 
         completed = subprocess.run(
             [sys.executable, str(SCRIPT), "--spec-json", json.dumps(spec)],
@@ -111,6 +117,46 @@ class PlanInputBuilderV2Tests(unittest.TestCase):
         self.assertGreaterEqual(
             routing_input["contextBundle"]["maxBytes"], total
         )
+
+    def test_cli_rejects_dependency_cycles_before_smart_plan(self) -> None:
+        spec = _valid_spec()
+        first = spec["nodes"][0]
+        second = copy.deepcopy(first)
+        first["clientNodeId"] = "first-check"
+        first["dependencyIds"] = ["second-check"]
+        second["clientNodeId"] = "second-check"
+        second["dependencyIds"] = ["first-check"]
+        spec["nodes"].append(second)
+
+        completed = subprocess.run(
+            [sys.executable, str(SCRIPT), "--spec-json", json.dumps(spec)],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("цикл", completed.stderr)
+
+    def test_cli_preserves_acyclic_forward_dependencies(self) -> None:
+        spec = _valid_spec()
+        first = spec["nodes"][0]
+        second = copy.deepcopy(first)
+        first["clientNodeId"] = "dependent-check"
+        first["dependencyIds"] = ["foundation-check"]
+        second["clientNodeId"] = "foundation-check"
+        spec["nodes"].append(second)
+
+        completed = subprocess.run(
+            [sys.executable, str(SCRIPT), "--spec-json", json.dumps(spec)],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
 
 
 if __name__ == "__main__":
