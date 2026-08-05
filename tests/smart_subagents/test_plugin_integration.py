@@ -921,6 +921,12 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("непустой `nextCursor`", normalized_text)
         self.assertNotIn("lastCursor", text)
         self.assertNotIn("smart_integrate", text)
+        self.assertIn("prepare_smart_plan.py", text)
+        self.assertIn("--spec-json", text)
+        self.assertIn("shellQuote", text)
+        self.assertIn("готовый `planInput`", text)
+        self.assertNotIn("new TextEncoder", text)
+        self.assertNotIn("crypto.subtle", text)
 
 
 if __name__ == "__main__":

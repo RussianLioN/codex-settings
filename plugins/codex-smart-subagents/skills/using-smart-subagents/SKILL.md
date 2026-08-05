@@ -39,27 +39,14 @@ description: Use when an adaptive Codex turn is active and the task may benefit 
   `roleTemplateId`. В `taskFacts.delegation` передавай только проверяемость и
   число независимых единиц; разрешение делегирования и остальные служебные
   поля добавляет контроллер.
-- Не перепечатывай нормативный объект вручную. Возьми абсолютный путь этого
-  `SKILL.md`, от каталога навыка поднимись на два уровня к корню подключаемого
-  модуля, прочитай `config/contracts/routing-input-v2.json` и программно
-  скопируй `baseInput`.
-  Например:
-
-  ```javascript
-  const vector = JSON.parse(vectorRead.output);
-  const baseInput = JSON.parse(JSON.stringify(vector.baseInput));
-  const taskFacts = JSON.parse(JSON.stringify(baseInput.taskFacts));
-  delete taskFacts.schemaVersion;
-  delete taskFacts.contractVersion;
-  delete taskFacts.delegation.permission;
-  const routingInput = {
-    taskFacts,
-    contextBundle: JSON.parse(JSON.stringify(baseInput.contextBundle)),
-    roleTemplateId: baseInput.roleTemplateId,
-  };
-  ```
-
-  Меняй в копии только доказанные значения задачи. Не меняй имена полей.
+- Не перепечатывай нормативный объект и не вычисляй контрольные суммы вручную.
+  Возьми абсолютный путь этого `SKILL.md`, от каталога навыка поднимись на два
+  уровня к корню подключаемого модуля и используй находящийся там
+  `scripts/prepare_smart_plan.py`. Передай помощнику короткий смысловой объект
+  через `--spec-json`; он сам копирует нормативный `baseInput`, проверяет поля,
+  вычисляет SHA-256, `byteLength`, связанные `evidenceSha256` и
+  `contextBundle.totalBytes` по точным байтам UTF-8 и печатает готовый
+  `planInput`.
 - Выбери смысловую роль по самой подзадаче, а не по роли корневого диалога:
   - `researcher-v1` — чтение, поиск и извлечение фактов; обязательные виды
     контекста: `task-request`, `source-excerpt`;
@@ -76,12 +63,11 @@ description: Use when an adaptive Codex turn is active and the task may benefit 
   `contextBundle.entries` к обязательному набору этой роли. Лишняя запись
   допустима, недостающая — нет. Роль задаёт характер работы и профиль прав;
   модель и глубину рассуждений по-прежнему выбирает контроллер.
-- До единственного вызова `smart_plan` программно проверь весь изменённый
-  объект. Для каждого изменённого текста пересчитай SHA-256 и точный
-  `byteLength` в байтах UTF-8, обнови связанные `evidenceSha256`, затем
-  пересчитай `contextBundle.totalBytes` и проверь, что
-  `contextBundle.maxBytes` не меньше итога. Не угадывай длину текста и не
-  вызывай `smart_plan`, пока локальная сверка не прошла.
+- До единственного вызова `smart_plan` обязательно получи успешный ответ
+  `prepare_smart_plan.py`. Не подменяй помощника кодом с `TextEncoder`, Web
+  Crypto или обрезанным чтением нормативного файла: эти средства не входят в
+  договор среды выполнения. При ошибке помощника исправь смысловой объект, а
+  не вызывай `smart_plan` с частичными данными.
 - Оценки `q`, `p`, `v`, `o` определяй по нормативным описаниям в `tools/list`;
   `factorClaims` для `q`, `v`, `o` сохраняй из образца и меняй только при
   наличии соответствующего доказательства. Значение `p` выводит контроллер
@@ -94,24 +80,56 @@ description: Use when an adaptive Codex turn is active and the task may benefit 
 
 ## Выполнение
 
-1. Сначала создай полный `planInput`, затем передай именно его в `smart_plan`.
-   Не передавай `routingInput` непосредственно в корне параметров. Для одного
-   узла точная оболочка такая:
+1. Сначала опиши узлы смысловым объектом и передай его проверенному помощнику.
+   В каждом узле обязательны `clientNodeId`, `dependencyIds`, `taskText`,
+   `roleTemplateId`, три доказательства `request`, `policy`, `scope`, четыре
+   целых значения `workShape`, два значения `delegation` и `contextEntries`
+   нужных для роли видов. `factorClaims` добавляй только для доказанных
+   отклонений; остальные помощник помечает как неизвестные, а не как нулевые.
+   Точный образец одного узла:
 
    ```javascript
-   const planInput = {
+   const spec = {
      nodes: [{
-       clientNodeId: "stable-semantic-node-id",
+       clientNodeId: "stable-node-id",
        dependencyIds: [],
-       routingInput,
+       taskText: "Точное описание подзадачи.",
+       roleTemplateId: "researcher-v1",
+       evidence: [
+         {evidenceRefId: "request", kind: "user-request",
+          statement: "Что именно просит пользователь."},
+         {evidenceRefId: "policy", kind: "explicit-policy",
+          statement: "Почему делегирование разрешено или не требуется."},
+         {evidenceRefId: "scope", kind: "repository-file",
+          statement: "Границы и форма этой подзадачи."},
+       ],
+       workShape: {scopeUnits: 1, workUnits: 1, boundaries: 1, workstreams: 1},
+       delegation: {objectivelyVerifiable: true, independentWorkUnits: 1},
+       contextEntries: [
+         {contextRefId: "request", kind: "task-request",
+          evidenceRefIds: ["request"], content: "Точный запрос."},
+         {contextRefId: "source", kind: "source-excerpt",
+          evidenceRefIds: ["scope"], content: "Нужный исходный контекст."},
+       ],
      }],
    };
-   const plan =
-     await tools.mcp__codex_smart_subagents__smart_plan(planInput);
+   const shellQuote = value => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+   const prepared = await tools.exec_command({
+     cmd: "python3 " + shellQuote(builderPath) + " --spec-json " +
+          shellQuote(JSON.stringify(spec)),
+     workdir: projectRoot,
+     yield_time_ms: 10000,
+     max_output_tokens: 30000,
+   });
+   if (prepared.exit_code !== 0) throw new Error(prepared.output);
+   const planInput = JSON.parse(prepared.output);
+   const plan = await tools.mcp__codex_smart_subagents__smart_plan(planInput);
    ```
 
-   Если подготовленный или сохранённый объект уже содержит `nodes` на верхнем
-   уровне, это готовый `planInput`: никогда не присваивай его переменной
+   Здесь `builderPath` — абсолютный путь к `scripts/prepare_smart_plan.py`, а
+   `projectRoot` — текущий рабочий каталог. Не вставляй данные пользователя в
+   команду без `shellQuote`. Ответ помощника уже содержит `nodes` на верхнем
+   уровне: это готовый `planInput`. Никогда не присваивай его переменной
    `routingInput` и не оборачивай повторно в новый `nodes`.
    Для нескольких узлов задай каждому уникальный `clientNodeId`, а в
    `dependencyIds` перечисли только идентификаторы его предшественников.
