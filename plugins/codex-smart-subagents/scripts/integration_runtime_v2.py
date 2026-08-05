@@ -189,6 +189,14 @@ class IntegrationConfigV2:
 
 
 @dataclass(frozen=True)
+class PinnedResumeBindingV2:
+    """Минимальная доказанная привязка для начального хука сеанса."""
+
+    database_path: Path
+    compatibility_fingerprint: str
+
+
+@dataclass(frozen=True)
 class HookTurnContextV2:
     shell_session_id: str
     session_id: str
@@ -788,6 +796,7 @@ def durable_stop_smart_turn_state_v2(
         layout,
         absence_checker,
         health_checker,
+        _,
     ) = _pinned_stop_database_path_v2(
         config,
         environ,
@@ -811,6 +820,27 @@ def durable_stop_smart_turn_state_v2(
     return route_state
 
 
+def pinned_resume_binding_v2(
+    config: IntegrationConfigV2,
+    environ: Mapping[str, str],
+    *,
+    deadline: float,
+) -> PinnedResumeBindingV2:
+    """Доказывает закреплённую базу без полного разрешения активации."""
+
+    database_path, _, _, _, _, pinned = _pinned_stop_database_path_v2(
+        config,
+        environ,
+        deadline=deadline,
+        absence_checker=None,
+        health_checker=None,
+    )
+    return PinnedResumeBindingV2(
+        database_path=database_path,
+        compatibility_fingerprint=pinned["compatibility_fingerprint"],
+    )
+
+
 def _pinned_stop_database_path_v2(
     config: IntegrationConfigV2,
     environ: Mapping[str, str],
@@ -824,6 +854,7 @@ def _pinned_stop_database_path_v2(
     GatewayLayout,
     Callable[..., Any],
     Callable[..., Any],
+    dict[str, str],
 ]:
     _remaining_hook_budget(deadline)
     if absence_checker is None:
@@ -894,7 +925,7 @@ def _pinned_stop_database_path_v2(
             "закреплённая база smart_plan текущей активации не доказана"
         ) from exc
     _remaining_hook_budget(deadline)
-    return database_path, gate, layout, absence_checker, health_checker
+    return database_path, gate, layout, absence_checker, health_checker, pinned
 
 
 def _require_stop_transition_guard_v2(
@@ -1816,11 +1847,13 @@ __all__ = [
     "HookTurnContextV2",
     "IntegrationConfigV2",
     "IntegrationV2Error",
+    "PinnedResumeBindingV2",
     "TurnContextStoreV2",
     "capture_hook_turn_context_v2",
     "durable_smart_plan_exists_v2",
     "durable_smart_turn_state_v2",
     "durable_stop_smart_turn_state_v2",
+    "pinned_resume_binding_v2",
     "require_current_user_mcp_policy_v2",
     "require_mcp_contract_v2",
     "require_live_controller_v2",

@@ -1381,6 +1381,48 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
 
         self.assertEqual(["absence", "health", "absence", "health"], calls)
 
+    def test_resume_binding_uses_pinned_database_and_compatibility(self) -> None:
+        runtime = sys.modules["integration_runtime_v2"]
+        database_id = "db2_" + "f" * 32
+        database_path = self._write_schema_routes_database(
+            database_id,
+            include_route=False,
+        )
+        self._write_active_manifest(database_id)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        self._publish_launch_gate(environment)
+        config = IntegrationConfigV2.from_environ(environment)
+
+        with (
+            mock.patch.object(
+                runtime,
+                "refresh_activation_journal_absence_v2",
+                return_value=None,
+            ),
+            mock.patch.object(
+                runtime,
+                "require_pinned_controller_health_v2",
+                return_value=None,
+            ),
+            mock.patch.object(
+                runtime,
+                "ActivationResolver",
+                side_effect=AssertionError("SessionStart не должен запускать resolve"),
+            ),
+        ):
+            binding = runtime.pinned_resume_binding_v2(
+                config,
+                environment,
+                deadline=time.monotonic() + 1,
+            )
+
+        self.assertEqual(database_path, binding.database_path)
+        self.assertEqual(
+            self.compatibility_fingerprint,
+            binding.compatibility_fingerprint,
+        )
+
     def test_user_prompt_falls_back_when_required_mcp_contract_is_unproved(
         self,
     ) -> None:

@@ -12,7 +12,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -57,6 +57,73 @@ def environment(state_home: Path) -> dict[str, str]:
         ),
         "XDG_STATE_HOME": str(state_home.resolve()),
     }
+
+
+class SessionStartHookTests(unittest.TestCase):
+    def test_startup_uses_bounded_pinned_binding_instead_of_full_resolver(
+        self,
+    ) -> None:
+        module = load_module("session_start_bounded_binding", "hooks/session_start.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            state_home = Path(tmp)
+            config = SimpleNamespace(
+                state_home=state_home,
+                shell_session_id="shell-session-1",
+            )
+            binding = SimpleNamespace(
+                database_path=state_home / "smart-subagents.sqlite3",
+                compatibility_fingerprint="a" * 64,
+            )
+            store = mock.Mock()
+            environ = {
+                "CODEX_SMART_LAUNCH_KIND": "startup",
+                "CODEX_SMART_ROOT_PID": "1234",
+                "CODEX_SMART_ROOT_START_MARKER": "darwin:1:2",
+            }
+            payload = {
+                "session_id": "codex-session-1",
+                "cwd": str(REPO),
+                "hook_event_name": "SessionStart",
+                "source": "startup",
+            }
+
+            with (
+                mock.patch.object(module, "environment_is_active", return_value=True),
+                mock.patch.object(
+                    module.IntegrationConfigV2,
+                    "from_environ",
+                    return_value=config,
+                ),
+                mock.patch.object(module, "require_current_user_mcp_policy_v2"),
+                mock.patch.object(
+                    module,
+                    "pinned_resume_binding_v2",
+                    return_value=binding,
+                    create=True,
+                ) as pinned_binding,
+                mock.patch.object(
+                    module,
+                    "FreshActivationProviderV2",
+                    side_effect=AssertionError("full resolver must not run"),
+                    create=True,
+                ) as full_resolver,
+                mock.patch.object(
+                    module,
+                    "_git_identity",
+                    return_value=(str(REPO), "b" * 40, "c" * 64),
+                ),
+                mock.patch.object(
+                    module,
+                    "RootSessionLeaseStoreV2",
+                    return_value=store,
+                ),
+            ):
+                result = module.handle(payload, environ)
+
+            self.assertIsNone(result)
+            pinned_binding.assert_called_once()
+            full_resolver.assert_not_called()
+            store.register_startup.assert_called_once()
 
 
 class FakeClient:

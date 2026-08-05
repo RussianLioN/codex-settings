@@ -23,10 +23,9 @@ from integration_runtime import (  # noqa: E402
     write_hook_output,
 )
 from integration_runtime_v2 import (  # noqa: E402
-    FreshActivationProviderV2,
     IntegrationConfigV2,
+    pinned_resume_binding_v2,
     require_current_user_mcp_policy_v2,
-    require_live_controller_v2,
 )
 from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
     ProjectIdentityV2,
@@ -52,9 +51,7 @@ def handle(payload: dict[str, Any], environ: Mapping[str, str]) -> dict[str, Any
     try:
         config = IntegrationConfigV2.from_environ(environ)
         require_current_user_mcp_policy_v2(config, environ)
-        require_live_controller_v2(config, environ, deadline=deadline)
-        provider = FreshActivationProviderV2(config)
-        binding = provider.runtime_binding()
+        binding = pinned_resume_binding_v2(config, environ, deadline=deadline)
         repo_root, base_sha, worktree_fingerprint = _git_identity(
             payload["cwd"], deadline=deadline
         )
