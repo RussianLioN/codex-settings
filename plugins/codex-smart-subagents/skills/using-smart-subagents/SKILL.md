@@ -84,7 +84,9 @@ description: Use when an adaptive Codex turn is active and the task may benefit 
    В каждом узле обязательны `clientNodeId`, `dependencyIds`, `taskText`,
    `roleTemplateId`, три доказательства `request`, `policy`, `scope`, четыре
    целых значения `workShape`, два значения `delegation` и `contextEntries`
-   нужных для роли видов. `factorClaims` добавляй только для доказанных
+   нужных для роли видов. Если независимых частей нет, обязательно укажи
+   `independentWorkUnits: 0`; иначе укажи их фактическое число. `factorClaims`
+   добавляй только для доказанных
    отклонений; остальные помощник помечает как неизвестные, а не как нулевые.
    Точный образец одного узла:
 
@@ -104,7 +106,7 @@ description: Use when an adaptive Codex turn is active and the task may benefit 
           statement: "Границы и форма этой подзадачи."},
        ],
        workShape: {scopeUnits: 1, workUnits: 1, boundaries: 1, workstreams: 1},
-       delegation: {objectivelyVerifiable: true, independentWorkUnits: 1},
+       delegation: {objectivelyVerifiable: true, independentWorkUnits: 0},
        contextEntries: [
          {contextRefId: "request", kind: "task-request",
           evidenceRefIds: ["request"], content: "Точный запрос."},
@@ -130,14 +132,18 @@ description: Use when an adaptive Codex turn is active and the task may benefit 
    `projectRoot` — текущий рабочий каталог. Не вставляй данные пользователя в
    команду без `shellQuote`. Ответ помощника уже содержит `nodes` на верхнем
    уровне: это готовый `planInput`. Никогда не присваивай его переменной
-   `routingInput` и не оборачивай повторно в новый `nodes`.
+   `routingInput` и не оборачивай повторно в новый `nodes`. Не проверяй повторно
+   структуру результата собственными условиями: помощник уже применил тот же
+   публичный валидатор, что и сервер.
    Для нескольких узлов задай каждому уникальный `clientNodeId`, а в
    `dependencyIds` перечисли только идентификаторы его предшественников.
 2. При `direct` выполни задачу в корневом диалоге.
 3. При `delegate` вызови `route_start` отдельно для указанного узла.
-4. Первый `smart_wait` вызывай с `startRequestId` и `cursor: null`. В следующие
-   вызовы передавай в `cursor` только непустой `nextCursor`, возвращённый
-   предыдущим ответом. Повторяй, пока состояние не станет конечным.
+4. Первый `smart_wait` вызывай с `cursor: null` и точно с полным объектом
+   `{startRequestId, cursor: null, pageSize: 100, waitSeconds: 60}`. В следующие
+   вызовы передавай те же `pageSize: 100`, `waitSeconds: 60`, а в `cursor` —
+   только непустой `nextCursor`, возвращённый предыдущим ответом. Повторяй,
+   пока состояние не станет конечным.
 5. Если маршрут устарел или больше не нужен, вызови `smart_cancel` с
    подходящим кодом причины.
 
