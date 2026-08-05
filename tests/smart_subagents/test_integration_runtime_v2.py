@@ -1711,6 +1711,10 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         context = response["hookSpecificOutput"]["additionalContext"]
         self.assertIn("route_start", context)
         self.assertNotIn("smart_start", context)
+        self.assertIn("using-smart-subagents", context)
+        self.assertIn("до вызова smart_plan", context.lower())
+        self.assertIn("прямое имя", context)
+        self.assertNotIn("ALL_TOOLS", context)
         saved = TurnContextStoreV2(self.config).load()
         self.assertEqual("session-from-hook", saved.session_id)
         self.assertEqual("turn-from-hook", saved.turn_id)
