@@ -1381,7 +1381,9 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
 
         self.assertEqual(["absence", "health", "absence", "health"], calls)
 
-    def test_resume_binding_uses_pinned_database_and_compatibility(self) -> None:
+    def test_resume_binding_uses_pinned_database_without_waiting_for_controller(
+        self,
+    ) -> None:
         runtime = sys.modules["integration_runtime_v2"]
         database_id = "db2_" + "f" * 32
         database_path = self._write_schema_routes_database(
@@ -1403,7 +1405,10 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             mock.patch.object(
                 runtime,
                 "require_pinned_controller_health_v2",
-                return_value=None,
+                side_effect=AssertionError(
+                    "SessionStart не должен ждать живой контроллер; "
+                    "UserPromptSubmit проверит его перед первым запросом"
+                ),
             ),
             mock.patch.object(
                 runtime,

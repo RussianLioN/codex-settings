@@ -15,6 +15,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Iterator
 
+from . import finite_file_lock_v2
 from .canonical_json import canonical_json_bytes, domain_fingerprint
 from .child_guard_v2 import system_process_start_marker_v2
 
@@ -22,6 +23,7 @@ from .child_guard_v2 import system_process_start_marker_v2
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _BASE_SHA = re.compile(r"^[0-9a-f]{40,64}$")
 _MAX_DOCUMENT_BYTES = 64 * 1024
+_LEASE_LOCK_TIMEOUT_SECONDS = 0.25
 _ELIGIBLE_ROUTE_STATES = frozenset(
     {
         "PLANNED",
@@ -435,12 +437,26 @@ class RootSessionLeaseStoreV2:
             os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0),
             0o600,
         )
+        acquired = False
         try:
             self._require_private_regular_descriptor(descriptor, "файл блокировки")
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            try:
+                finite_file_lock_v2.acquire_flock_v2(
+                    descriptor,
+                    exclusive=True,
+                    timeout_seconds=_LEASE_LOCK_TIMEOUT_SECONDS,
+                    timeout_code="RESUME_LEASE_LOCK_TIMEOUT",
+                )
+            except finite_file_lock_v2.FileLockTimeoutV2 as exc:
+                raise ResumeSessionV2Error(
+                    "RESUME_LEASE_BUSY",
+                    "аренда корневого сеанса временно занята",
+                ) from exc
+            acquired = True
             yield
         finally:
-            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            if acquired:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
 
     def _read_unlocked(self, session_id: str) -> RootSessionLeaseV2 | None:

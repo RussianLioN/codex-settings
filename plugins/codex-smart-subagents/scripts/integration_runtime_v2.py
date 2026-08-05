@@ -826,19 +826,29 @@ def pinned_resume_binding_v2(
     *,
     deadline: float,
 ) -> PinnedResumeBindingV2:
-    """Доказывает закреплённую базу без полного разрешения активации."""
+    """Доказывает закреплённую базу без ожидания живого контроллера.
+
+    SessionStart только готовит аренду и не разрешает работу с маршрутом.
+    Живой контроллер повторно и обязательно проверяется UserPromptSubmit до
+    привязки первого хода, поэтому сетевое обращение здесь создавало лишь
+    недетерминированный риск исчерпать двухсекундный срок обработчика.
+    """
 
     database_path, _, _, _, _, pinned = _pinned_stop_database_path_v2(
         config,
         environ,
         deadline=deadline,
         absence_checker=None,
-        health_checker=None,
+        health_checker=_defer_resume_controller_health_v2,
     )
     return PinnedResumeBindingV2(
         database_path=database_path,
         compatibility_fingerprint=pinned["compatibility_fingerprint"],
     )
+
+
+def _defer_resume_controller_health_v2(**_kwargs: object) -> None:
+    """Откладывает живую проверку до обязательного UserPromptSubmit."""
 
 
 def _pinned_stop_database_path_v2(

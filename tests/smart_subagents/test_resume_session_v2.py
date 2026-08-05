@@ -6,15 +6,18 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO = Path(__file__).resolve().parents[2]
 PLUGIN_ROOT = REPO / "plugins" / "codex-smart-subagents"
 sys.path.insert(0, str(PLUGIN_ROOT / "src"))
 
+from codex_smart_subagents import finite_file_lock_v2  # noqa: E402
 from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
     ProjectIdentityV2,
     ResumeCandidateV2,
+    ResumeSessionV2Error,
     RootIdentityV2,
     RootSessionLeaseStoreV2,
     discover_resume_candidate_v2,
@@ -54,6 +57,30 @@ class RootSessionLeaseStoreV2Tests(unittest.TestCase):
             start_request_id="sr2_" + "2" * 32,
             node_id="node2_" + "3" * 32,
             terminal_result_unacknowledged=False,
+        )
+
+    def test_lease_lock_wait_is_finite_and_reports_busy_state(self) -> None:
+        timeout = finite_file_lock_v2.FileLockTimeoutV2(
+            "RESUME_LEASE_LOCK_TIMEOUT",
+            0.25,
+        )
+
+        with (
+            mock.patch.object(
+                finite_file_lock_v2,
+                "acquire_flock_v2",
+                side_effect=timeout,
+            ) as acquire,
+            self.assertRaises(ResumeSessionV2Error) as captured,
+        ):
+            self.store.load("codex-session")
+
+        self.assertEqual("RESUME_LEASE_BUSY", captured.exception.code)
+        acquire.assert_called_once_with(
+            mock.ANY,
+            exclusive=True,
+            timeout_seconds=0.25,
+            timeout_code="RESUME_LEASE_LOCK_TIMEOUT",
         )
 
     def test_live_original_root_blocks_resume_without_replacing_owner(self) -> None:
