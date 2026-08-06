@@ -217,6 +217,9 @@ class OperationProcessGroupSupervisorV2Tests(unittest.TestCase):
     def test_terminate_signals_entire_group_in_term_then_cont_order(self) -> None:
         module = _load_module()
         process = _FakeProcess()
+        process.stdin = _TrackedStream()
+        process.stdout = _TrackedStream()
+        process.stderr = _TrackedStream()
         clock = _Clock()
         signal_calls: list[tuple[int, int]] = []
         observations = iter((True, False))
@@ -257,6 +260,9 @@ class OperationProcessGroupSupervisorV2Tests(unittest.TestCase):
         self.assertTrue(result.continuation_allowed)
         self.assertIsNone(result.cleanup_obligation)
         self.assertEqual((), supervisor.owned_lease_ids())
+        self.assertTrue(process.stdin.closed)
+        self.assertTrue(process.stdout.closed)
+        self.assertTrue(process.stderr.closed)
 
     def test_leader_exit_after_term_never_leaves_preexisting_stopped_children(
         self,
