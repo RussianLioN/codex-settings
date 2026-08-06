@@ -93,6 +93,13 @@ def write_fake_pathlib(directory: Path, lines: list[str]) -> None:
     (directory / "pathlib.py").write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_fake_module(directory: Path, module_name: str, lines: list[str]) -> None:
+    (directory / f"{module_name}.py").write_text(
+        "\n".join(lines),
+        encoding="utf-8",
+    )
+
+
 def write_stop_sitecustomize(directory: Path, *, delay_seconds: float) -> None:
     (directory / "sitecustomize.py").write_text(
         "\n".join(
@@ -514,6 +521,195 @@ class PluginMetadataTests(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
             parse_single_deferred_stdout(result.stdout)
             self.assertLess(elapsed, 1.75)
+
+    def test_stop_parent_supervises_slow_bootstrap_json_and_select_imports(self) -> None:
+        for module_name in ("json", "select"):
+            with self.subTest(module_name=module_name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    write_fake_module(
+                        Path(tmp),
+                        module_name,
+                        [
+                            "import time",
+                            "time.sleep(2.2)",
+                            "raise RuntimeError('slow bootstrap import')",
+                        ],
+                    )
+                    environment_copy = dict(getattr(os, "environ"))
+                    environment_copy["PYTHONPATH"] = tmp
+
+                    started = time.monotonic()
+                    result = subprocess.run(
+                        stop_hook_command(),
+                        input=stop_payload(),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        env=environment_copy,
+                        check=False,
+                        timeout=1.7,
+                    )
+                    elapsed = time.monotonic() - started
+
+                self.assertEqual(0, result.returncode)
+                self.assertEqual(b"", result.stderr)
+                parse_single_deferred_stdout(result.stdout)
+                self.assertLess(elapsed, 1.5)
+
+    def test_stop_parent_does_not_timeout_recoverable_1150ms_json_import(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            write_fake_module(
+                Path(tmp),
+                "json",
+                [
+                    "import time",
+                    "time.sleep(1.15)",
+                    "raise RuntimeError('recoverable bootstrap import failure')",
+                ],
+            )
+            environment_copy = dict(getattr(os, "environ"))
+            environment_copy["PYTHONPATH"] = tmp
+
+            started = time.monotonic()
+            result = subprocess.run(
+                stop_hook_command(),
+                input=stop_payload(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment_copy,
+                check=False,
+                timeout=1.7,
+            )
+            elapsed = time.monotonic() - started
+
+        self.assertEqual(0, result.returncode)
+        self.assertEqual(b"", result.stderr)
+        response = parse_single_deferred_stdout(result.stdout)
+        self.assertIn("ошиб", response["reason"].lower())
+        self.assertNotIn("срок", response["reason"].lower())
+        self.assertLess(elapsed, 1.5)
+
+    def test_stop_parent_timeout_distribution_stays_below_internal_budget(self) -> None:
+        durations: list[float] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            write_fake_module(
+                Path(tmp),
+                "json",
+                [
+                    "import time",
+                    "time.sleep(2.2)",
+                    "raise RuntimeError('slow bootstrap import')",
+                ],
+            )
+            environment_copy = dict(getattr(os, "environ"))
+            environment_copy["PYTHONPATH"] = tmp
+
+            for _attempt in range(10):
+                started = time.monotonic()
+                result = subprocess.run(
+                    stop_hook_command(),
+                    input=stop_payload(),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=environment_copy,
+                    check=False,
+                    timeout=1.7,
+                )
+                durations.append(time.monotonic() - started)
+                self.assertEqual(0, result.returncode)
+                self.assertEqual(b"", result.stderr)
+                parse_single_deferred_stdout(result.stdout)
+
+        ordered = sorted(durations)
+        p95 = ordered[int(0.95 * (len(ordered) - 1))]
+        p99 = ordered[-1]
+        self.assertLess(p95, 1.5)
+        self.assertLess(p99, 1.5)
+
+    def test_stop_parent_supervises_broken_bootstrap_json_and_select_imports(self) -> None:
+        for module_name in ("json", "select"):
+            with self.subTest(module_name=module_name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    write_fake_module(
+                        Path(tmp),
+                        module_name,
+                        ["raise RuntimeError('broken bootstrap import')"],
+                    )
+                    environment_copy = dict(getattr(os, "environ"))
+                    environment_copy["PYTHONPATH"] = tmp
+
+                    started = time.monotonic()
+                    result = subprocess.run(
+                        stop_hook_command(),
+                        input=stop_payload(),
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        env=environment_copy,
+                        check=False,
+                        timeout=1.7,
+                    )
+                    elapsed = time.monotonic() - started
+
+                self.assertEqual(0, result.returncode)
+                self.assertEqual(b"", result.stderr)
+                parse_single_deferred_stdout(result.stdout)
+                self.assertLess(elapsed, 1.5)
+
+    def test_stop_parent_rejects_json_import_side_effect_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            write_fake_module(
+                Path(tmp),
+                "json",
+                [
+                    "import sys",
+                    "sys.stdout.write('{bad}')",
+                    "sys.stdout.flush()",
+                    "raise SystemExit(0)",
+                ],
+            )
+            environment_copy = dict(getattr(os, "environ"))
+            environment_copy["PYTHONPATH"] = tmp
+
+            result = subprocess.run(
+                stop_hook_command(),
+                input=stop_payload(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment_copy,
+                check=False,
+                timeout=1.7,
+            )
+
+        self.assertEqual(0, result.returncode)
+        self.assertEqual(b"", result.stderr)
+        parse_single_deferred_stdout(result.stdout)
+
+    def test_stop_parent_rejects_json_import_low_level_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            write_fake_module(
+                Path(tmp),
+                "json",
+                [
+                    "import os",
+                    "os.write(1, b'{bad}')",
+                    "raise SystemExit(0)",
+                ],
+            )
+            environment_copy = dict(getattr(os, "environ"))
+            environment_copy["PYTHONPATH"] = tmp
+
+            result = subprocess.run(
+                stop_hook_command(),
+                input=stop_payload(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment_copy,
+                check=False,
+                timeout=1.7,
+            )
+
+        self.assertEqual(0, result.returncode)
+        self.assertEqual(b"", result.stderr)
+        parse_single_deferred_stdout(result.stdout)
 
     def test_stop_parent_reports_import_exception_as_one_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
