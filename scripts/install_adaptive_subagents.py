@@ -3869,8 +3869,12 @@ def _update_source_file_digest_v2(
     normalize_any_bound_python: bool = False,
 ) -> None:
     interpreter = _bound_python_runtime_v2()
-    portable_shebang = b"#!/usr/bin/env python3\n"
-    bound_shebang = f"#!{interpreter} -B\n".encode("utf-8")
+    bound_shebangs = {
+        b"#!/usr/bin/env python3\n": f"#!{interpreter} -B\n".encode("utf-8"),
+        b"#!/usr/bin/env -S python3 -S\n": f"#!{interpreter} -S -B\n".encode(
+            "utf-8"
+        ),
+    }
     for relative, path in sorted(
         files.items(), key=lambda item: item[0].encode("utf-8")
     ):
@@ -3886,31 +3890,33 @@ def _update_source_file_digest_v2(
             and path.parent == layout.plugin_source / "bin"
         ):
             payload = path.read_bytes()
-            if payload.startswith(bound_shebang):
-                payload = portable_shebang + payload[len(bound_shebang) :]
-            elif payload.startswith(portable_shebang):
-                pass
-            elif normalize_any_bound_python:
+            normalized_payload = None
+            for portable_shebang, bound_shebang in bound_shebangs.items():
+                if payload.startswith(bound_shebang):
+                    normalized_payload = portable_shebang + payload[len(bound_shebang) :]
+                    break
+                if payload.startswith(portable_shebang):
+                    normalized_payload = payload
+                    break
+            if normalized_payload is None and normalize_any_bound_python:
                 first_line, separator, remainder = payload.partition(b"\n")
-                if (
-                    separator != b"\n"
-                    or re.fullmatch(
-                        rb"#!/[^\x00 \t\r\n]+ -B",
-                        first_line,
+                bound_match = re.fullmatch(
+                    rb"#!/[^\x00 \t\r\n]+ (?P<flags>-B|-S -B)",
+                    first_line,
+                )
+                if separator == b"\n" and bound_match is not None:
+                    portable_shebang = (
+                        b"#!/usr/bin/env -S python3 -S\n"
+                        if bound_match.group("flags") == b"-S -B"
+                        else b"#!/usr/bin/env python3\n"
                     )
-                    is None
-                ):
-                    raise InstallError(
-                        "PYTHON_ENTRYPOINT_INVALID",
-                        f"неизвестная исполняемая точка входа: {path.name}",
-                    )
-                payload = portable_shebang + remainder
-            else:
+                    normalized_payload = portable_shebang + remainder
+            if normalized_payload is None:
                 raise InstallError(
                     "PYTHON_ENTRYPOINT_INVALID",
                     f"неизвестная исполняемая точка входа: {path.name}",
                 )
-            payload_sha256 = hashlib.sha256(payload).hexdigest()
+            payload_sha256 = hashlib.sha256(normalized_payload).hexdigest()
         digest.update(bytes.fromhex(payload_sha256))
 
 
@@ -4005,7 +4011,7 @@ def _bound_python_runtime_v2() -> Path:
             character in str(interpreter)
             for character in (" ", "\t", "\n", "\r")
         )
-        or len(f"#!{interpreter} -B\n".encode("utf-8")) > 120
+        or len(f"#!{interpreter} -S -B\n".encode("utf-8")) > 120
     ):
         raise InstallError(
             "PYTHON_RUNTIME_INVALID",

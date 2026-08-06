@@ -2318,13 +2318,17 @@ def _bind_python_entrypoints(bin_root: Path) -> None:
             "PYTHON_RUNTIME_INVALID",
             "для активации требуется обычный исполняемый Python не ниже 3.11",
         )
-    shebang = f"#!{interpreter} -B\n".encode("utf-8")
-    if len(shebang) > 120:
+    bound_shebangs = {
+        b"#!/usr/bin/env python3\n": f"#!{interpreter} -B\n".encode("utf-8"),
+        b"#!/usr/bin/env -S python3 -S\n": f"#!{interpreter} -S -B\n".encode(
+            "utf-8"
+        ),
+    }
+    if any(len(shebang) > 120 for shebang in bound_shebangs.values()):
         _fail(
             "PYTHON_RUNTIME_PATH_TOO_LONG",
             "путь Python слишком длинный для переносимой точки входа",
         )
-    portable = b"#!/usr/bin/env python3\n"
     found = False
     for entrypoint in sorted(
         bin_root.iterdir(), key=lambda item: item.name.encode("utf-8")
@@ -2334,16 +2338,21 @@ def _bind_python_entrypoints(bin_root: Path) -> None:
             continue
         found = True
         payload = entrypoint.read_bytes()
-        if payload.startswith(shebang):
+        if any(payload.startswith(shebang) for shebang in bound_shebangs.values()):
             entrypoint.chmod(0o500)
             continue
-        if not payload.startswith(portable):
+        replacement = None
+        for portable, shebang in bound_shebangs.items():
+            if payload.startswith(portable):
+                replacement = shebang + payload[len(portable) :]
+                break
+        if replacement is None:
             _fail(
                 "PYTHON_ENTRYPOINT_INVALID",
                 f"неизвестная исполняемая точка входа: {entrypoint.name}",
             )
         entrypoint.chmod(0o700)
-        entrypoint.write_bytes(shebang + payload[len(portable) :])
+        entrypoint.write_bytes(replacement)
         entrypoint.chmod(0o500)
     if not found:
         _fail("PYTHON_ENTRYPOINT_INVALID", "точки входа Python отсутствуют")

@@ -357,26 +357,32 @@ class TurnContextStoreV2:
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
 
-    def load(self) -> HookTurnContextV2:
+    def load(self, *, deadline: float | None = None) -> HookTurnContextV2:
+        if deadline is None:
+            deadline = time.monotonic() + HOOK_TOTAL_BUDGET_SECONDS
+        _remaining_hook_budget(deadline)
         self._prepare_directory()
         descriptor = self._open_lock()
         acquired = False
         try:
+            remaining = _remaining_hook_budget(deadline)
             try:
                 finite_file_lock_v2.acquire_flock_v2(
                     descriptor,
                     exclusive=False,
-                    timeout_seconds=HOOK_TOTAL_BUDGET_SECONDS,
+                    timeout_seconds=remaining,
                     timeout_code="TURN_CONTEXT_LOCK_TIMEOUT",
                 )
             except finite_file_lock_v2.FileLockTimeoutV2 as error:
                 raise IntegrationV2Error(str(error)) from error
             acquired = True
+            _remaining_hook_budget(deadline)
             raw = _read_private_file(self.path)
         finally:
             if acquired:
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
+        _remaining_hook_budget(deadline)
         try:
             value = json.loads(raw.decode("utf-8", "strict"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -537,8 +543,26 @@ class FreshActivationProviderV2:
         decision = self._decision()
         return copy.deepcopy(dict(decision.activation_gate or {}))
 
-    def runtime_binding(self) -> GatewayRuntimeBindingV2:
-        decision = self._decision()
+    def runtime_binding(
+        self,
+        *,
+        deadline: float | None = None,
+    ) -> GatewayRuntimeBindingV2:
+        if deadline is None:
+            decision = self._decision()
+        else:
+            operation_deadline = operation_deadline_v2.current_operation_deadline_v2()
+            if operation_deadline is None:
+                operation_deadline = operation_deadline_v2.OperationDeadlineV2.start(
+                    operation="fresh-activation-resolve",
+                    timeout_seconds=_remaining_hook_budget(deadline),
+                    timeout_code="FRESH_ACTIVATION_DEADLINE",
+                )
+            with operation_deadline_v2.scoped_current_deadline_v2(operation_deadline):
+                operation_deadline.checkpoint()
+                decision = self._decision()
+                operation_deadline.checkpoint()
+            _remaining_hook_budget(deadline)
         binding = decision.runtime_binding
         assert binding is not None
         return binding
@@ -887,12 +911,14 @@ def _pinned_stop_database_path_v2(
             absence_checker(
                 gate["journalAbsenceProof"],
                 expected_journal=layout.journal_path,
+                deadline=deadline,
             )
             operation_deadline.checkpoint()
             health_checker(
                 codex_home=config.codex_home,
                 state_home=config.state_home,
                 activation_id=config.launch_activation_id,
+                deadline=deadline,
             )
             operation_deadline.checkpoint()
             manifest = _read_private_json_document_v2(
@@ -964,14 +990,17 @@ def _require_stop_transition_guard_v2(
             absence_checker(
                 gate["journalAbsenceProof"],
                 expected_journal=layout.journal_path,
+                deadline=deadline,
             )
             operation_deadline.checkpoint()
             health_checker(
                 codex_home=config.codex_home,
                 state_home=config.state_home,
                 activation_id=config.launch_activation_id,
+                deadline=deadline,
             )
             operation_deadline.checkpoint()
+            _remaining_hook_budget(deadline)
     except Exception as exc:
         raise IntegrationV2Error(
             "закреплённая активация изменилась после чтения smart_plan"

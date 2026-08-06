@@ -25,7 +25,6 @@ from integration_runtime import (  # noqa: E402
     write_hook_output,
 )
 from integration_runtime_v2 import (  # noqa: E402
-    HOOK_TOTAL_BUDGET_SECONDS as HOOK_TOTAL_BUDGET_SECONDS_V2,
     HookTurnContextV2,
     IntegrationConfigV2,
     TurnContextStoreV2,
@@ -33,8 +32,16 @@ from integration_runtime_v2 import (  # noqa: E402
     pinned_resume_binding_v2,
     require_current_user_mcp_policy_v2,
 )
+from hook_deadline import (  # noqa: E402
+    STOP_HOOK_BUDGET_SECONDS,
+    HookDeadlineExceeded,
+    fail_open_response,
+    require_time_remaining,
+    stop_deadline_from_environ,
+)
 from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
     ProjectIdentityV2,
+    ResumeSessionV2Error,
     RootIdentityV2,
     RootSessionLeaseStoreV2,
     route_is_terminal_v2,
@@ -43,6 +50,7 @@ from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
 
 
 _RESUME_LEASE_OPERATION_BUDGET_SECONDS = 0.30
+HOOK_TOTAL_BUDGET_SECONDS_V2 = STOP_HOOK_BUDGET_SECONDS
 
 
 class V2PlanStateProvider(Protocol):
@@ -62,9 +70,14 @@ def handle(
     *,
     v2_plan_state_provider: V2PlanStateProvider = durable_stop_smart_turn_state_v2,
 ) -> dict[str, Any] | None:
+    deadline = stop_deadline_from_environ(
+        environ,
+        fallback_budget_seconds=HOOK_TOTAL_BUDGET_SECONDS_V2,
+    )
     if not environment_is_active(environ):
         return None
     try:
+        require_time_remaining(deadline, "истёк общий срок Stop")
         if payload.get("hook_event_name") != "Stop":
             return None
         if environ.get("CODEX_SMART_STATE_HOME") and environ.get(
@@ -75,7 +88,7 @@ def handle(
                 require_current_user_mcp_policy_v2(config_v2, environ)
             except Exception:
                 return None
-            deadline = time.monotonic() + HOOK_TOTAL_BUDGET_SECONDS_V2
+            require_time_remaining(deadline, "истёк общий срок Stop")
             store_v2 = TurnContextStoreV2(config_v2)
             outcome = "unknown"
 
@@ -95,6 +108,7 @@ def handle(
                     environ=environ,
                     deadline=deadline,
                 )
+                require_time_remaining(deadline, "истёк общий срок Stop")
                 if route_state in {"DIRECT", "CLARIFY", "DELEGATE_TERMINAL"}:
                     outcome = "complete"
                     return current
@@ -119,6 +133,7 @@ def handle(
                 inspect_and_increment,
                 deadline=deadline,
             )
+            require_time_remaining(deadline, "истёк общий срок Stop")
             if outcome in {"different-turn", "complete"}:
                 if outcome == "complete":
                     _acknowledge_resume_result_v2(
@@ -165,6 +180,7 @@ def handle(
                 "decision": "block",
                 "reason": reason,
             }
+        require_time_remaining(deadline, "истёк общий срок Stop")
         config = IntegrationConfig.from_environ(
             environ,
             require_catalog=False,
@@ -202,6 +218,7 @@ def handle(
 
         state["continuationCount"] += 1
         store.save(state)
+        require_time_remaining(deadline, "истёк общий срок Stop")
         if not state["planCalled"]:
             instruction = (
                 "Перед завершением хода вызови smart_plan с выданной "
@@ -227,14 +244,26 @@ def handle(
             "decision": "block",
             "reason": f"{reason} {instruction}",
         }
+    except ResumeSessionV2Error as exc:
+        if exc.code == "RESUME_DEADLINE_EXCEEDED":
+            return fail_open_response(exc.message)
+        if environ.get("CODEX_SMART_LAUNCH_KIND") == "resume":
+            return fail_open_response(
+                "ошибка resume-подтверждения Stop; состояние будет сохранено для следующего хода"
+            )
+        return fail_open_response(
+            "ошибка проверки Stop; состояние будет сохранено для следующего хода"
+        )
+    except HookDeadlineExceeded as exc:
+        return fail_open_response(str(exc))
     except Exception:
-        return {
-            "continue": True,
-            "systemMessage": (
-                "Не удалось проверить состояние умного маршрута; событие "
-                "Stop не считает это доказательством отмены."
-            ),
-        }
+        if environ.get("CODEX_SMART_LAUNCH_KIND") == "resume":
+            return fail_open_response(
+                "ошибка resume-подтверждения Stop; состояние будет сохранено для следующего хода"
+            )
+        return fail_open_response(
+            "ошибка проверки Stop; состояние будет сохранено для следующего хода"
+        )
 
 
 def _acknowledge_resume_result_v2(
@@ -260,7 +289,7 @@ def _acknowledge_resume_result_v2(
     )
     if not _resume_lease_operation_has_budget_v2(deadline):
         return
-    lease = store.load(record.session_id)
+    lease = store.load(record.session_id, deadline=deadline)
     if lease is None or lease.attachment is None:
         return
     if not _resume_lease_operation_has_budget_v2(deadline):
@@ -271,7 +300,7 @@ def _acknowledge_resume_result_v2(
         deadline=deadline,
     )
     route_id = lease.attachment.candidate.route_id
-    if not route_is_terminal_v2(binding.database_path, route_id):
+    if not route_is_terminal_v2(binding.database_path, route_id, deadline=deadline):
         return
     if not _resume_lease_operation_has_budget_v2(deadline):
         return
@@ -288,6 +317,7 @@ def _acknowledge_resume_result_v2(
         turn_id=record.turn_id,
         root=root,
         project=project,
+        deadline=deadline,
     ):
         return
     if not _resume_lease_operation_has_budget_v2(deadline):
@@ -298,6 +328,7 @@ def _acknowledge_resume_result_v2(
         turn_id=record.turn_id,
         root=root,
         route_id=route_id,
+        deadline=deadline,
     )
 
 
@@ -324,7 +355,7 @@ def _defer_resume_to_next_turn_v2(
     )
     if not _resume_lease_operation_has_budget_v2(deadline):
         return
-    lease = store.load(record.session_id)
+    lease = store.load(record.session_id, deadline=deadline)
     if lease is None or lease.attachment is None:
         return
     if not _resume_lease_operation_has_budget_v2(deadline):
@@ -348,6 +379,7 @@ def _defer_resume_to_next_turn_v2(
         root=root,
         project=project,
         route_id=route_id,
+        deadline=deadline,
     )
 
 
@@ -358,19 +390,20 @@ def _resume_lease_operation_has_budget_v2(deadline: float) -> bool:
 def main() -> int:
     try:
         payload = read_hook_input(sys.stdin)
+        deadline = stop_deadline_from_environ(os.environ)
+        require_time_remaining(deadline, "истёк общий срок Stop")
         response = handle(payload, os.environ)
         write_hook_output(sys.stdout, response)
+        return 0
+    except HookDeadlineExceeded as exc:
+        write_hook_output(sys.stdout, fail_open_response(str(exc)))
         return 0
     except Exception:
         write_hook_output(
             sys.stdout,
-            {
-                "continue": True,
-                "systemMessage": (
-                    "Событие Stop завершилось ошибкой и не подтверждает "
-                    "отмену маршрута."
-                ),
-            },
+            fail_open_response(
+                "ошибка Stop; состояние будет сохранено для следующего хода"
+            ),
         )
         return 0
 

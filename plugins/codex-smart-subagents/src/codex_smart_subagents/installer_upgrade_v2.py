@@ -569,6 +569,7 @@ def _initial_callbacks_for_intent_v2(
 class _BoundPythonRuntimeV2:
     path: Path
     identity: tuple[int, int, int, int, int, int, int, int, int]
+    portable_shebang: bytes
 
 
 class PersistedUpgradePreparationRecoveryV2(ActivationPreparationExecutorV2):
@@ -1939,7 +1940,10 @@ def installer_source_digest_from_materialized_activation_v2(
         if entrypoint_runtime is not None:
             if bound_python_runtime is None:
                 bound_python_runtime = entrypoint_runtime
-            elif entrypoint_runtime != bound_python_runtime:
+            elif (
+                entrypoint_runtime.path != bound_python_runtime.path
+                or entrypoint_runtime.identity != bound_python_runtime.identity
+            ):
                 raise ValueError(
                     "persisted Python entrypoints bind different runtimes"
                 )
@@ -2012,7 +2016,7 @@ def _recovery_source_file_v2(
     if restore_portable_shebang and executable:
         bound_runtime = _bound_python_runtime_from_shebang_v2(path, payload)
         line_end = payload.find(b"\n")
-        payload = b"#!/usr/bin/env python3\n" + payload[line_end + 1 :]
+        payload = bound_runtime.portable_shebang + payload[line_end + 1 :]
     return payload, executable, bound_runtime
 
 
@@ -2022,11 +2026,18 @@ def _bound_python_runtime_from_shebang_v2(
 ) -> _BoundPythonRuntimeV2:
     line_end = payload.find(b"\n")
     line = payload[: line_end + 1] if line_end >= 0 else b""
-    suffix = b" -B\n"
-    if not line.startswith(b"#!") or not line.endswith(suffix):
+    suffixes = (
+        (b" -S -B\n", b"#!/usr/bin/env -S python3 -S\n"),
+        (b" -B\n", b"#!/usr/bin/env python3\n"),
+    )
+    suffix_and_portable = next(
+        (candidate for candidate in suffixes if line.endswith(candidate[0])), None
+    )
+    if not line.startswith(b"#!") or suffix_and_portable is None:
         raise ValueError(
             f"persisted Python entrypoint has no exact bound shebang: {entrypoint}"
         )
+    suffix, portable_shebang = suffix_and_portable
     raw_path = line[2 : -len(suffix)]
     try:
         runtime = Path(raw_path.decode("utf-8"))
@@ -2039,6 +2050,7 @@ def _bound_python_runtime_from_shebang_v2(
         or b"\0" in raw_path
         or b" " in raw_path
         or b"\t" in raw_path
+        or b"\r" in raw_path
         or not runtime.is_absolute()
         or len(line) > 120
     ):
@@ -2062,6 +2074,7 @@ def _bound_python_runtime_from_shebang_v2(
     return _BoundPythonRuntimeV2(
         path=runtime,
         identity=_runtime_file_identity_v2(info),
+        portable_shebang=portable_shebang,
     )
 
 

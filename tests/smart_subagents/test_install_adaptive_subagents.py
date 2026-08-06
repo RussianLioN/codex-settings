@@ -1256,13 +1256,29 @@ class InstallerV2ContractTests(_InstallerBase):
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
 
-        portable = b"#!/usr/bin/env python3\n"
-        bound = b"#!/opt/another-python/bin/python3 -B\n"
+        bindings = {
+            b"#!/usr/bin/env python3\n": (
+                b"#!/opt/another-python/bin/python3 -B\n"
+            ),
+            b"#!/usr/bin/env -S python3 -S\n": (
+                b"#!/opt/another-python/bin/python3 -S -B\n"
+            ),
+        }
         for entrypoint in (source_layout.plugin_source / "bin").iterdir():
             if not entrypoint.stat().st_mode & stat.S_IXUSR:
                 continue
             payload = entrypoint.read_bytes()
-            self.assertTrue(payload.startswith(portable), entrypoint.name)
+            portable = next(
+                (
+                    candidate
+                    for candidate in bindings
+                    if payload.startswith(candidate)
+                ),
+                None,
+            )
+            self.assertIsNotNone(portable, entrypoint.name)
+            assert portable is not None
+            bound = bindings[portable]
             entrypoint.write_bytes(bound + payload[len(portable) :])
             entrypoint.chmod(0o500)
 
@@ -1303,6 +1319,22 @@ class InstallerV2ContractTests(_InstallerBase):
             self.installer._source_lineage_v2(source_layout)
 
         self.assertEqual("SOURCE_LINEAGE_INVALID", captured.exception.code)
+
+    def test_source_digest_accepts_isolated_python_entrypoint(self) -> None:
+        entrypoint = self.layout.plugin_source / "bin" / "codex-smart-subagents-hook"
+        original = entrypoint.read_bytes()
+        original_mode = stat.S_IMODE(entrypoint.stat().st_mode)
+        line_end = original.find(b"\n")
+        self.addCleanup(entrypoint.write_bytes, original)
+        self.addCleanup(entrypoint.chmod, original_mode)
+        entrypoint.write_bytes(
+            b"#!/usr/bin/env -S python3 -S\n" + original[line_end + 1 :]
+        )
+        entrypoint.chmod(0o700)
+
+        digest = self.installer._source_digest(self.layout)
+
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
 
     def test_first_activation_reproduces_the_exact_source_digest(self) -> None:
         self.publish_fake_activation()
