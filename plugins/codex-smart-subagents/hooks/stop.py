@@ -42,6 +42,9 @@ from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
 )
 
 
+_RESUME_LEASE_OPERATION_BUDGET_SECONDS = 0.30
+
+
 class V2PlanStateProvider(Protocol):
     def __call__(
         self,
@@ -241,6 +244,8 @@ def _acknowledge_resume_result_v2(
     *,
     deadline: float,
 ) -> None:
+    if not _resume_lease_operation_has_budget_v2(deadline):
+        return
     if not environ.get("CODEX_SMART_ROOT_PID") or not environ.get(
         "CODEX_SMART_ROOT_START_MARKER"
     ):
@@ -253,10 +258,12 @@ def _acknowledge_resume_result_v2(
         config.state_home,
         process_marker_reader=system_process_marker_reader_v2,
     )
+    if not _resume_lease_operation_has_budget_v2(deadline):
+        return
     lease = store.load(record.session_id)
     if lease is None or lease.attachment is None:
         return
-    if time.monotonic() >= deadline:
+    if not _resume_lease_operation_has_budget_v2(deadline):
         return
     binding = pinned_resume_binding_v2(
         config,
@@ -266,7 +273,7 @@ def _acknowledge_resume_result_v2(
     route_id = lease.attachment.candidate.route_id
     if not route_is_terminal_v2(binding.database_path, route_id):
         return
-    if time.monotonic() >= deadline:
+    if not _resume_lease_operation_has_budget_v2(deadline):
         return
     project = ProjectIdentityV2(
         repo_root=record.repo_root,
@@ -282,6 +289,8 @@ def _acknowledge_resume_result_v2(
         root=root,
         project=project,
     ):
+        return
+    if not _resume_lease_operation_has_budget_v2(deadline):
         return
     store.acknowledge_result(
         session_id=record.session_id,
@@ -299,6 +308,8 @@ def _defer_resume_to_next_turn_v2(
     *,
     deadline: float,
 ) -> None:
+    if not _resume_lease_operation_has_budget_v2(deadline):
+        return
     if not environ.get("CODEX_SMART_ROOT_PID") or not environ.get(
         "CODEX_SMART_ROOT_START_MARKER"
     ):
@@ -311,10 +322,12 @@ def _defer_resume_to_next_turn_v2(
         config.state_home,
         process_marker_reader=system_process_marker_reader_v2,
     )
+    if not _resume_lease_operation_has_budget_v2(deadline):
+        return
     lease = store.load(record.session_id)
     if lease is None or lease.attachment is None:
         return
-    if time.monotonic() >= deadline:
+    if not _resume_lease_operation_has_budget_v2(deadline):
         return
     project = lease.project
     if (
@@ -326,6 +339,8 @@ def _defer_resume_to_next_turn_v2(
     route_id = lease.attachment.candidate.route_id
     if lease.attachment.state == "PENDING_NEXT_TURN":
         return
+    if not _resume_lease_operation_has_budget_v2(deadline):
+        return
     store.defer_resume_to_next_turn(
         session_id=record.session_id,
         shell_session_id=record.shell_session_id,
@@ -334,6 +349,10 @@ def _defer_resume_to_next_turn_v2(
         project=project,
         route_id=route_id,
     )
+
+
+def _resume_lease_operation_has_budget_v2(deadline: float) -> bool:
+    return deadline - time.monotonic() > _RESUME_LEASE_OPERATION_BUDGET_SECONDS
 
 
 def main() -> int:
