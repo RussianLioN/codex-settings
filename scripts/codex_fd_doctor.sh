@@ -4,6 +4,7 @@ set -o pipefail
 
 DEFAULT_WAVE_SIZE=6
 MAX_WAVE_SIZE=20
+MAX_NATIVE_SESSION_THREADS=20
 HIGH_FD_LIMIT=4096
 MIN_FD_HEADROOM=64
 
@@ -66,11 +67,27 @@ read_mcp_command() {
   local config=${CODEX_HOME:-$HOME/.codex}/config.toml
   [[ -f "$config" ]] || return 1
   awk '
-    $0 == "[mcp_servers.node_repl]" { active = 1; next }
-    active && /^\[/ { exit }
+    /^[[:space:]]*\[mcp_servers\.node_repl\][[:space:]]*(#.*)?$/ { active = 1; next }
+    active && /^[[:space:]]*\[/ { exit }
     active && /^[[:space:]]*command[[:space:]]*=/ {
       sub(/^[[:space:]]*command[[:space:]]*=[[:space:]]*"/, "")
       sub(/"[[:space:]]*$/, "")
+      print
+      exit
+    }
+  ' "$config"
+}
+
+read_native_session_thread_cap() {
+  local config=${CODEX_HOME:-$HOME/.codex}/config.toml
+  [[ -f "$config" ]] || return 1
+  awk '
+    /^[[:space:]]*\[features\.multi_agent_v2\][[:space:]]*(#.*)?$/ { active = 1; next }
+    active && /^[[:space:]]*\[/ { exit }
+    active && /^[[:space:]]*max_concurrent_threads_per_session[[:space:]]*=/ {
+      sub(/^[[:space:]]*max_concurrent_threads_per_session[[:space:]]*=[[:space:]]*/, "")
+      sub(/[[:space:]]*#.*/, "")
+      sub(/[[:space:]]*$/, "")
       print
       exit
     }
@@ -106,6 +123,7 @@ else
 fi
 
 mcp_command=${CODEX_FD_DOCTOR_MCP_COMMAND:-$(read_mcp_command 2>/dev/null || true)}
+native_session_thread_cap=${CODEX_FD_DOCTOR_NATIVE_SESSION_THREAD_CAP:-$(read_native_session_thread_cap 2>/dev/null || true)}
 codex_processes=${CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT:-$(pgrep -x codex 2>/dev/null | wc -l | tr -d ' ')}
 node_repl_processes=${CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT:-$(pgrep -f '/node_repl([[:space:]]|$)' 2>/dev/null | wc -l | tr -d ' ')}
 if [[ -n ${CODEX_FD_DOCTOR_ORPHAN_NODE_REPL_COUNT:-} && -n ${CODEX_FD_DOCTOR_STALE_NODE_REPL_COUNT:-} ]]; then
@@ -132,6 +150,10 @@ warn() {
 
 if [[ -z "$mcp_command" || ! -x "$mcp_command" ]]; then
   block "node_repl_command_unresolvable"
+fi
+
+if [[ ! "$native_session_thread_cap" =~ ^[1-9][0-9]*$ ]] || (( native_session_thread_cap != MAX_NATIVE_SESSION_THREADS )); then
+  block "native_session_thread_cap_not_${MAX_NATIVE_SESSION_THREADS}"
 fi
 
 if [[ "$soft_limit" =~ ^[0-9]+$ ]]; then
@@ -164,6 +186,8 @@ fi
 print -- "status=$doctor_status"
 print -- "wave_size=$wave_size"
 print -- "default_wave_size=$DEFAULT_WAVE_SIZE"
+print -- "native_session_thread_cap=${native_session_thread_cap:-missing}"
+print -- "max_native_session_threads=$MAX_NATIVE_SESSION_THREADS"
 print -- "soft_limit=$soft_limit"
 print -- "hard_limit=$hard_limit"
 print -- "launchd_soft_limit=${launchd_soft_limit:-unknown}"

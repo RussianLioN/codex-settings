@@ -217,11 +217,24 @@ def markdown_policy_marker_failures(text: str) -> list[str]:
 
 def base_agent_limit_failures(config: dict[str, Any]) -> list[str]:
     agents = config.get("agents", {})
-    return [
+    failures = [
         f"agents.{setting} must be {expected}, got {agents.get(setting)!r}"
         for setting, expected in EXPECTED_BASE_AGENT_LIMITS.items()
         if type(agents.get(setting)) is not int or agents.get(setting) != expected
     ]
+    multi_agent_v2 = config.get("features", {}).get("multi_agent_v2", {})
+    native_session_thread_cap = multi_agent_v2.get(
+        "max_concurrent_threads_per_session"
+    )
+    if (
+        type(native_session_thread_cap) is not int
+        or native_session_thread_cap != MAX_BASE_THREADS
+    ):
+        failures.append(
+            "features.multi_agent_v2.max_concurrent_threads_per_session "
+            f"must be {MAX_BASE_THREADS}, got {native_session_thread_cap!r}"
+        )
+    return failures
 
 
 def extract_interface_default_prompt(text: str) -> str:
