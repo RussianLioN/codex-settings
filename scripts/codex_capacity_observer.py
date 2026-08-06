@@ -10,6 +10,7 @@ import math
 import os
 import re
 import resource
+import shlex
 import subprocess
 import sys
 import time
@@ -1231,12 +1232,89 @@ def is_codex_process(row: dict[str, Any]) -> bool:
     if is_excluded_codex_helper(command):
         return False
     basename = os.path.basename(argv0).lower()
-    args = command.split()
     if basename in {"codex-app-server", "codex_app_server"} or (
-        basename == "codex" and len(args) > 1 and args[1] == "app-server"
+        basename == "codex" and codex_cli_subcommand(command) == "app-server"
     ):
         return False
     return basename in {"codex", "codex-smart"}
+
+
+CODEX_OPTIONS_WITH_VALUE = {
+    "--add-dir",
+    "--ask-for-approval",
+    "--cd",
+    "--config",
+    "--disable",
+    "--enable",
+    "--image",
+    "--local-provider",
+    "--model",
+    "--profile",
+    "--remote",
+    "--remote-auth-token-env",
+    "--sandbox",
+    "-C",
+    "-a",
+    "-c",
+    "-i",
+    "-m",
+    "-p",
+    "-s",
+}
+CODEX_FLAG_OPTIONS = {
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--dangerously-bypass-hook-trust",
+    "--help",
+    "--no-alt-screen",
+    "--oss",
+    "--search",
+    "--strict-config",
+    "--version",
+    "-V",
+    "-h",
+}
+CODEX_SHORT_OPTIONS_WITH_ATTACHED_VALUE = {"-C", "-a", "-c", "-i", "-m", "-p", "-s"}
+
+
+def codex_cli_subcommand(command: str) -> str | None:
+    """Return the first Codex positional command after known global options."""
+
+    try:
+        arguments = shlex.split(command, posix=True)
+    except ValueError:
+        return None
+    if len(arguments) < 2:
+        return None
+    index = 1
+    while index < len(arguments):
+        argument = arguments[index]
+        if argument == "--":
+            return None
+        if argument in CODEX_OPTIONS_WITH_VALUE:
+            if index + 1 >= len(arguments):
+                return None
+            index += 2
+            continue
+        if any(
+            argument.startswith(f"{option}=")
+            for option in CODEX_OPTIONS_WITH_VALUE
+            if option.startswith("--")
+        ):
+            index += 1
+            continue
+        if argument in CODEX_FLAG_OPTIONS:
+            index += 1
+            continue
+        if any(
+            argument.startswith(option) and argument != option
+            for option in CODEX_SHORT_OPTIONS_WITH_ATTACHED_VALUE
+        ):
+            index += 1
+            continue
+        if argument.startswith("-"):
+            return None
+        return argument
+    return None
 
 
 def codex_root_pids(rows: list[dict[str, Any]], uid: int) -> list[int]:

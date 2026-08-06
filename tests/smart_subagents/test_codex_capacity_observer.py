@@ -316,12 +316,16 @@ class CapacityObserverTests(unittest.TestCase):
                 "22 1 501 user Mon Aug  3 10:00:00 2026 0.1 /opt/homebrew/bin/codex app-server",
                 "23 1 501 user Mon Aug  3 10:00:00 2026 0.1 codex_app_server",
                 "24 1 501 user Mon Aug  3 10:00:00 2026 0.1 /opt/homebrew/bin/codex run",
+                "25 1 501 user Mon Aug  3 10:00:00 2026 0.1 /opt/homebrew/bin/codex --profile local app-server",
+                "26 1 501 user Mon Aug  3 10:00:00 2026 0.1 /opt/homebrew/bin/codex --profile app-server run",
+                "27 1 501 user Mon Aug  3 10:00:00 2026 0.1 /opt/homebrew/bin/codex 'inspect app-server behavior'",
+                "28 1 501 user Mon Aug  3 10:00:00 2026 0.1 /opt/homebrew/bin/codex -- app-server",
             ]
         )
 
         roots = observer.codex_root_pids(observer.parse_ps_snapshot(ps_text), 501)
 
-        self.assertEqual(roots, [24])
+        self.assertEqual(roots, [24, 26, 27, 28])
 
     def test_newer_reused_parent_pid_does_not_hide_codex_root(self):
         rows = observer.parse_ps_snapshot(
