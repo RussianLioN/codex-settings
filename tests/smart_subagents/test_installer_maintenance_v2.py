@@ -494,7 +494,13 @@ class _InstallationFixture:
             "links": links,
             "marketplaceName": "codex-settings-adaptive",
             "pluginId": "codex-smart-subagents@codex-settings-adaptive",
-            "extensions": {},
+            "extensions": {
+                "sourceLineage": {
+                    "schemaVersion": 1,
+                    "generation": 2,
+                    "implementationDigest": "e" * 64,
+                }
+            },
         }
         self.installer_receipt_path.write_bytes(canonical_json_bytes(receipt))
         self.installer_receipt_path.chmod(0o600)
@@ -529,6 +535,38 @@ class InstallerMaintenanceV2Tests(unittest.TestCase):
         self.assertRegex(digest, r"^[0-9a-f]{64}$")
         self.assertEqual(path.read_bytes(), payload)
         self.assertGreaterEqual(checkpoint.call_count, 6)
+
+    def test_cleanup_runs_lineage_guard_before_first_mutation(self) -> None:
+        before = _snapshot(self.root)
+
+        with self.assertRaisesRegex(RuntimeError, "stale source"):
+            cleanup_inactive_activations_v2(
+                self.fixture.layout,
+                execute=True,
+                now=lambda: NOW,
+                pre_mutation_check=lambda: (_ for _ in ()).throw(
+                    RuntimeError("stale source")
+                ),
+            )
+
+        self.assertEqual(before, _snapshot(self.root))
+
+    def test_uninstall_runs_lineage_guard_before_first_mutation(self) -> None:
+        before = _snapshot(self.root)
+
+        with self.assertRaisesRegex(RuntimeError, "stale source"):
+            uninstall_retain_data_v2(
+                self.fixture.layout,
+                registrations=self.fixture.registrations.callbacks,
+                execute=True,
+                retain_data=True,
+                now=lambda: NOW,
+                pre_mutation_check=lambda: (_ for _ in ()).throw(
+                    RuntimeError("stale source")
+                ),
+            )
+
+        self.assertEqual(before, _snapshot(self.root))
 
     def test_inventory_is_read_only_and_separates_protected_and_cleanup_trees(self) -> None:
         before = _snapshot(self.root)

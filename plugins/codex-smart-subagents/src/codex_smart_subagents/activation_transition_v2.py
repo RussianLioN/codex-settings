@@ -723,6 +723,7 @@ def build_prepared_manifest_plan_v2(
     staged: StagedActivationV2,
     activation_tree_sha256: str,
     installer_source_digest: str | None = None,
+    installer_source_lineage: Mapping[str, Any] | None = None,
 ) -> PreparedManifestPlanV2:
     """Построить без записи точное логическое намерение source-манифеста."""
 
@@ -745,6 +746,7 @@ def build_prepared_manifest_plan_v2(
         staged=staged,
         activation_tree_sha256=activation_tree_sha256,
         installer_source_digest=installer_source_digest,
+        installer_source_lineage=installer_source_lineage,
     )
 
 
@@ -754,6 +756,7 @@ def _build_prepared_manifest_plan_from_verified_proof_v2(
     staged: StagedActivationV2,
     activation_tree_sha256: str,
     installer_source_digest: str | None = None,
+    installer_source_lineage: Mapping[str, Any] | None = None,
 ) -> PreparedManifestPlanV2:
     """Чисто построить план из уже проверенного переходного снимка."""
 
@@ -767,6 +770,7 @@ def _build_prepared_manifest_plan_from_verified_proof_v2(
         staged,
         activation_tree_sha256=activation_tree_sha256,
         installer_source_digest=installer_source_digest,
+        installer_source_lineage=installer_source_lineage,
     )
     prepared_raw = canonical_json_bytes(manifest)
     content_sha256 = hashlib.sha256(prepared_raw).hexdigest()
@@ -1041,6 +1045,9 @@ def verify_prepared_manifest_file_v2(
             installer_source_digest=_installer_source_digest_from_manifest(
                 prepared.manifest_document
             ),
+            installer_source_lineage=_installer_source_lineage_from_manifest(
+                prepared.manifest_document
+            ),
         )
     ):
         _fail(
@@ -1115,6 +1122,9 @@ def observe_prepared_manifest_transition_v2(
             staged,
             activation_tree_sha256=prepared.activation_tree_sha256,
             installer_source_digest=_installer_source_digest_from_manifest(
+                prepared.manifest_document
+            ),
+            installer_source_lineage=_installer_source_lineage_from_manifest(
                 prepared.manifest_document
             ),
         )
@@ -1211,6 +1221,9 @@ def build_manifest_commit_plan_v2(
             staged,
             activation_tree_sha256=prepared.activation_tree_sha256,
             installer_source_digest=_installer_source_digest_from_manifest(
+                prepared.manifest_document
+            ),
+            installer_source_lineage=_installer_source_lineage_from_manifest(
                 prepared.manifest_document
             ),
         )
@@ -2061,6 +2074,7 @@ def _updated_manifest_document(
     *,
     activation_tree_sha256: str,
     installer_source_digest: str | None = None,
+    installer_source_lineage: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     _validate_staged_manifest_subject(proof, staged)
     activation_tree_sha256 = _sha256(
@@ -2089,16 +2103,26 @@ def _updated_manifest_document(
             "lastCommittedOperation": staged.operation_id,
         }
     )
+    if installer_source_digest is not None or installer_source_lineage is not None:
+        extensions = manifest.get("extensions")
+        if type(extensions) is not dict:
+            _fail("MANIFEST_CHANGED", "extensions манифеста имеет неверный тип")
+        extensions = copy.deepcopy(extensions)
+    else:
+        extensions = None
     if installer_source_digest is not None:
         source_digest = _sha256(
             installer_source_digest,
             "INSTALLER_SOURCE_DIGEST_INVALID",
         )
-        extensions = manifest.get("extensions")
-        if type(extensions) is not dict:
-            _fail("MANIFEST_CHANGED", "extensions манифеста имеет неверный тип")
-        extensions = copy.deepcopy(extensions)
+        assert extensions is not None
         extensions["installerSourceDigest"] = source_digest
+    if installer_source_lineage is not None:
+        assert extensions is not None
+        extensions["sourceLineage"] = _validate_installer_source_lineage_v2(
+            installer_source_lineage
+        )
+    if extensions is not None:
         if len(extensions) > 128:
             _fail("MANIFEST_CHANGED", "extensions манифеста переполнен")
         manifest["extensions"] = extensions
@@ -2117,6 +2141,44 @@ def _installer_source_digest_from_manifest(
     if value is None:
         return None
     return _sha256(value, "INSTALLER_SOURCE_DIGEST_INVALID")
+
+
+def _validate_installer_source_lineage_v2(
+    value: Mapping[str, Any] | object,
+) -> dict[str, Any]:
+    if (
+        type(value) is not dict
+        or set(value)
+        != {"schemaVersion", "generation", "implementationDigest"}
+        or value.get("schemaVersion") != 1
+        or type(value.get("generation")) is not int
+        or not 1 <= value["generation"] <= 2**31 - 1
+    ):
+        _fail(
+            "INSTALLER_SOURCE_LINEAGE_INVALID",
+            "линия исходников установщика имеет неверную форму",
+        )
+    implementation_digest = _sha256(
+        value.get("implementationDigest"),
+        "INSTALLER_SOURCE_LINEAGE_INVALID",
+    )
+    return {
+        "schemaVersion": 1,
+        "generation": value["generation"],
+        "implementationDigest": implementation_digest,
+    }
+
+
+def _installer_source_lineage_from_manifest(
+    manifest: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    extensions = manifest.get("extensions")
+    if type(extensions) is not dict:
+        _fail("MANIFEST_PREPARED_INVALID", "extensions манифеста имеет неверный тип")
+    value = extensions.get("sourceLineage")
+    if value is None:
+        return None
+    return _validate_installer_source_lineage_v2(value)
 
 
 def _manifest_artifacts_for_preparation(
@@ -2622,6 +2684,14 @@ def _validate_installer_receipt(
         "pluginId",
         "extensions",
     }
+    extensions = value.get("extensions")
+    extensions_valid = extensions == {} or (
+        type(extensions) is dict
+        and set(extensions) == {"sourceLineage"}
+        and _installer_source_lineage_shape_valid_v2(
+            extensions.get("sourceLineage")
+        )
+    )
     if (
         set(value) != expected_keys
         or value.get("schemaVersion") != 2
@@ -2635,7 +2705,7 @@ def _validate_installer_receipt(
         or value.get("registeredMarketplacePath") != str(binding.marketplace_path)
         or value.get("marketplaceName") != "codex-settings-adaptive"
         or value.get("pluginId") != "codex-smart-subagents@codex-settings-adaptive"
-        or value.get("extensions") != {}
+        or not extensions_valid
     ):
         _fail("INSTALLER_RECEIPT_INVALID", "квитанция владения имеет иную форму")
     try:
@@ -2651,6 +2721,19 @@ def _validate_installer_receipt(
         value,
         layout=layout,
         registered_marketplace=Path(str(value["registeredMarketplacePath"])),
+    )
+
+
+def _installer_source_lineage_shape_valid_v2(value: object) -> bool:
+    return bool(
+        type(value) is dict
+        and set(value)
+        == {"schemaVersion", "generation", "implementationDigest"}
+        and value.get("schemaVersion") == 1
+        and type(value.get("generation")) is int
+        and 1 <= value["generation"] <= 2**31 - 1
+        and type(value.get("implementationDigest")) is str
+        and _SHA256.fullmatch(value["implementationDigest"]) is not None
     )
 
 

@@ -69,6 +69,7 @@ _INSTALLER_MUTABLE_KEYS = {
     "activationId",
     "codexBinary",
     "registeredMarketplacePath",
+    "extensions",
 }
 
 
@@ -268,6 +269,17 @@ def _validate_committed_state(
         if type(extensions) is not dict
         else extensions.get("installerSourceDigest")
     )
+    manifest_lineage = (
+        None
+        if type(extensions) is not dict
+        else extensions.get("sourceLineage")
+    )
+    expected_extensions = expected.get("extensions")
+    expected_lineage = (
+        None
+        if type(expected_extensions) is not dict
+        else expected_extensions.get("sourceLineage")
+    )
     source_locator = manifest.get("sourceLocator")
     lexical_codex = (
         source_locator.get("lexicalPath")
@@ -289,6 +301,7 @@ def _validate_committed_state(
         or expected["installationId"] != installation_id
         or expected["activationId"] != activation_id
         or expected["sourceDigest"] != source_digest
+        or expected_lineage != manifest_lineage
         or expected["codexBinary"] != lexical_codex
     ):
         _fail(
@@ -363,11 +376,36 @@ def _validate_previous_receipt(
     previous = manifest.get("previousActivation")
     previous_id = None if type(previous) is not dict else previous.get("activationId")
     immutable = _INSTALLER_KEYS.difference(_INSTALLER_MUTABLE_KEYS)
+    current_extensions = current.get("extensions")
+    expected_extensions = expected.get("extensions")
+    current_lineage = (
+        current_extensions.get("sourceLineage")
+        if type(current_extensions) is dict
+        else None
+    )
+    expected_lineage = (
+        expected_extensions.get("sourceLineage")
+        if type(expected_extensions) is dict
+        else None
+    )
+    lineage_regressed = bool(
+        current_lineage is not None
+        and (
+            expected_lineage is None
+            or expected_lineage["generation"] < current_lineage["generation"]
+            or (
+                expected_lineage["generation"] == current_lineage["generation"]
+                and expected_lineage["implementationDigest"]
+                != current_lineage["implementationDigest"]
+            )
+        )
+    )
     if (
         current.get("installationId") != expected.get("installationId")
         or current.get("activationId") != previous_id
         or current.get("sourceDigest") == expected.get("sourceDigest")
         or any(current.get(name) != expected.get(name) for name in immutable)
+        or lineage_regressed
     ):
         _fail(
             "INSTALLER_RECEIPT_CURRENT_MISMATCH",
@@ -380,6 +418,12 @@ def _installer_receipt(value: Mapping[str, Any], code: str) -> dict[str, Any]:
         _fail(code, "квитанция должна быть объектом")
     document = copy.deepcopy(dict(value))
     links = document.get("links")
+    extensions = document.get("extensions")
+    extensions_valid = extensions == {} or (
+        type(extensions) is dict
+        and set(extensions) == {"sourceLineage"}
+        and _source_lineage_valid(extensions.get("sourceLineage"))
+    )
     if (
         set(document) != _INSTALLER_KEYS
         or document.get("schemaVersion") != 2
@@ -390,7 +434,7 @@ def _installer_receipt(value: Mapping[str, Any], code: str) -> dict[str, Any]:
         or document.get("marketplaceName") != "codex-settings-adaptive"
         or document.get("pluginId")
         != "codex-smart-subagents@codex-settings-adaptive"
-        or document.get("extensions") != {}
+        or not extensions_valid
         or type(links) is not list
         or len(links) != 2
     ):
@@ -409,6 +453,19 @@ def _installer_receipt(value: Mapping[str, Any], code: str) -> dict[str, Any]:
         _absolute_string(item.get("path"), code)
         _absolute_string(item.get("target"), code)
     return document
+
+
+def _source_lineage_valid(value: object) -> bool:
+    return bool(
+        type(value) is dict
+        and set(value)
+        == {"schemaVersion", "generation", "implementationDigest"}
+        and value.get("schemaVersion") == 1
+        and type(value.get("generation")) is int
+        and 1 <= value["generation"] <= 2**31 - 1
+        and type(value.get("implementationDigest")) is str
+        and _SHA256.fullmatch(value["implementationDigest"]) is not None
+    )
 
 
 def _verify_journal_absence(

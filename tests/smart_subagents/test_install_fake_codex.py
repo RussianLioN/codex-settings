@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -74,6 +75,18 @@ def main() -> int:
                 encoding="utf-8"
             )
         )
+        cache_root = (
+            home
+            / "plugins"
+            / "cache"
+            / "codex-settings-adaptive"
+            / "codex-smart-subagents"
+            / str(plugin_manifest["version"])
+        )
+        if cache_root.exists() or cache_root.is_symlink():
+            remove_tree(cache_root)
+        cache_root.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(plugin_root, cache_root)
         state["installed"] = [
             {
                 "pluginId": ("codex-smart-subagents@codex-settings-adaptive"),
@@ -106,6 +119,15 @@ def main() -> int:
         print(json.dumps({"installed": True}))
         return 0
     if args[:2] == ["plugin", "remove"]:
+        cache_parent = (
+            home
+            / "plugins"
+            / "cache"
+            / "codex-settings-adaptive"
+            / "codex-smart-subagents"
+        )
+        if cache_parent.exists() or cache_parent.is_symlink():
+            remove_tree(cache_parent)
         state["installed"] = []
         save_state(state_path, state)
         remove_config_text(
@@ -244,7 +266,7 @@ def fake_hook(event_name: str, trust_status: str) -> dict[str, object]:
             / "cache"
             / "codex-settings-adaptive"
             / "codex-smart-subagents"
-            / "0.1.0"
+            / "0.2.0"
             / "hooks"
             / "hooks.json"
         ),
@@ -252,6 +274,19 @@ def fake_hook(event_name: str, trust_status: str) -> dict[str, object]:
         "timeoutSec": 2,
         "trustStatus": trust_status,
     }
+
+
+def remove_tree(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+        return
+    for child in sorted(path.rglob("*"), reverse=True):
+        if child.is_symlink() or child.is_file():
+            child.chmod(0o600)
+        elif child.is_dir():
+            child.chmod(0o700)
+    path.chmod(0o700)
+    shutil.rmtree(path)
 
 
 def load_hook_configuration(home: Path) -> dict[str, object]:

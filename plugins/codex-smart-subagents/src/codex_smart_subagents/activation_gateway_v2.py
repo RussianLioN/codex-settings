@@ -2203,7 +2203,9 @@ def _read_reconciliation_installer_v1(
         or receipt["marketplaceName"] != "codex-settings-adaptive"
         or receipt["pluginId"]
         != "codex-smart-subagents@codex-settings-adaptive"
-        or receipt["extensions"] != {}
+        or not _installer_receipt_extensions_valid_v2(
+            receipt["extensions"]
+        )
     ):
         raise _ProofError(code, "installer receipt binding differs")
     _identifier(receipt["installationId"], "ins2_", 32, code)
@@ -2272,6 +2274,24 @@ def _read_reconciliation_installer_v1(
     ):
         raise _ProofError(code, "stable wrapper does not target active marketplace")
     return receipt, stable_wrapper
+
+
+def _installer_receipt_extensions_valid_v2(value: object) -> bool:
+    if value == {}:
+        return True
+    if type(value) is not dict or set(value) != {"sourceLineage"}:
+        return False
+    lineage = value.get("sourceLineage")
+    return bool(
+        type(lineage) is dict
+        and set(lineage)
+        == {"schemaVersion", "generation", "implementationDigest"}
+        and lineage.get("schemaVersion") == 1
+        and type(lineage.get("generation")) is int
+        and 1 <= lineage["generation"] <= 2**31 - 1
+        and type(lineage.get("implementationDigest")) is str
+        and _SHA256.fullmatch(lineage["implementationDigest"]) is not None
+    )
 
 
 def _verified_external_executable_v1(path: Path, *, code: str) -> Path:

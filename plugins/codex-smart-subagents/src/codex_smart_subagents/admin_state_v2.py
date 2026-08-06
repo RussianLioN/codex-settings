@@ -669,7 +669,25 @@ def _installer_receipt_valid(value: object, *, codex_home: Path) -> bool:
         and value.get("marketplaceName") == "codex-settings-adaptive"
         and value.get("pluginId")
         == "codex-smart-subagents@codex-settings-adaptive"
-        and value.get("extensions") == {}
+        and _installer_receipt_extensions_valid_v2(value.get("extensions"))
+    )
+
+
+def _installer_receipt_extensions_valid_v2(value: object) -> bool:
+    if value == {}:
+        return True
+    if type(value) is not dict or set(value) != {"sourceLineage"}:
+        return False
+    lineage = value.get("sourceLineage")
+    return bool(
+        type(lineage) is dict
+        and set(lineage)
+        == {"schemaVersion", "generation", "implementationDigest"}
+        and lineage.get("schemaVersion") == 1
+        and type(lineage.get("generation")) is int
+        and 1 <= lineage["generation"] <= 2**31 - 1
+        and type(lineage.get("implementationDigest")) is str
+        and _SHA256.fullmatch(lineage["implementationDigest"]) is not None
     )
 
 

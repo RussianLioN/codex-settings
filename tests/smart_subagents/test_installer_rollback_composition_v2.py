@@ -529,7 +529,13 @@ class InstallerRollbackCompositionV2Tests(unittest.TestCase):
             "links": self.launcher_links,
             "marketplaceName": "codex-settings-adaptive",
             "pluginId": "codex-smart-subagents@codex-settings-adaptive",
-            "extensions": {},
+            "extensions": {
+                "sourceLineage": {
+                    "schemaVersion": 1,
+                    "generation": 2,
+                    "implementationDigest": "e" * 64,
+                }
+            },
         }
         self.installer_receipt_path.write_bytes(
             canonical_json_bytes(self.installer_receipt)

@@ -14,6 +14,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -128,6 +129,10 @@ from codex_smart_subagents.lifecycle_operation_v2 import (  # noqa: E402
 from codex_smart_subagents.lifecycle_plan_v2 import (  # noqa: E402
     LifecyclePlanRegistryV2,
 )
+from codex_smart_subagents.live_canary import (  # noqa: E402
+    AppServerError,
+    StrictAppServerClient,
+)
 from codex_smart_subagents.policy_bundle_v2 import (  # noqa: E402
     PolicyBundleError,
     load_policy_bundle_v2,
@@ -140,6 +145,7 @@ PLUGIN_NAME = "codex-smart-subagents"
 PLUGIN_ID = f"{PLUGIN_NAME}@{MARKETPLACE_NAME}"
 INSTALLATION_NAME = "codex-smart-subagents-v2"
 INSTALLER_RECEIPT_KIND = "codex-smart-installer-receipt/v2"
+SOURCE_LINEAGE_KIND = "codex-smart-source-lineage/v2"
 _FIRST_INSTALL_JOURNAL_KIND = "codex-smart-first-install-transaction/v2"
 _FIRST_INSTALL_JOURNAL_DOMAIN = "codex-smart/first-install-transaction/v2"
 _VERSION_PATTERN = re.compile(r"^codex-cli ([0-9]+\.[0-9]+\.[0-9]+)\n?$")
@@ -268,6 +274,10 @@ class InstallLayout:
             / "schemas"
             / "installer-receipt-v2.schema.json"
         )
+
+    @property
+    def source_lineage_source(self) -> Path:
+        return self.plugin_source / "config" / "source-lineage-v2.json"
 
     @property
     def config_path(self) -> Path:
@@ -446,6 +456,7 @@ def install(
 ) -> dict[str, Any]:
     _require_socket_path_capacity(layout.state_home)
     _validate_source_layout(layout)
+    _source_lineage_v2(layout)
     version = _probe_version(layout, extra_environment)
     if not codex_version_supported(version):
         raise InstallError(
@@ -959,6 +970,8 @@ def _repeat_install(
     extra_environment: Mapping[str, str] | None,
 ) -> dict[str, Any]:
     receipt = _load_installer_receipt(layout.installer_receipt_path)
+    candidate_lineage = _source_lineage_v2(layout)
+    _require_monotonic_source_lineage_v2(receipt, candidate_lineage)
     inspection = _inspect_installation_recovery_v2(layout)
     if inspection.journal_kind != "none":
         _recover_pending_install_journal_v2(
@@ -981,6 +994,7 @@ def _repeat_install(
         if reconciled["sourceDigest"] == source_digest:
             return reconciled
         receipt = _load_installer_receipt(layout.installer_receipt_path)
+        _require_monotonic_source_lineage_v2(receipt, candidate_lineage)
     if receipt["sourceDigest"] != source_digest:
         return _upgrade_install(
             layout,
@@ -1032,6 +1046,9 @@ def _upgrade_install(
 ) -> dict[str, Any]:
     """Продолжить уже зафиксированное обновление либо начать новую операцию."""
 
+    candidate_lineage = _source_lineage_v2(layout)
+    _require_monotonic_source_lineage_v2(previous_receipt, candidate_lineage)
+
     gateway = layout.gateway_layout
     if os.path.lexists(gateway.journal_path):
         return _recover_update_install_v2(
@@ -1050,6 +1067,7 @@ def _upgrade_install(
         if reconciled["sourceDigest"] == source_digest:
             return reconciled
         previous_receipt = _load_installer_receipt(layout.installer_receipt_path)
+        _require_monotonic_source_lineage_v2(previous_receipt, candidate_lineage)
 
     transition = _capture_upgrade_transition_proof_v2(
         layout,
@@ -1589,6 +1607,11 @@ def _inspect_pending_committed_upgrade_v2(
     committed_digest = (
         extensions.get("installerSourceDigest") if type(extensions) is dict else None
     )
+    committed_lineage = _manifest_source_lineage_v2(manifest)
+    previous_extensions = _validate_installer_receipt_extensions_v2(
+        previous_receipt.get("extensions")
+    )
+    previous_lineage = previous_extensions.get("sourceLineage")
     if (
         manifest.get("schemaVersion") != 2
         or not _identifier(installation_id, "ins2_", 32)
@@ -1623,6 +1646,16 @@ def _inspect_pending_committed_upgrade_v2(
             "UPDATE_RECOVERY_NOT_RECONCILABLE",
             "принятая активация не продолжает активацию из квитанции",
         )
+    if previous_lineage is not None and committed_lineage is None:
+        raise InstallError(
+            "UPDATE_RECOVERY_NOT_RECONCILABLE",
+            "принятый манифест не может удалить защищённую линию исходников",
+        )
+    if committed_lineage is not None:
+        _require_monotonic_source_lineage_v2(
+            previous_receipt,
+            committed_lineage,
+        )
     source_locator = manifest.get("sourceLocator")
     committed_codex = (
         source_locator.get("lexicalPath") if type(source_locator) is dict else None
@@ -1638,6 +1671,7 @@ def _inspect_pending_committed_upgrade_v2(
         "activeActivationId": str(active_id),
         "previousActivationId": str(previous_id),
         "sourceDigest": str(committed_digest),
+        "sourceLineage": committed_lineage,
         "codexBinary": str(committed_codex),
     }
 
@@ -1879,6 +1913,7 @@ def _try_reconcile_committed_upgrade_v2(
     committed_digest = (
         extensions.get("installerSourceDigest") if type(extensions) is dict else None
     )
+    committed_lineage = _manifest_source_lineage_v2(manifest)
     if committed_digest != source_digest:
         return None
     active = manifest.get("activeActivation")
@@ -1908,6 +1943,11 @@ def _try_reconcile_committed_upgrade_v2(
         layout,
         source_digest=source_digest,
         identity=identity,
+        extensions=(
+            {}
+            if committed_lineage is None
+            else {"sourceLineage": committed_lineage}
+        ),
     )
     observed_receipt = _load_installer_receipt(layout.installer_receipt_path)
     if observed_receipt not in (dict(previous_receipt), expected):
@@ -1934,7 +1974,14 @@ def _try_reconcile_committed_upgrade_v2(
     decision = _supervise_existing(
         layout,
         extra_environment=extra_environment,
-        plugin_root=layout.plugin_source,
+        plugin_root=(
+            layout.gateway_layout.managed_root
+            / "activations"
+            / str(active["activationId"])
+            / "marketplace"
+            / "plugins"
+            / PLUGIN_NAME
+        ),
     )
     if decision.state is not GatewayState.READY:
         raise InstallError(
@@ -1990,11 +2037,34 @@ def doctor(
         problems.append(exc.code)
     if receipt is not None and identity is not None:
         try:
+            manifest = _read_private_json(
+                layout.gateway_layout.manifest_path,
+                code="LIFECYCLE_MANIFEST_INVALID",
+            )
+            manifest_lineage = _manifest_source_lineage_v2(manifest)
+            materialized_lineage = _materialized_source_lineage_v2(
+                layout,
+                manifest=manifest,
+            )
+            if (
+                manifest_lineage is not None
+                and manifest_lineage != materialized_lineage
+            ):
+                raise InstallError(
+                    "INSTALLER_RECEIPT_MISMATCH",
+                    "линия манифеста не совпадает с принятой активацией",
+                )
+            committed_lineage = manifest_lineage or materialized_lineage
             committed_layout = _committed_installer_layout_v2(layout, receipt)
             expected = _build_installer_receipt(
                 committed_layout,
                 source_digest=str(receipt["sourceDigest"]),
                 identity=identity,
+                extensions=(
+                    {}
+                    if committed_lineage is None
+                    else {"sourceLineage": committed_lineage}
+                ),
             )
             if receipt != expected:
                 problems.append("INSTALLER_RECEIPT_MISMATCH")
@@ -2112,11 +2182,89 @@ def smoke(
             "LAUNCHER_SMOKE_FAILED",
             _bounded_error(completed),
         )
+    hook_source_path = _loaded_hook_cache_source_v2(layout)
     return {
         "ok": True,
         "status": "FULL_READY",
         "launcherVersion": completed.stdout.strip(),
+        "hookSourcePath": str(hook_source_path),
     }
+
+
+def _loaded_hook_cache_source_v2(layout: InstallLayout) -> Path:
+    """Доказать через Codex, что хуки читаются из проверенного кеша."""
+
+    runtime_layout = _registration_runtime_layout_v2(layout)
+    marketplace = layout.gateway_layout.marketplace_link.resolve(strict=True)
+    contract = _load_activation_marketplace_contract_v2(marketplace.parent)
+    expected = (
+        layout.codex_home
+        / "plugins"
+        / "cache"
+        / MARKETPLACE_NAME
+        / PLUGIN_NAME
+        / contract.plugin_version
+        / "hooks"
+        / "hooks.json"
+    )
+    try:
+        _ensure_owned_directory(layout.state_home, create=True, private=True)
+        with tempfile.TemporaryDirectory(
+            prefix="hooks-list-",
+            dir=layout.state_home,
+        ) as raw_tmpdir:
+            tmpdir = Path(raw_tmpdir)
+            tmpdir.chmod(0o700)
+            result = StrictAppServerClient(
+                codex_executable=runtime_layout.codex_binary,
+                codex_home=layout.codex_home,
+                home=layout.codex_home,
+                tmpdir=tmpdir,
+                cwd=layout.codex_home,
+                timeout_seconds=8.0,
+                accepted_stderr=lambda _payload: True,
+            ).call("hooks/list", {"cwds": [str(layout.codex_home)]})
+    except (AppServerError, OSError, RuntimeError, ValueError) as exc:
+        raise InstallError("HOOK_CACHE_PROBE_FAILED", str(exc)) from exc
+    if type(result) is not dict or type(result.get("data")) is not list:
+        raise InstallError(
+            "HOOK_CACHE_PROBE_INVALID",
+            "Codex вернул неверный ответ hooks/list",
+        )
+    for item in result["data"]:
+        if (
+            type(item) is not dict
+            or type(item.get("errors")) is not list
+            or type(item.get("warnings")) is not list
+        ):
+            raise InstallError(
+                "HOOK_CACHE_PROBE_INVALID",
+                "Codex вернул незакрытую диагностику hooks/list",
+            )
+        if item["errors"] or item["warnings"]:
+            raise InstallError(
+                "HOOK_CACHE_REPORTED_ERRORS",
+                "Codex сообщил ошибку или предупреждение загрузки хуков",
+            )
+    hooks = [
+        hook
+        for item in result["data"]
+        if type(item) is dict and type(item.get("hooks")) is list
+        for hook in item["hooks"]
+        if type(hook) is dict and hook.get("pluginId") == PLUGIN_ID
+    ]
+    if not hooks:
+        raise InstallError(
+            "HOOK_CACHE_NOT_LOADED",
+            "Codex не сообщил ни одного хука установленного расширения",
+        )
+    observed = {hook.get("sourcePath") for hook in hooks}
+    if observed != {str(expected)}:
+        raise InstallError(
+            "HOOK_CACHE_DRIFT",
+            "Codex загрузил хуки не из проверенного кеша расширения",
+        )
+    return expected
 
 
 def initial_controller_environment(
@@ -2597,6 +2745,7 @@ def _build_installer_receipt(
     *,
     source_digest: str,
     identity: Mapping[str, str],
+    extensions: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if _SHA256_PATTERN.fullmatch(source_digest) is None:
         raise InstallError("SOURCE_DIGEST_INVALID", "sourceDigest неверен")
@@ -2611,6 +2760,11 @@ def _build_installer_receipt(
             "INSTALLER_RECEIPT_INVALID",
             "невозможно связать квитанцию с принятой активацией",
         ) from exc
+    receipt_extensions = (
+        _source_lineage_extensions_v2(_source_lineage_v2(layout))
+        if extensions is None
+        else _validate_installer_receipt_extensions_v2(dict(extensions))
+    )
     value = {
         "schemaVersion": 2,
         "kind": INSTALLER_RECEIPT_KIND,
@@ -2628,7 +2782,7 @@ def _build_installer_receipt(
         ],
         "marketplaceName": MARKETPLACE_NAME,
         "pluginId": PLUGIN_ID,
-        "extensions": {},
+        "extensions": receipt_extensions,
     }
     return _validate_installer_receipt_document(value)
 
@@ -2760,7 +2914,7 @@ def _validate_installer_receipt_document(value: object) -> dict[str, Any]:
         or not _activation_identifier(value.get("activationId"))
         or value.get("marketplaceName") != MARKETPLACE_NAME
         or value.get("pluginId") != PLUGIN_ID
-        or value.get("extensions") != {}
+        or not _installer_receipt_extensions_valid_v2(value.get("extensions"))
         or not _absolute_string_path(value.get("codexHome"))
         or not _absolute_string_path(value.get("codexBinary"))
         or not _absolute_string_path(value.get("stateHome"))
@@ -2773,6 +2927,158 @@ def _validate_installer_receipt_document(value: object) -> dict[str, Any]:
             "закрытая квитанция установщика имеет неверную форму",
         )
     return dict(value)
+
+
+def _installer_receipt_extensions_valid_v2(value: object) -> bool:
+    try:
+        _validate_installer_receipt_extensions_v2(value)
+    except InstallError:
+        return False
+    return True
+
+
+def _validate_installer_receipt_extensions_v2(value: object) -> dict[str, Any]:
+    if value == {}:
+        # Совместимость чтения нужна только для одноразового перехода с
+        # установщика, который ещё не умел защищать источник от отката.
+        return {}
+    if type(value) is not dict or set(value) != {"sourceLineage"}:
+        raise InstallError(
+            "INSTALLER_RECEIPT_INVALID",
+            "расширения квитанции установщика имеют неверную форму",
+        )
+    lineage = value.get("sourceLineage")
+    if (
+        type(lineage) is not dict
+        or set(lineage)
+        != {"schemaVersion", "generation", "implementationDigest"}
+        or lineage.get("schemaVersion") != 1
+        or type(lineage.get("generation")) is not int
+        or not 1 <= lineage["generation"] <= 2**31 - 1
+        or type(lineage.get("implementationDigest")) is not str
+        or _SHA256_PATTERN.fullmatch(lineage["implementationDigest"]) is None
+    ):
+        raise InstallError(
+            "INSTALLER_RECEIPT_INVALID",
+            "линия источника в квитанции установщика неверна",
+        )
+    return {"sourceLineage": dict(lineage)}
+
+
+def _source_lineage_extensions_v2(lineage: Mapping[str, Any]) -> dict[str, Any]:
+    return _validate_installer_receipt_extensions_v2(
+        {"sourceLineage": dict(lineage)}
+    )
+
+
+def _manifest_source_lineage_v2(
+    manifest: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    extensions = manifest.get("extensions")
+    if extensions is None:
+        # Старые первые активации не закрепляли расширения манифеста; их
+        # квитанция установщика остаётся границей одноразовой миграции.
+        return None
+    if type(extensions) is not dict:
+        raise InstallError(
+            "LIFECYCLE_MANIFEST_INVALID",
+            "extensions принятого манифеста имеет неверную форму",
+        )
+    value = extensions.get("sourceLineage")
+    if value is None:
+        return None
+    try:
+        return _validate_installer_receipt_extensions_v2(
+            {"sourceLineage": value}
+        )["sourceLineage"]
+    except InstallError as exc:
+        raise InstallError(
+            "LIFECYCLE_MANIFEST_INVALID",
+            "линия исходников принятого манифеста неверна",
+        ) from exc
+
+
+def _materialized_source_lineage_v2(
+    layout: InstallLayout,
+    *,
+    manifest: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    active = manifest.get("activeActivation")
+    activation_id = (
+        active.get("activationId") if type(active) is dict else None
+    )
+    if not _activation_identifier(activation_id):
+        raise InstallError(
+            "LIFECYCLE_MANIFEST_INVALID",
+            "манифест не указывает принятую активацию",
+        )
+    materialized_layout = InstallLayout(
+        source_root=(
+            layout.gateway_layout.managed_root
+            / "activations"
+            / str(activation_id)
+            / "marketplace"
+        ),
+        codex_home=layout.codex_home,
+        bin_dir=layout.bin_dir,
+        codex_binary=layout.codex_binary,
+        state_home=layout.state_home,
+    )
+    if not os.path.lexists(materialized_layout.source_lineage_source):
+        return None
+    return _source_lineage_v2(materialized_layout)
+
+
+def _require_monotonic_source_lineage_v2(
+    previous_receipt: Mapping[str, Any],
+    candidate_lineage: Mapping[str, Any],
+) -> None:
+    candidate = _validate_installer_receipt_extensions_v2(
+        {"sourceLineage": dict(candidate_lineage)}
+    )["sourceLineage"]
+    previous_extensions = _validate_installer_receipt_extensions_v2(
+        previous_receipt.get("extensions")
+    )
+    previous = previous_extensions.get("sourceLineage")
+    if previous is None:
+        return
+    if candidate["generation"] < previous["generation"]:
+        raise InstallError(
+            "SOURCE_DOWNGRADE_REJECTED",
+            "более старая линия исходников не может заменить активную установку",
+        )
+    if (
+        candidate["generation"] == previous["generation"]
+        and candidate["implementationDigest"]
+        != previous["implementationDigest"]
+    ):
+        raise InstallError(
+            "SOURCE_LINEAGE_CONFLICT",
+            "один номер поколения описывает разные реализации установщика",
+        )
+
+
+def _require_current_source_lineage_v2(
+    layout: InstallLayout,
+    *,
+    allow_absent: bool = False,
+) -> dict[str, Any] | None:
+    try:
+        receipt = _load_installer_receipt(layout.installer_receipt_path)
+    except InstallError as exc:
+        if allow_absent and not os.path.lexists(layout.installer_receipt_path):
+            return None
+        if not os.path.lexists(layout.installer_receipt_path):
+            raise InstallError(
+                "INSTALLER_RECEIPT_MISSING",
+                "изменяющая операция требует квитанцию текущей установки",
+            ) from exc
+        raise
+    _require_monotonic_source_lineage_v2(
+        receipt,
+        _source_lineage_v2(layout),
+    )
+    return receipt
 
 
 def _installation_problems(
@@ -2896,10 +3202,13 @@ def _registration_problems(
     ):
         problems.append("MARKETPLACE_REGISTRATION_MISMATCH")
     plugins = _target_plugins(layout, extra_environment)
-    if len(plugins) != 1 or not _plugin_entry_matches(
+    plugin_matches = len(plugins) == 1 and _plugin_entry_matches(
         plugins[0] if plugins else {}, layout
-    ):
+    )
+    if not plugin_matches:
         problems.append("PLUGIN_REGISTRATION_MISMATCH")
+    else:
+        problems.extend(_plugin_cache_problems_v2(layout))
     return problems
 
 
@@ -3019,6 +3328,34 @@ def _plugin_entry_matches(entry: Mapping[str, Any], layout: InstallLayout) -> bo
         and source.get("source") == "local"
         and source.get("path") == expected_plugin
     )
+
+
+def _plugin_cache_problems_v2(layout: InstallLayout) -> list[str]:
+    """Сверить фактически загружаемый кеш Codex с принятой активацией."""
+
+    try:
+        marketplace = layout.gateway_layout.marketplace_link.resolve(strict=True)
+        contract = _load_activation_marketplace_contract_v2(marketplace.parent)
+        active_plugin = (
+            marketplace / contract.plugin_source_path
+        ).resolve(strict=True)
+        cache_plugin = (
+            layout.codex_home
+            / "plugins"
+            / "cache"
+            / MARKETPLACE_NAME
+            / PLUGIN_NAME
+            / contract.plugin_version
+        )
+        if not cache_plugin.exists() or cache_plugin.is_symlink():
+            return ["PLUGIN_CACHE_MISSING"]
+        if _runtime_tree_digest_v2(cache_plugin) != _runtime_tree_digest_v2(
+            active_plugin
+        ):
+            return ["PLUGIN_CACHE_DRIFT"]
+    except (InstallError, OSError, RuntimeError, ValueError):
+        return ["PLUGIN_CACHE_DRIFT"]
+    return []
 
 
 def _add_marketplace(
@@ -3421,6 +3758,7 @@ def _validate_source_layout(layout: InstallLayout) -> None:
         layout.marketplace_source,
         layout.codex_marketplace_source,
         layout.installer_receipt_schema_source,
+        layout.source_lineage_source,
         layout.catalog_source,
         layout.controller_entrypoint,
         layout.plugin_source / "config" / "adaptive-subagents.toml",
@@ -3498,7 +3836,7 @@ def _load_policy_bundle_v2(layout: InstallLayout):
     )
 
 
-def _source_digest(layout: InstallLayout) -> str:
+def _installer_source_files_v2(layout: InstallLayout) -> dict[str, Path]:
     files: dict[str, Path] = {}
     for path in _iter_source_tree(layout.plugin_source):
         plugin_relative = path.relative_to(layout.plugin_source)
@@ -3520,10 +3858,19 @@ def _source_digest(layout: InstallLayout) -> str:
         *layout.runtime_vector_paths,
     ):
         files[path.relative_to(layout.source_root).as_posix()] = path
+    return files
+
+
+def _update_source_file_digest_v2(
+    digest: Any,
+    *,
+    layout: InstallLayout,
+    files: Mapping[str, Path],
+    normalize_any_bound_python: bool = False,
+) -> None:
     interpreter = _bound_python_runtime_v2()
     portable_shebang = b"#!/usr/bin/env python3\n"
     bound_shebang = f"#!{interpreter} -B\n".encode("utf-8")
-    digest = hashlib.sha256()
     for relative, path in sorted(
         files.items(), key=lambda item: item[0].encode("utf-8")
     ):
@@ -3541,13 +3888,95 @@ def _source_digest(layout: InstallLayout) -> str:
             payload = path.read_bytes()
             if payload.startswith(bound_shebang):
                 payload = portable_shebang + payload[len(bound_shebang) :]
-            elif not payload.startswith(portable_shebang):
+            elif payload.startswith(portable_shebang):
+                pass
+            elif normalize_any_bound_python:
+                first_line, separator, remainder = payload.partition(b"\n")
+                if (
+                    separator != b"\n"
+                    or re.fullmatch(
+                        rb"#!/[^\x00 \t\r\n]+ -B",
+                        first_line,
+                    )
+                    is None
+                ):
+                    raise InstallError(
+                        "PYTHON_ENTRYPOINT_INVALID",
+                        f"неизвестная исполняемая точка входа: {path.name}",
+                    )
+                payload = portable_shebang + remainder
+            else:
                 raise InstallError(
                     "PYTHON_ENTRYPOINT_INVALID",
                     f"неизвестная исполняемая точка входа: {path.name}",
                 )
             payload_sha256 = hashlib.sha256(payload).hexdigest()
         digest.update(bytes.fromhex(payload_sha256))
+
+
+def _source_implementation_digest_v2(layout: InstallLayout) -> str:
+    files = _installer_source_files_v2(layout)
+    lineage_relative = layout.source_lineage_source.relative_to(
+        layout.source_root
+    ).as_posix()
+    files.pop(lineage_relative, None)
+    digest = hashlib.sha256()
+    digest.update(b"codex-smart/source-implementation/v2\0")
+    _update_source_file_digest_v2(
+        digest,
+        layout=layout,
+        files=files,
+        normalize_any_bound_python=True,
+    )
+    return digest.hexdigest()
+
+
+def _source_lineage_v2(layout: InstallLayout) -> dict[str, Any]:
+    path = layout.source_lineage_source
+    try:
+        info = os.lstat(path)
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise InstallError(
+            "SOURCE_LINEAGE_INVALID",
+            "не удалось прочитать линию исходников установщика",
+        ) from exc
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or type(value) is not dict
+        or set(value)
+        != {"schemaVersion", "kind", "generation", "implementationDigest"}
+        or value.get("schemaVersion") != 1
+        or value.get("kind") != SOURCE_LINEAGE_KIND
+        or type(value.get("generation")) is not int
+        or not 1 <= value["generation"] <= 2**31 - 1
+        or type(value.get("implementationDigest")) is not str
+        or _SHA256_PATTERN.fullmatch(value["implementationDigest"]) is None
+    ):
+        raise InstallError(
+            "SOURCE_LINEAGE_INVALID",
+            "линия исходников установщика имеет неверную форму",
+        )
+    observed = _source_implementation_digest_v2(layout)
+    if observed != value["implementationDigest"]:
+        raise InstallError(
+            "SOURCE_LINEAGE_MISMATCH",
+            "реализация изменилась без нового поколения линии исходников",
+        )
+    return {
+        "schemaVersion": 1,
+        "generation": value["generation"],
+        "implementationDigest": value["implementationDigest"],
+    }
+
+
+def _source_digest(layout: InstallLayout) -> str:
+    files = _installer_source_files_v2(layout)
+    interpreter = _bound_python_runtime_v2()
+    digest = hashlib.sha256()
+    digest.update(b"codex-smart/source-digest/v2\0")
+    _update_source_file_digest_v2(digest, layout=layout, files=files)
     digest.update(b"\0codex-binary-v1\0")
     digest.update(str(layout.codex_binary).encode("utf-8"))
     digest.update(b"\0")
@@ -3618,6 +4047,20 @@ def tree_digest(root: Path) -> str:
     digest = hashlib.sha256()
     for path in _iter_source_tree(root):
         digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(bytes.fromhex(file_digest(path)))
+    return digest.hexdigest()
+
+
+def _runtime_tree_digest_v2(root: Path) -> str:
+    """Связать байты и точные права файлов фактически загружаемого дерева."""
+
+    digest = hashlib.sha256()
+    for path in _iter_source_tree(root):
+        info = path.lstat()
+        digest.update(path.relative_to(root).as_posix().encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(f"{stat.S_IMODE(info.st_mode):04o}".encode("ascii"))
         digest.update(b"\0")
         digest.update(bytes.fromhex(file_digest(path)))
     return digest.hexdigest()
@@ -4497,6 +4940,11 @@ def cleanup_installation_v2(
         _maintenance_layout_v2(layout),
         execute=execute,
         now=_maintenance_now_v2,
+        pre_mutation_check=(
+            (lambda: _require_current_source_lineage_v2(layout))
+            if execute
+            else None
+        ),
     )
     return _maintenance_public_result_v2(
         layout,
@@ -4525,6 +4973,11 @@ def uninstall_installation_v2(
             execute=execute,
             retain_data=retain_data,
             now=_maintenance_now_v2,
+            pre_mutation_check=(
+                (lambda: _require_current_source_lineage_v2(layout))
+                if execute
+                else None
+            ),
         )
     elif os.path.lexists(layout.gateway_layout.journal_path):
         if execute:
@@ -4665,6 +5118,7 @@ def _execute_fresh_uninstall_composition_v2(
     """Снять снимок и исполнить его под одной installer-блокировкой."""
 
     with installation_lock(layout.lock_path):
+        _require_current_source_lineage_v2(layout)
         store = _AlreadyHeldOperationJournalStoreV2(
             _LazyOperationJournalStoreV2(layout=layout)
         )
@@ -4685,6 +5139,7 @@ def _execute_existing_uninstall_composition_v2(
     """Продолжить только точное определение uninstall из основного журнала."""
 
     with installation_lock(layout.lock_path):
+        _require_current_source_lineage_v2(layout, allow_absent=True)
         store = _AlreadyHeldOperationJournalStoreV2(
             _LazyOperationJournalStoreV2(layout=layout)
         )
@@ -5015,6 +5470,11 @@ def _completed_rollback_operation_v2(
         if isinstance(extensions, Mapping)
         else None
     )
+    committed_lineage = (
+        _manifest_source_lineage_v2(manifest_document)
+        if isinstance(manifest_document, Mapping)
+        else None
+    )
     try:
         if (
             type(source_digest) is not str
@@ -5035,6 +5495,11 @@ def _completed_rollback_operation_v2(
                 "installationId": str(installation_id),
                 "activationId": str(current_activation_id),
             },
+            extensions=(
+                {}
+                if committed_lineage is None
+                else {"sourceLineage": committed_lineage}
+            ),
         )
     except InstallError as exc:
         raise InstallError(
@@ -5123,6 +5588,7 @@ def rollback_installation_v2(
         )
 
     with installation_lock(layout.lock_path):
+        current_installer_receipt = _require_current_source_lineage_v2(layout)
         inspection = inspect_recovery_v2(
             journal_root=gateway.manifest_root,
             preparation_journal_path=(
@@ -5143,9 +5609,6 @@ def rollback_installation_v2(
                 "ROLLBACK_RECOVERY_REQUIRED",
                 "найден незавершённый журнал; сначала выполните recover --apply",
             )
-        current_installer_receipt = _load_installer_receipt(
-            layout.installer_receipt_path
-        )
         reconciled_before = _try_reconcile_pending_committed_upgrade_v2(
             layout,
             previous_receipt=current_installer_receipt,
@@ -5648,6 +6111,14 @@ def recover_installation_v2(
             execute=execute,
             retain_data=True,
             now=_maintenance_now_v2,
+            pre_mutation_check=(
+                (lambda: _require_current_source_lineage_v2(
+                    layout,
+                    allow_absent=True,
+                ))
+                if execute
+                else None
+            ),
         )
         result = InstallerLifecycleAdapterResultV2(
             command="recover",
@@ -5696,6 +6167,7 @@ def recover_installation_v2(
                     },
                 )
             with installation_lock(layout.lock_path):
+                _require_current_source_lineage_v2(layout)
                 if _inspect_installation_recovery_v2(layout).journal_kind != "none":
                     raise InstallError(
                         "ACTIVATION_BYTECODE_REPAIR_BUSY",
@@ -5790,6 +6262,7 @@ def recover_installation_v2(
         )
 
     with installation_lock(layout.lock_path):
+        _require_current_source_lineage_v2(layout, allow_absent=True)
         inspection = _inspect_installation_recovery_v2(layout)
         plan = build_plan(inspection)
         if getattr(plan, "main", None) is not None:

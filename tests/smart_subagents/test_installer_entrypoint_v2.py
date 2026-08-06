@@ -52,6 +52,11 @@ ACTIVE_ID = "act2_" + "2" * 64
 PREVIOUS_ID = "act2_" + "3" * 64
 STALE_ID = "act2_" + "4" * 64
 OPERATION_ID = "op2_" + "5" * 32
+SOURCE_LINEAGE = {
+    "schemaVersion": 1,
+    "generation": 1,
+    "implementationDigest": "9" * 64,
+}
 
 
 def _filesystem_snapshot(root: Path) -> tuple[tuple[str, str, object], ...]:
@@ -247,7 +252,10 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
             installer_receipt_path=Path("/tmp/receipt"),
             gateway_layout=SimpleNamespace(journal_path=Path("/tmp/main-journal")),
         )
-        receipt = {"sourceDigest": "a" * 64}
+        receipt = {
+            "sourceDigest": "a" * 64,
+            "extensions": {"sourceLineage": SOURCE_LINEAGE},
+        }
         upgraded = {
             "status": "upgraded",
             "readiness": "FULL_READY",
@@ -274,6 +282,11 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 self.installer,
                 "_inspect_installation_recovery_v2",
                 return_value=SimpleNamespace(journal_kind="none"),
+            ),
+            mock.patch.object(
+                self.installer,
+                "_source_lineage_v2",
+                return_value=SOURCE_LINEAGE,
             ),
         ):
             result = self.installer._repeat_install(
@@ -336,13 +349,21 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
             layout = self._layout(root)
             old_receipt = {"sourceDigest": "a" * 64}
             expected_receipt = {"sourceDigest": "b" * 64}
+            committed_lineage = {
+                "schemaVersion": 1,
+                "generation": 7,
+                "implementationDigest": "c" * 64,
+            }
             manifest = {
                 "schemaVersion": 2,
                 "installationId": INSTALLATION_ID,
                 "activeActivation": {"activationId": ACTIVE_ID},
                 "previousActivation": {"activationId": PREVIOUS_ID},
                 "lastCommittedOperation": OPERATION_ID,
-                "extensions": {"installerSourceDigest": "b" * 64},
+                "extensions": {
+                    "installerSourceDigest": "b" * 64,
+                    "sourceLineage": committed_lineage,
+                },
             }
 
             def reconcile(**arguments):
@@ -374,7 +395,7 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                     self.installer,
                     "_build_installer_receipt",
                     return_value=expected_receipt,
-                ),
+                ) as build_receipt,
                 mock.patch.object(
                     self.installer,
                     "_installation_problems",
@@ -410,13 +431,69 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
             supervise.assert_called_once_with(
                 layout,
                 extra_environment={"TEST_BOUNDARY": "closed"},
-                plugin_root=layout.plugin_source,
+                plugin_root=(
+                    layout.gateway_layout.managed_root
+                    / "activations"
+                    / ACTIVE_ID
+                    / "marketplace"
+                    / "plugins"
+                    / self.installer.PLUGIN_NAME
+                ),
             )
             reconcile_receipt.assert_called_once()
             archive_receipt.assert_called_once_with(
                 layout,
                 receipt=old_receipt,
                 activation_id=PREVIOUS_ID,
+            )
+            build_receipt.assert_called_once_with(
+                layout,
+                source_digest="b" * 64,
+                identity={
+                    "installationId": INSTALLATION_ID,
+                    "activationId": ACTIVE_ID,
+                    "operationId": OPERATION_ID,
+                },
+                extensions={"sourceLineage": committed_lineage},
+            )
+
+    def test_pending_commit_cannot_erase_a_protected_source_lineage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            layout = self._layout(Path(directory).resolve())
+            protected = {
+                "schemaVersion": 1,
+                "generation": 4,
+                "implementationDigest": "d" * 64,
+            }
+            previous_receipt = {
+                "installationId": INSTALLATION_ID,
+                "activationId": PREVIOUS_ID,
+                "sourceDigest": "a" * 64,
+                "extensions": {"sourceLineage": protected},
+            }
+            manifest = {
+                "schemaVersion": 2,
+                "installationId": INSTALLATION_ID,
+                "activeActivation": {"activationId": ACTIVE_ID},
+                "previousActivation": {"activationId": PREVIOUS_ID},
+                "lastCommittedOperation": OPERATION_ID,
+                "sourceLocator": {"lexicalPath": str(layout.codex_binary)},
+                "extensions": {"installerSourceDigest": "b" * 64},
+            }
+            with mock.patch.object(
+                self.installer,
+                "_read_private_json",
+                return_value=manifest,
+            ):
+                with self.assertRaises(self.installer.InstallError) as caught:
+                    self.installer._inspect_pending_committed_upgrade_v2(
+                        layout,
+                        previous_receipt=previous_receipt,
+                    )
+
+            self.assertEqual(
+                "UPDATE_RECOVERY_NOT_RECONCILABLE",
+                caught.exception.code,
             )
 
     def test_committed_upgrade_retry_accepts_the_already_replaced_receipt(
@@ -596,11 +673,13 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 "installationId": INSTALLATION_ID,
                 "activationId": PREVIOUS_ID,
                 "sourceDigest": d0,
+                "extensions": {},
             }
             d1_receipt = {
                 "installationId": INSTALLATION_ID,
                 "activationId": ACTIVE_ID,
                 "sourceDigest": d1,
+                "extensions": {},
             }
             final = {
                 "status": "upgraded",
@@ -666,6 +745,7 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 "installationId": INSTALLATION_ID,
                 "activationId": PREVIOUS_ID,
                 "sourceDigest": "0" * 64,
+                "extensions": {},
             }
             inspection = SimpleNamespace(journal_kind="main")
             with (
@@ -778,11 +858,13 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 "installationId": INSTALLATION_ID,
                 "activationId": PREVIOUS_ID,
                 "sourceDigest": d0,
+                "extensions": {"sourceLineage": SOURCE_LINEAGE},
             }
             d1_receipt = {
                 "installationId": INSTALLATION_ID,
                 "activationId": ACTIVE_ID,
                 "sourceDigest": d1,
+                "extensions": {"sourceLineage": SOURCE_LINEAGE},
             }
             manifest = {
                 "schemaVersion": 2,
@@ -791,7 +873,10 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 "previousActivation": {"activationId": PREVIOUS_ID},
                 "lastCommittedOperation": OPERATION_ID,
                 "sourceLocator": {"lexicalPath": str(d1_codex)},
-                "extensions": {"installerSourceDigest": d1},
+                "extensions": {
+                    "installerSourceDigest": d1,
+                    "sourceLineage": SOURCE_LINEAGE,
+                },
             }
             d1_result = {
                 "status": "reconciled",
@@ -884,6 +969,11 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                     "file_digest",
                     return_value="8" * 64,
                 ),
+                mock.patch.object(
+                    self.installer,
+                    "_source_lineage_v2",
+                    return_value=SOURCE_LINEAGE,
+                ),
             ):
                 result = self.installer._upgrade_install(
                     layout,
@@ -914,11 +1004,13 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 "installationId": INSTALLATION_ID,
                 "activationId": PREVIOUS_ID,
                 "sourceDigest": "0" * 64,
+                "extensions": {},
             }
             d1_receipt = {
                 "installationId": INSTALLATION_ID,
                 "activationId": ACTIVE_ID,
                 "sourceDigest": d1,
+                "extensions": {},
             }
             recovered = {
                 "status": "reconciled",
@@ -1040,7 +1132,10 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
             ):
                 result = self.installer._upgrade_install(
                     layout,
-                    previous_receipt={"sourceDigest": "0" * 64},
+                    previous_receipt={
+                        "sourceDigest": "0" * 64,
+                        "extensions": {},
+                    },
                     source_digest="2" * 64,
                     codex_version="0.145.0",
                     extra_environment=None,
@@ -1822,7 +1917,11 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 self.installer,
                 "_build_fresh_uninstall_composition_v2",
                 return_value=composition,
-            ) as build:
+            ) as build, mock.patch.object(
+                self.installer,
+                "_require_current_source_lineage_v2",
+                return_value={},
+            ):
                 result = self.installer._execute_fresh_uninstall_composition_v2(
                     layout,
                     extra_environment={"TEST_BOUNDARY": "closed"},
@@ -1976,6 +2075,11 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                     self.installer,
                     "doctor",
                     return_value=self._ready_diagnosis(),
+                ),
+                mock.patch.object(
+                    self.installer,
+                    "_require_current_source_lineage_v2",
+                    return_value={},
                 ),
             ):
                 first_code, first = self._run_main(
@@ -2268,6 +2372,7 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 "installationId": INSTALLATION_ID,
                 "activationId": PREVIOUS_ID,
                 "sourceDigest": "0" * 64,
+                "extensions": {},
             }
             held = False
 
@@ -2450,6 +2555,7 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 "installationId": INSTALLATION_ID,
                 "activationId": PREVIOUS_ID,
                 "sourceDigest": "a" * 64,
+                "extensions": {},
             }
             pending = {
                 "operationId": OPERATION_ID,
@@ -2549,6 +2655,7 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 "installationId": INSTALLATION_ID,
                 "activationId": PREVIOUS_ID,
                 "sourceDigest": "0" * 64,
+                "extensions": {},
             }
             d1 = "1" * 64
             inspection = SimpleNamespace(
@@ -2713,6 +2820,7 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 "installationId": INSTALLATION_ID,
                 "activationId": ACTIVE_ID,
                 "sourceDigest": "a" * 64,
+                "extensions": {},
             }
             composition = SimpleNamespace(
                 definition=object(),
@@ -2893,6 +3001,7 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 "installationId": INSTALLATION_ID,
                 "activationId": PREVIOUS_ID,
                 "sourceDigest": "a" * 64,
+                "extensions": {},
             }
 
             @contextmanager
@@ -2992,6 +3101,7 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 "installationId": INSTALLATION_ID,
                 "activationId": PREVIOUS_ID,
                 "sourceDigest": "a" * 64,
+                "extensions": {},
             }
 
             @contextmanager
@@ -3090,6 +3200,43 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
 
             self.assertEqual("ROLLBACK_RECOVERY_REQUIRED", caught.exception.code)
 
+    def test_rollback_rejects_stale_source_before_recovery_or_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            layout = self._layout(Path(directory).resolve())
+
+            @contextmanager
+            def lock(_path):
+                yield
+
+            with (
+                mock.patch.object(
+                    self.installer,
+                    "installation_lock",
+                    side_effect=lock,
+                ),
+                mock.patch.object(
+                    self.installer,
+                    "_require_current_source_lineage_v2",
+                    side_effect=self.installer.InstallError(
+                        "SOURCE_DOWNGRADE_REJECTED",
+                        "stale source",
+                    ),
+                ),
+                mock.patch.object(
+                    self.installer,
+                    "inspect_recovery_v2",
+                ) as inspect_recovery,
+            ):
+                with self.assertRaises(self.installer.InstallError) as caught:
+                    self.installer.rollback_installation_v2(
+                        layout,
+                        execute=True,
+                        extra_environment=None,
+                    )
+
+            self.assertEqual("SOURCE_DOWNGRADE_REJECTED", caught.exception.code)
+            inspect_recovery.assert_not_called()
+
     def test_completed_rollback_requires_the_exact_durable_receipt(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             layout = self._layout(Path(directory).resolve())
@@ -3098,9 +3245,17 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
             receipt_path = receipts / f"{OPERATION_ID}.rollback-preparation.json"
             receipt_path.write_text("{}", encoding="utf-8")
             receipt_path.chmod(0o600)
+            committed_lineage = {
+                "schemaVersion": 1,
+                "generation": 4,
+                "implementationDigest": "b" * 64,
+            }
             manifest = {
                 "lastCommittedOperation": OPERATION_ID,
-                "extensions": {"installerSourceDigest": "a" * 64},
+                "extensions": {
+                    "installerSourceDigest": "a" * 64,
+                    "sourceLineage": committed_lineage,
+                },
             }
             projection = object()
             previous_operation_id = "op2_" + "6" * 32
@@ -3117,6 +3272,7 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                 "installationId": INSTALLATION_ID,
                 "activationId": PREVIOUS_ID,
                 "sourceDigest": "a" * 64,
+                "extensions": {"sourceLineage": committed_lineage},
             }
             receipt = SimpleNamespace(
                 installation_id=INSTALLATION_ID,
@@ -3160,6 +3316,7 @@ class InstallerEntrypointV2Tests(unittest.TestCase):
                     "installationId": INSTALLATION_ID,
                     "activationId": PREVIOUS_ID,
                 },
+                extensions={"sourceLineage": committed_lineage},
             )
 
             with (

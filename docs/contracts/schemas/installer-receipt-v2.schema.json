@@ -41,7 +41,19 @@
     },
     "marketplaceName": {"const": "codex-settings-adaptive"},
     "pluginId": {"const": "codex-smart-subagents@codex-settings-adaptive"},
-    "extensions": {"type": "object", "maxProperties": 0}
+    "extensions": {
+      "oneOf": [
+        {"type": "object", "maxProperties": 0},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sourceLineage"],
+          "properties": {
+            "sourceLineage": {"$ref": "#/$defs/sourceLineage"}
+          }
+        }
+      ]
+    }
   },
   "$defs": {
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
@@ -58,6 +70,16 @@
       "properties": {
         "path": {"$ref": "#/$defs/absolutePath"},
         "target": {"$ref": "#/$defs/absolutePath"}
+      }
+    },
+    "sourceLineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "generation", "implementationDigest"],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "generation": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "implementationDigest": {"$ref": "#/$defs/sha256"}
       }
     }
   }

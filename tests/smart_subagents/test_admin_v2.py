@@ -246,7 +246,13 @@ class AdminV2Tests(unittest.TestCase):
             ],
             "marketplaceName": "codex-settings-adaptive",
             "pluginId": "codex-smart-subagents@codex-settings-adaptive",
-            "extensions": {},
+            "extensions": {
+                "sourceLineage": {
+                    "schemaVersion": 1,
+                    "generation": 2,
+                    "implementationDigest": "e" * 64,
+                }
+            },
         }
         receipt.write_text(
             json.dumps(value, sort_keys=True, separators=(",", ":")),

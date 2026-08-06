@@ -27,8 +27,8 @@ Codex используются только как источник наблюд
 | [`operation-step-v2`](operation-step-v2.schema.json) | Семьдесят два точных вида шага, их носители, действия и состояния до/после |
 | [`operation-journal-v2`](operation-journal-v2.schema.json) | Основной журнал установки, перехода, восстановления и удаления |
 | [`lifecycle-command-result-v2`](lifecycle-command-result-v2.schema.json) | Закрытый пользовательский результат чтения, установки, отката, восстановления, уборки и удаления |
-| [`installer-receipt-v2`](installer-receipt-v2.schema.json) | Закрытая квитанция установщика с раздельными лексическим входом рынка и канонической регистрацией неизменяемой активации |
-| [`manifest-document-v2`](manifest-document-v2.schema.json) | Полный канонический манифест, замороженный в commit-квитанции для точного восстановления предыдущей версии |
+| [`installer-receipt-v2`](installer-receipt-v2.schema.json) | Закрытая квитанция установщика с раздельными лексическим входом рынка, канонической регистрацией неизменяемой активации и поколением исходной реализации |
+| [`manifest-document-v2`](manifest-document-v2.schema.json) | Полный канонический манифест, замороженный в commit-квитанции вместе с поколением исходной реализации для точного восстановления предыдущей версии |
 | [`activation-commit-receipt-v2`](activation-commit-receipt-v2.schema.json) | Положительное доказательство открытия умного шлюза |
 | [`operation-abort-receipt-v2`](operation-abort-receipt-v2.schema.json) | Доказательство полного возврата незавершённой операции |
 | [`cleanup-journal-v2`](cleanup-journal-v2.schema.json) | Отдельная уборка только неиспользуемых принадлежащих объектов |

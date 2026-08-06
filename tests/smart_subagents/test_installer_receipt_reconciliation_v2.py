@@ -108,6 +108,65 @@ class InstallerReceiptReconciliationV2Tests(unittest.TestCase):
         self.assertEqual("ALREADY_RECONCILED", result.status)
         self.assertEqual([mock.call(self.root), mock.call(self.root)], sync.call_args_list)
 
+    def test_reconciliation_uses_the_committed_lineage_not_the_previous_one(
+        self,
+    ) -> None:
+        previous_lineage = {
+            "schemaVersion": 1,
+            "generation": 1,
+            "implementationDigest": "1" * 64,
+        }
+        committed_lineage = {
+            "schemaVersion": 1,
+            "generation": 2,
+            "implementationDigest": "2" * 64,
+        }
+        self.old_receipt["extensions"] = {
+            "sourceLineage": previous_lineage,
+        }
+        self.expected_receipt["extensions"] = {
+            "sourceLineage": committed_lineage,
+        }
+        self.manifest["extensions"]["sourceLineage"] = committed_lineage
+        self._write(self.receipt_path, self.old_receipt)
+        self._write(self.manifest_path, self.manifest)
+        self._write(self.commit_path, self._commit_receipt())
+
+        result = reconcile_installer_receipt_v2(
+            receipt_path=self.receipt_path,
+            manifest_path=self.manifest_path,
+            commit_receipt_path=self.commit_path,
+            operation_journal_path=self.journal_path,
+            expected_receipt=self.expected_receipt,
+            verify_external_state=lambda: None,
+        )
+
+        self.assertEqual("RECONCILED", result.status)
+        self.assertEqual(self.expected_receipt, self._read(self.receipt_path))
+
+    def test_reconciliation_rejects_erasing_a_protected_lineage(self) -> None:
+        protected = {
+            "schemaVersion": 1,
+            "generation": 2,
+            "implementationDigest": "2" * 64,
+        }
+        self.old_receipt["extensions"] = {"sourceLineage": protected}
+        self._write(self.receipt_path, self.old_receipt)
+        before = self.receipt_path.read_bytes()
+
+        with self.assertRaises(InstallerReceiptReconciliationV2Error) as caught:
+            reconcile_installer_receipt_v2(
+                receipt_path=self.receipt_path,
+                manifest_path=self.manifest_path,
+                commit_receipt_path=self.commit_path,
+                operation_journal_path=self.journal_path,
+                expected_receipt=self.expected_receipt,
+                verify_external_state=lambda: None,
+            )
+
+        self.assertEqual("INSTALLER_RECEIPT_CURRENT_MISMATCH", caught.exception.code)
+        self.assertEqual(before, self.receipt_path.read_bytes())
+
     def test_retry_completes_after_replace_succeeded_but_parent_sync_failed(self) -> None:
         def fail_after_replace(_path: Path) -> None:
             raise OSError("simulated parent sync failure")

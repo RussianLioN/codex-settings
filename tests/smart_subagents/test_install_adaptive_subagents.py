@@ -743,6 +743,7 @@ class InstallerV2ContractTests(_InstallerBase):
             self.layout.marketplace_source,
             self.layout.codex_marketplace_source,
             self.layout.installer_receipt_schema_source,
+            self.layout.source_lineage_source,
             self.layout.catalog_source,
             self.layout.controller_entrypoint,
             self.layout.plugin_source / ".codex-plugin" / "plugin.json",
@@ -1242,6 +1243,67 @@ class InstallerV2ContractTests(_InstallerBase):
 
         self.assertEqual("PYTHON_RUNTIME_INVALID", captured.exception.code)
 
+    def test_source_lineage_ignores_the_materialized_python_path(self) -> None:
+        source_root = self.root / "materialized-source"
+        source_layout = dataclasses.replace(
+            self.layout,
+            source_root=source_root,
+        )
+        for relative, source in self.installer._installer_source_files_v2(
+            self.layout
+        ).items():
+            destination = source_root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+
+        portable = b"#!/usr/bin/env python3\n"
+        bound = b"#!/opt/another-python/bin/python3 -B\n"
+        for entrypoint in (source_layout.plugin_source / "bin").iterdir():
+            if not entrypoint.stat().st_mode & stat.S_IXUSR:
+                continue
+            payload = entrypoint.read_bytes()
+            self.assertTrue(payload.startswith(portable), entrypoint.name)
+            entrypoint.write_bytes(bound + payload[len(portable) :])
+            entrypoint.chmod(0o500)
+
+        observed = self.installer._source_lineage_v2(source_layout)
+
+        self.assertEqual(
+            self.installer._source_lineage_v2(self.layout),
+            observed,
+        )
+
+    def test_source_lineage_rejects_a_numeric_implementation_digest(self) -> None:
+        source_root = self.root / "numeric-lineage-source"
+        lineage_path = (
+            source_root
+            / "plugins"
+            / "codex-smart-subagents"
+            / "config"
+            / "source-lineage-v2.json"
+        )
+        lineage_path.parent.mkdir(parents=True)
+        lineage_path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "kind": self.installer.SOURCE_LINEAGE_KIND,
+                    "generation": 1,
+                    "implementationDigest": int("1" * 64),
+                }
+            ),
+            encoding="utf-8",
+        )
+        source_layout = dataclasses.replace(
+            self.layout,
+            source_root=source_root,
+        )
+
+        with self.assertRaises(self.installer.InstallError) as captured:
+            self.installer._source_lineage_v2(source_layout)
+
+        self.assertEqual("SOURCE_LINEAGE_INVALID", captured.exception.code)
+
     def test_first_activation_reproduces_the_exact_source_digest(self) -> None:
         self.publish_fake_activation()
         identity = self.installer._load_lifecycle_identity(
@@ -1517,6 +1579,28 @@ class InstallerV2ApplyTests(_InstallerBase):
             installer.parent.mkdir(mode=0o700)
             shutil.copy2(INSTALLER_PATH, installer)
 
+        def refresh_source_lineage(source_root: Path, *, generation: int) -> None:
+            source_layout = dataclasses.replace(layout, source_root=source_root)
+            lineage_path = source_layout.source_lineage_source
+            lineage_path.write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "kind": self.installer.SOURCE_LINEAGE_KIND,
+                        "generation": generation,
+                        "implementationDigest": (
+                            self.installer._source_implementation_digest_v2(
+                                source_layout
+                            )
+                        ),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
         def command(source_root: Path) -> list[str]:
             return [
                 sys.executable,
@@ -1568,6 +1652,8 @@ class InstallerV2ApplyTests(_InstallerBase):
         copy_source(fixture_source)
         old_readme = old_source / "plugins" / "codex-smart-subagents" / "README.md"
         old_readme.write_bytes(old_readme.read_bytes() + b"\nold fixture source\n")
+        refresh_source_lineage(old_source, generation=1)
+        refresh_source_lineage(fixture_source, generation=2)
 
         initial = subprocess.run(
             command(old_source),
@@ -2216,7 +2302,7 @@ class InstallerV2RepeatTests(_InstallerBase):
         ):
             result = self.installer._upgrade_install(
                 self.layout,
-                previous_receipt={},
+                previous_receipt={"extensions": {}},
                 source_digest="a" * 64,
                 codex_version="0.146.0",
                 extra_environment=None,
@@ -2278,7 +2364,7 @@ class InstallerV2RepeatTests(_InstallerBase):
         ):
             self.installer._upgrade_install(
                 self.layout,
-                previous_receipt={},
+                previous_receipt={"extensions": {}},
                 source_digest="a" * 64,
                 codex_version="0.144.4",
                 extra_environment=None,
@@ -2471,6 +2557,46 @@ class InstallerV2RepeatTests(_InstallerBase):
         self.assertRegex(lineage["implementationDigest"], r"^[0-9a-f]{64}$")
         # Установщик до защиты от отката принимал только пустые extensions.
         self.assertNotEqual({}, receipt["extensions"])
+
+    def test_all_receipt_consumers_reject_a_numeric_lineage_digest(self) -> None:
+        plugin_src = ROOT / "plugins" / "codex-smart-subagents" / "src"
+        if str(plugin_src) not in sys.path:
+            sys.path.insert(0, str(plugin_src))
+        from codex_smart_subagents import (  # noqa: PLC0415
+            activation_gateway_v2,
+            activation_transition_v2,
+            admin_state_v2,
+            installer_maintenance_v2,
+            installer_receipt_reconciliation_v2,
+            installer_rollback_composition_v2,
+        )
+
+        lineage = {
+            "schemaVersion": 1,
+            "generation": 1,
+            "implementationDigest": int("1" * 64),
+        }
+        extensions = {"sourceLineage": lineage}
+
+        self.assertFalse(
+            self.installer._installer_receipt_extensions_valid_v2(extensions)
+        )
+        for validator in (
+            activation_gateway_v2._installer_receipt_extensions_valid_v2,
+            admin_state_v2._installer_receipt_extensions_valid_v2,
+            installer_maintenance_v2._installer_receipt_extensions_valid_v2,
+            installer_rollback_composition_v2._installer_receipt_extensions_valid_v2,
+        ):
+            with self.subTest(validator=validator.__module__):
+                self.assertFalse(validator(extensions))
+        self.assertFalse(
+            activation_transition_v2._installer_source_lineage_shape_valid_v2(
+                lineage
+            )
+        )
+        self.assertFalse(
+            installer_receipt_reconciliation_v2._source_lineage_valid(lineage)
+        )
 
     def test_repeat_rejects_older_source_generation_before_upgrade(self) -> None:
         self.successful_first_apply()
@@ -2867,6 +2993,79 @@ class InstallerV2DoctorTests(_InstallerBase):
 
         self.assertEqual("INSTALLATION_NOT_FULL_READY", captured.exception.code)
 
+    def test_hook_probe_proves_the_cache_path_loaded_by_codex(self) -> None:
+        observed = self.installer._loaded_hook_cache_source_v2(self.layout)
+
+        self.assertEqual(
+            self.layout.codex_home
+            / "plugins"
+            / "cache"
+            / self.installer.MARKETPLACE_NAME
+            / self.installer.PLUGIN_NAME
+            / "0.2.0"
+            / "hooks"
+            / "hooks.json",
+            observed,
+        )
+
+    def test_hook_probe_rejects_reported_loading_errors(self) -> None:
+        (self.codex_home / "fake-hook-state.json").write_text(
+            json.dumps({"errors": ["synthetic hook load error"]}),
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(self.installer.InstallError) as captured:
+            self.installer._loaded_hook_cache_source_v2(self.layout)
+
+        self.assertEqual("HOOK_CACHE_REPORTED_ERRORS", captured.exception.code)
+
+    def test_hook_probe_rejects_reported_loading_warnings(self) -> None:
+        (self.codex_home / "fake-hook-state.json").write_text(
+            json.dumps({"warnings": ["synthetic hook load warning"]}),
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(self.installer.InstallError) as captured:
+            self.installer._loaded_hook_cache_source_v2(self.layout)
+
+        self.assertEqual("HOOK_CACHE_REPORTED_ERRORS", captured.exception.code)
+
+    def test_doctor_rejects_receipt_lineage_drift_from_committed_manifest(
+        self,
+    ) -> None:
+        receipt_path = self.layout.installer_receipt_path
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        committed_lineage = copy.deepcopy(receipt["extensions"]["sourceLineage"])
+        receipt["extensions"] = {}
+        receipt_path.write_text(
+            json.dumps(receipt, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        receipt_path.chmod(0o600)
+        self.assertEqual(1, committed_lineage["schemaVersion"])
+
+        with (
+            mock.patch.object(
+                self.installer,
+                "_resolve_activation",
+                return_value=self.ready_decision(),
+            ),
+            mock.patch.object(
+                self.installer,
+                "_probe_command_socket",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.installer,
+                "_registration_problems",
+                return_value=[],
+            ),
+        ):
+            result = self.installer.doctor(self.layout)
+
+        self.assertFalse(result["ok"])
+        self.assertIn("INSTALLER_RECEIPT_MISMATCH", result["problems"])
+
     def test_doctor_checks_the_committed_codex_path_not_the_next_desired_path(
         self,
     ) -> None:
@@ -2893,6 +3092,68 @@ class InstallerV2DoctorTests(_InstallerBase):
 
         self.assertTrue(result["ok"])
         self.assertNotIn("INSTALLER_RECEIPT_MISMATCH", result["problems"])
+
+    def test_doctor_rejects_plugin_cache_drift_from_active_activation(self) -> None:
+        cache_root = (
+            self.layout.codex_home
+            / "plugins"
+            / "cache"
+            / self.installer.MARKETPLACE_NAME
+            / self.installer.PLUGIN_NAME
+            / "0.2.0"
+        )
+        self.assertTrue(cache_root.is_dir())
+        hook = cache_root / "hooks" / "session_start.py"
+        hook.chmod(0o600)
+        hook.write_bytes(hook.read_bytes() + b"\n# stale cache\n")
+
+        with (
+            mock.patch.object(
+                self.installer,
+                "_resolve_activation",
+                return_value=self.ready_decision(),
+            ),
+            mock.patch.object(
+                self.installer,
+                "_probe_command_socket",
+                return_value=True,
+            ),
+        ):
+            result = self.installer.doctor(self.layout)
+
+        self.assertFalse(result["ok"])
+        self.assertIn("PLUGIN_CACHE_DRIFT", result["problems"])
+
+    def test_doctor_rejects_plugin_cache_executable_mode_drift(self) -> None:
+        cache_hook = (
+            self.layout.codex_home
+            / "plugins"
+            / "cache"
+            / self.installer.MARKETPLACE_NAME
+            / self.installer.PLUGIN_NAME
+            / "0.2.0"
+            / "bin"
+            / "codex-smart-subagents-hook"
+        )
+        self.assertTrue(os.access(cache_hook, os.X_OK))
+        cache_hook.chmod(0o600)
+
+        with (
+            mock.patch.object(
+                self.installer,
+                "_resolve_activation",
+                return_value=self.ready_decision(),
+            ),
+            mock.patch.object(
+                self.installer,
+                "_probe_command_socket",
+                return_value=True,
+            ),
+        ):
+            result = self.installer.doctor(self.layout)
+
+        self.assertFalse(result["ok"])
+        self.assertIn("PLUGIN_CACHE_DRIFT", result["problems"])
 
 
 if __name__ == "__main__":

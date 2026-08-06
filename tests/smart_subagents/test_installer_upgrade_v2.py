@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import os
 import shutil
 import sqlite3
@@ -968,6 +969,19 @@ class InstallerUpgradePreparationV2Tests(unittest.TestCase):
     ) -> None:
         proof = self.fixture.capture()
         source_digest = self._source_digest()
+        source_lineage_document = json.loads(
+            (
+                ROOT
+                / "plugins"
+                / "codex-smart-subagents"
+                / "config"
+                / "source-lineage-v2.json"
+            ).read_text(encoding="utf-8")
+        )
+        source_lineage = {
+            key: source_lineage_document[key]
+            for key in ("schemaVersion", "generation", "implementationDigest")
+        }
 
         preparation = build_upgrade_preparation_v2(
             proof=proof,
@@ -986,6 +1000,12 @@ class InstallerUpgradePreparationV2Tests(unittest.TestCase):
                 "installerSourceDigest"
             ],
         )
+        self.assertEqual(
+            source_lineage,
+            preparation.prepared_manifest_plan.manifest_document["extensions"][
+                "sourceLineage"
+            ],
+        )
         receipt = execute_and_verify_upgrade_preparation_v2(
             proof=proof,
             preparation=preparation,
@@ -998,6 +1018,10 @@ class InstallerUpgradePreparationV2Tests(unittest.TestCase):
         self.assertEqual(
             source_digest,
             prepared.manifest_document["extensions"]["installerSourceDigest"],
+        )
+        self.assertEqual(
+            source_lineage,
+            prepared.manifest_document["extensions"]["sourceLineage"],
         )
 
     def test_capsule_reconstructs_exact_installer_source_digest(self) -> None:

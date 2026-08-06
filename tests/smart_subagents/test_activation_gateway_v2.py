@@ -1483,7 +1483,13 @@ class _ActivationFixture:
             "links": link_documents,
             "marketplaceName": "codex-settings-adaptive",
             "pluginId": "codex-smart-subagents@codex-settings-adaptive",
-            "extensions": {},
+            "extensions": {
+                "sourceLineage": {
+                    "schemaVersion": 1,
+                    "generation": 2,
+                    "implementationDigest": "e" * 64,
+                }
+            },
         }
         _write_json(self.installer_receipt_path, self.installer_receipt)
 

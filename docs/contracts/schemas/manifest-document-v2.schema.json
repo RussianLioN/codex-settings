@@ -23,10 +23,27 @@
     "originalBackup": {"$ref": "#/$defs/originalBackup"},
     "lastCommittedOperation": {"$ref": "#/$defs/operationId"},
     "databaseSchemaVersion": {"const": 2},
-    "extensions": {"type": "object", "additionalProperties": false, "properties": {"installerSourceDigest": {"$ref": "#/$defs/sha256"}}}
+    "extensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "installerSourceDigest": {"$ref": "#/$defs/sha256"},
+        "sourceLineage": {"$ref": "#/$defs/sourceLineage"}
+      }
+    }
   },
   "$defs": {
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sourceLineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "generation", "implementationDigest"],
+      "properties": {
+        "schemaVersion": {"const": 1},
+        "generation": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "implementationDigest": {"$ref": "#/$defs/sha256"}
+      }
+    },
     "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"},
     "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"},
     "activationId": {"type": "string", "pattern": "^act2_[0-9a-f]{64}$"},

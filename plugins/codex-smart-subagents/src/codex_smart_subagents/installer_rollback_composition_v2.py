@@ -213,7 +213,9 @@ def read_rollback_external_artifacts_v2(
         or receipt.get("marketplacePath") != str(evidence.marketplace_link)
         or receipt.get("marketplaceName") != "codex-settings-adaptive"
         or receipt.get("pluginId") != "codex-smart-subagents@codex-settings-adaptive"
-        or receipt.get("extensions") != {}
+        or not _installer_receipt_extensions_valid_v2(
+            receipt.get("extensions")
+        )
         or type(receipt.get("sourceDigest")) is not str
         or _SHA256.fullmatch(str(receipt.get("sourceDigest"))) is None
         or type(links) is not list
@@ -304,6 +306,24 @@ def read_rollback_external_artifacts_v2(
         current_registered_marketplace=current,
         previous_registered_marketplace=previous,
         launchers=tuple(result),
+    )
+
+
+def _installer_receipt_extensions_valid_v2(value: object) -> bool:
+    if value == {}:
+        return True
+    if type(value) is not dict or set(value) != {"sourceLineage"}:
+        return False
+    lineage = value.get("sourceLineage")
+    return bool(
+        type(lineage) is dict
+        and set(lineage)
+        == {"schemaVersion", "generation", "implementationDigest"}
+        and lineage.get("schemaVersion") == 1
+        and type(lineage.get("generation")) is int
+        and 1 <= lineage["generation"] <= 2**31 - 1
+        and type(lineage.get("implementationDigest")) is str
+        and _SHA256.fullmatch(lineage["implementationDigest"]) is not None
     )
 
 

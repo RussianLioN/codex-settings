@@ -124,7 +124,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
                     document.lower(),
                 )
 
-    def test_root_exposes_all_seven_v2_flow_diagrams(self) -> None:
+    def test_root_exposes_all_eight_v2_flow_diagrams(self) -> None:
         root = (REPO / "README.md").read_text(encoding="utf-8")
         flow_path = REPO / "docs/analysis/adaptive-subagents-v2-flow.md"
         flow = self.validator.parse_markdown(
@@ -152,12 +152,13 @@ class DocsNavigationValidatorTests(unittest.TestCase):
         mermaid = tuple(
             fence for fence in flow.fences if fence.language == "mermaid"
         )
-        self.assertEqual(7, len(mermaid))
+        self.assertEqual(8, len(mermaid))
         self.assertEqual(
             [
                 "flowchart TD",
                 "flowchart TD",
                 "sequenceDiagram",
+                "flowchart TD",
                 "flowchart TD",
                 "flowchart TD",
                 "flowchart TD",
@@ -255,7 +256,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
         mermaid = tuple(
             fence for fence in flow.fences if fence.language == "mermaid"
         )
-        self.assertEqual(7, len(mermaid))
+        self.assertEqual(8, len(mermaid))
         first_diagram = mermaid[0].content
         for branch in (
             "model_reasoning_effort=ultra",

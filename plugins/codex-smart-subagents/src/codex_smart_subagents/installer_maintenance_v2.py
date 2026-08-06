@@ -511,7 +511,9 @@ def _validate_installer_receipt_for_inventory(
         or receipt.get("marketplacePath") != str(layout.marketplace_link)
         or receipt.get("marketplaceName") != "codex-settings-adaptive"
         or receipt.get("pluginId") != "codex-smart-subagents@codex-settings-adaptive"
-        or receipt.get("extensions") != {}
+        or not _installer_receipt_extensions_valid_v2(
+            receipt.get("extensions")
+        )
     ):
         _issue(
             issues,
@@ -533,6 +535,22 @@ def _validate_installer_receipt_for_inventory(
     _validate_launcher_links(receipt, layout=layout, issues=issues)
 
 
+def _installer_receipt_extensions_valid_v2(value: object) -> bool:
+    if value == {}:
+        return True
+    if type(value) is not dict or set(value) != {"sourceLineage"}:
+        return False
+    lineage = value.get("sourceLineage")
+    return bool(
+        type(lineage) is dict
+        and set(lineage)
+        == {"schemaVersion", "generation", "implementationDigest"}
+        and lineage.get("schemaVersion") == 1
+        and type(lineage.get("generation")) is int
+        and 1 <= lineage["generation"] <= 2**31 - 1
+        and type(lineage.get("implementationDigest")) is str
+        and _SHA256.fullmatch(lineage["implementationDigest"]) is not None
+    )
 def _validate_marketplace_link(
     receipt: Mapping[str, Any],
     *,
@@ -1002,6 +1020,7 @@ def cleanup_inactive_activations_v2(
     now: Callable[[], str],
     id_factory: Callable[[str], str] | None = None,
     failure_injector: Callable[[str], None] | None = None,
+    pre_mutation_check: Callable[[], None] | None = None,
 ) -> MaintenanceResultV2:
     """Удалить только доказанные неактивные поколения."""
 
@@ -1019,6 +1038,8 @@ def cleanup_inactive_activations_v2(
             )
         with _installation_lock(layout.lock_path):
             _checkpoint_operation_deadline_if_scoped_v2()
+            if pre_mutation_check is not None:
+                pre_mutation_check()
             return _execute_cleanup_journal(
                 layout, journal, now=now, inject=inject
             )
@@ -1050,6 +1071,8 @@ def cleanup_inactive_activations_v2(
 
     with _installation_lock(layout.lock_path):
         _checkpoint_operation_deadline_if_scoped_v2()
+        if pre_mutation_check is not None:
+            pre_mutation_check()
         if _path_exists(layout.uninstall_journal_path):
             raise InstallerMaintenanceV2Error(
                 "OPERATION_IN_PROGRESS", "незавершённое удаление блокирует cleanup"
@@ -1875,6 +1898,7 @@ def uninstall_retain_data_v2(
     now: Callable[[], str],
     id_factory: Callable[[str], str] | None = None,
     failure_injector: Callable[[str], None] | None = None,
+    pre_mutation_check: Callable[[], None] | None = None,
 ) -> MaintenanceResultV2:
     """Удалить доказанную установку, сохранив рабочие данные и recovery-вход."""
 
@@ -1896,6 +1920,8 @@ def uninstall_retain_data_v2(
                 layout, journal, status="planned"
             )
         with _installation_lock(layout.lock_path):
+            if pre_mutation_check is not None:
+                pre_mutation_check()
             journal = _read_uninstall_journal(layout)
             return _execute_uninstall_journal(
                 layout,
@@ -1933,6 +1959,8 @@ def uninstall_retain_data_v2(
             retained_paths=inventory.retained_paths,
         )
     with _installation_lock(layout.lock_path):
+        if pre_mutation_check is not None:
+            pre_mutation_check()
         if _path_exists(layout.cleanup_journal_path):
             raise InstallerMaintenanceV2Error(
                 "OPERATION_IN_PROGRESS", "незавершённый cleanup блокирует uninstall"

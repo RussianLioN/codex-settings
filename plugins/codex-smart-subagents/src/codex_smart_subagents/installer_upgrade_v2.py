@@ -62,6 +62,7 @@ from .activation_transition_v2 import (
     PreparedManifestCommitV2,
     PreparedManifestPlanV2,
     _build_prepared_manifest_plan_from_verified_proof_v2,
+    _validate_installer_source_lineage_v2,
     build_prepared_manifest_plan_v2,
     materialize_prepared_manifest_plan_v2,
     prepared_manifest_commit_from_receipt_v2,
@@ -88,6 +89,55 @@ from .schema_projection import APPLICATION_ID, read_schema_artifact
 
 
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
+_SOURCE_LINEAGE_KIND = "codex-smart-source-lineage/v2"
+
+
+def _installer_source_lineage_from_plugin_root_v2(
+    plugin_root: Path,
+    *,
+    required: bool,
+) -> dict[str, Any] | None:
+    path = plugin_root / "config" / "source-lineage-v2.json"
+    if not os.path.lexists(path):
+        if required:
+            raise ValueError("candidate source lineage is missing")
+        return None
+    document = _read_json(path)
+    if (
+        set(document)
+        != {"schemaVersion", "kind", "generation", "implementationDigest"}
+        or document.get("kind") != _SOURCE_LINEAGE_KIND
+    ):
+        raise ValueError("candidate source lineage has an invalid shape")
+    return _validate_installer_source_lineage_v2(
+        {
+            key: document[key]
+            for key in ("schemaVersion", "generation", "implementationDigest")
+        }
+    )
+
+
+def _installer_source_lineage_from_source_root_v2(
+    source_root: Path,
+) -> dict[str, Any]:
+    value = _installer_source_lineage_from_plugin_root_v2(
+        source_root / "plugins" / _PLUGIN_NAME,
+        required=True,
+    )
+    assert value is not None
+    return value
+
+
+def _installer_source_lineage_from_activation_v2(
+    definition: ActivationPreparationDefinitionV2,
+) -> dict[str, Any] | None:
+    return _installer_source_lineage_from_plugin_root_v2(
+        definition.activation_intent.activation_dir
+        / "marketplace"
+        / "plugins"
+        / _PLUGIN_NAME,
+        required=False,
+    )
 
 
 @dataclass(frozen=True)
@@ -577,6 +627,9 @@ class PersistedUpgradePreparationRecoveryV2(ActivationPreparationExecutorV2):
                     self.definition.activation_tree_logical.content_sha256
                 ),
                 installer_source_digest=source_digest,
+                installer_source_lineage=(
+                    _installer_source_lineage_from_activation_v2(self.definition)
+                ),
             )
             if self.definition.prepared_manifest_logical != _prepared_manifest_logical(
                 plan
@@ -670,6 +723,9 @@ def _recover_upgrade_preparation_from_main_journal_v2(
             installer_source_digest=(
                 _installer_source_digest_from_activation_v2(persisted)
             ),
+            installer_source_lineage=(
+                _installer_source_lineage_from_activation_v2(persisted)
+            ),
         )
     if persisted.prepared_manifest_logical != _prepared_manifest_logical(plan):
         raise ValueError("persisted prepared manifest differs from receipt")
@@ -726,6 +782,11 @@ def build_upgrade_preparation_v2(
     layout = proof.layout
     state_home = normalize_state_home_v2(Path(proof.state_home))
     source_root = source_root.expanduser().resolve()
+    source_lineage = (
+        _installer_source_lineage_from_source_root_v2(source_root)
+        if source_digest is not None
+        else None
+    )
     codex_binary = codex_binary.expanduser().absolute()
     control_path = (
         layout.manifest_root
@@ -764,6 +825,7 @@ def build_upgrade_preparation_v2(
             staged=staged,
             activation_tree_sha256=(persisted.activation_tree_logical.content_sha256),
             installer_source_digest=source_digest,
+            installer_source_lineage=source_lineage,
         )
         prepared_logical = _prepared_manifest_logical(prepared_manifest_plan)
         if (
@@ -976,6 +1038,7 @@ def build_upgrade_preparation_v2(
         staged=staged,
         activation_tree_sha256=activation_tree_sha256,
         installer_source_digest=source_digest,
+        installer_source_lineage=source_lineage,
     )
     desired_seed = _empty_bundle()
     definition = ActivationPreparationDefinitionV2(
@@ -1864,6 +1927,7 @@ def installer_source_digest_from_materialized_activation_v2(
         files[relative] = (path, False)
 
     digest = hashlib.sha256()
+    digest.update(b"codex-smart/source-digest/v2\0")
     bound_python_runtime: _BoundPythonRuntimeV2 | None = None
     for relative, (path, restore_portable_shebang) in sorted(
         files.items(), key=lambda item: item[0].encode("utf-8")
