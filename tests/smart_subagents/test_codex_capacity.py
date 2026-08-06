@@ -795,11 +795,12 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertEqual("wide_wave_manifest_untrusted", result["wide_wave_trust_reason"])
         self.assertIn("expected_wave_size_mismatch", result["wide_wave_validator_reasons"])
 
-    def test_prepare_wave_blocks_trust_registry_and_validator_overrides_outside_test_mode(self) -> None:
+    def test_prepare_wave_blocks_trust_registry_and_validator_overrides_outside_capacity_test_mode(self) -> None:
         snapshot = self.write_observer_snapshot()
         observer_state_dir = self.root / "dynamic-observer"
         self.write_dynamic_green_observer_state(observer_state_dir)
         skill, registry, manifest = self.write_trusted_wide_wave_inputs(wave_size=8)
+        env = dict(self.env, TEST_MODE="1")
 
         result = self.read_cli_json(
             "prepare-wave",
@@ -819,6 +820,7 @@ class CodexCapacityTests(unittest.TestCase):
             str(registry),
             "--wide-wave-manifest-validator",
             str(self.root / "fake-validator.py"),
+            env=env,
         )
 
         self.assertEqual("BLOCK", result["decision"])
