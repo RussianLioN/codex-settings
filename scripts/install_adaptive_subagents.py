@@ -3457,8 +3457,12 @@ def _source_digest(layout: InstallLayout) -> str:
     ):
         files[path.relative_to(layout.source_root).as_posix()] = path
     interpreter = _bound_python_runtime_v2()
-    portable_shebang = b"#!/usr/bin/env python3\n"
-    bound_shebang = f"#!{interpreter} -B\n".encode("utf-8")
+    bound_shebangs = {
+        b"#!/usr/bin/env python3\n": f"#!{interpreter} -B\n".encode("utf-8"),
+        b"#!/usr/bin/env -S python3 -S\n": f"#!{interpreter} -S -B\n".encode(
+            "utf-8"
+        ),
+    }
     digest = hashlib.sha256()
     for relative, path in sorted(
         files.items(), key=lambda item: item[0].encode("utf-8")
@@ -3475,14 +3479,20 @@ def _source_digest(layout: InstallLayout) -> str:
             and path.parent == layout.plugin_source / "bin"
         ):
             payload = path.read_bytes()
-            if payload.startswith(bound_shebang):
-                payload = portable_shebang + payload[len(bound_shebang) :]
-            elif not payload.startswith(portable_shebang):
+            normalized_payload = None
+            for portable_shebang, bound_shebang in bound_shebangs.items():
+                if payload.startswith(bound_shebang):
+                    normalized_payload = portable_shebang + payload[len(bound_shebang) :]
+                    break
+                if payload.startswith(portable_shebang):
+                    normalized_payload = payload
+                    break
+            if normalized_payload is None:
                 raise InstallError(
                     "PYTHON_ENTRYPOINT_INVALID",
                     f"неизвестная исполняемая точка входа: {path.name}",
                 )
-            payload_sha256 = hashlib.sha256(payload).hexdigest()
+            payload_sha256 = hashlib.sha256(normalized_payload).hexdigest()
         digest.update(bytes.fromhex(payload_sha256))
     digest.update(b"\0codex-binary-v1\0")
     digest.update(str(layout.codex_binary).encode("utf-8"))
@@ -3512,7 +3522,7 @@ def _bound_python_runtime_v2() -> Path:
             character in str(interpreter)
             for character in (" ", "\t", "\n", "\r")
         )
-        or len(f"#!{interpreter} -B\n".encode("utf-8")) > 120
+        or len(f"#!{interpreter} -S -B\n".encode("utf-8")) > 120
     ):
         raise InstallError(
             "PYTHON_RUNTIME_INVALID",

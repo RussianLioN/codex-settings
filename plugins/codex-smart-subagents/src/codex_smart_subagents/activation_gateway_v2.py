@@ -3013,9 +3013,11 @@ def refresh_activation_journal_absence_v2(
     value: Mapping[str, object],
     *,
     expected_journal: Path,
+    deadline: float | None = None,
 ) -> dict[str, object]:
     """Повторно проверяет доказанное отсутствие главного журнала установки."""
 
+    del deadline
     return _refresh_absence_proof(
         dict(value),
         expected_journal=expected_journal,
@@ -3028,6 +3030,7 @@ def require_pinned_controller_health_v2(
     state_home: Path,
     activation_id: str,
     controller_probe=None,
+    deadline: float | None = None,
 ) -> None:
     """Быстро подтверждает живой принимающий контроллер заданной активации.
 
@@ -3037,6 +3040,7 @@ def require_pinned_controller_health_v2(
     чтобы короткий обработчик запроса не хешировал весь снимок Codex повторно.
     """
 
+    del deadline
     code = "PINNED_CONTROLLER_INVALID"
     codex_root = Path(codex_home).expanduser().absolute()
     state_root = Path(state_home).expanduser().absolute()

@@ -10,6 +10,7 @@ import re
 import secrets
 import sqlite3
 import stat
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -68,6 +69,30 @@ _ATTACHMENT_STATES = frozenset(
         "ACKNOWLEDGED",
     }
 )
+
+
+def _deadline_limited_timeout(
+    deadline: float | None,
+    default_timeout_seconds: float,
+) -> float:
+    if deadline is None:
+        return default_timeout_seconds
+    if type(deadline) not in {int, float}:
+        raise ResumeSessionV2Error(
+            "RESUME_DEADLINE_INVALID",
+            "абсолютный срок resume неверен",
+        )
+    remaining = float(deadline) - time.monotonic()
+    if remaining <= 0:
+        raise ResumeSessionV2Error(
+            "RESUME_DEADLINE_EXCEEDED",
+            "истёк абсолютный срок resume",
+        )
+    return min(default_timeout_seconds, remaining)
+
+
+def _require_deadline_remaining(deadline: float | None) -> None:
+    _deadline_limited_timeout(deadline, _LEASE_LOCK_TIMEOUT_SECONDS)
 
 
 class ResumeSessionV2Error(RuntimeError):
@@ -332,13 +357,16 @@ class RootSessionLeaseStoreV2:
         root: RootIdentityV2,
         project: ProjectIdentityV2,
         route_id: str,
+        deadline: float | None = None,
     ) -> RootSessionLeaseV2:
         _require_text(turn_id, "turnId")
         _require_text(route_id, "routeId")
-        with self._locked(session_id):
+        _require_deadline_remaining(deadline)
+        with self._locked(session_id, deadline=deadline):
             lease = self._require_current_unlocked(
                 session_id, shell_session_id, root, project
             )
+            _require_deadline_remaining(deadline)
             attachment = lease.attachment
             if attachment is None or attachment.state == "ACKNOWLEDGED":
                 return lease
@@ -362,6 +390,7 @@ class RootSessionLeaseStoreV2:
                     bound_turn_id=None,
                 ),
             )
+            _require_deadline_remaining(deadline)
             self._write_unlocked(updated)
             return updated
 
@@ -374,10 +403,15 @@ class RootSessionLeaseStoreV2:
         turn_id: str,
         root: RootIdentityV2,
         project: ProjectIdentityV2,
+        deadline: float | None = None,
     ) -> bool:
         try:
-            lease = self.load(session_id)
-        except (OSError, ValueError, ResumeSessionV2Error):
+            lease = self.load(session_id, deadline=deadline)
+        except ResumeSessionV2Error as exc:
+            if exc.code == "RESUME_DEADLINE_EXCEEDED":
+                raise
+            return False
+        except (OSError, ValueError):
             return False
         if (
             lease is None
@@ -403,9 +437,12 @@ class RootSessionLeaseStoreV2:
         turn_id: str,
         root: RootIdentityV2,
         route_id: str,
+        deadline: float | None = None,
     ) -> RootSessionLeaseV2:
-        with self._locked(session_id):
+        _require_deadline_remaining(deadline)
+        with self._locked(session_id, deadline=deadline):
             lease = self._read_unlocked(session_id)
+            _require_deadline_remaining(deadline)
             if (
                 lease is None
                 or lease.shell_session_id != shell_session_id
@@ -429,6 +466,7 @@ class RootSessionLeaseStoreV2:
                 lease,
                 attachment=replace(lease.attachment, state="ACKNOWLEDGED"),
             )
+            _require_deadline_remaining(deadline)
             self._write_unlocked(updated)
             return updated
 
@@ -448,9 +486,16 @@ class RootSessionLeaseStoreV2:
             self._write_unlocked(replace(lease, active=False))
             return True
 
-    def load(self, session_id: str) -> RootSessionLeaseV2 | None:
+    def load(
+        self,
+        session_id: str,
+        *,
+        deadline: float | None = None,
+    ) -> RootSessionLeaseV2 | None:
         _require_text(session_id, "sessionId")
-        with self._locked(session_id):
+        _require_deadline_remaining(deadline)
+        with self._locked(session_id, deadline=deadline):
+            _require_deadline_remaining(deadline)
             return self._read_unlocked(session_id)
 
     def _require_current_unlocked(
@@ -491,7 +536,13 @@ class RootSessionLeaseStoreV2:
         return self.directory / f"session-{token}.lock"
 
     @contextmanager
-    def _locked(self, session_id: str) -> Iterator[None]:
+    def _locked(
+        self,
+        session_id: str,
+        *,
+        deadline: float | None = None,
+    ) -> Iterator[None]:
+        lock_timeout = _deadline_limited_timeout(deadline, _LEASE_LOCK_TIMEOUT_SECONDS)
         self._prepare_directory()
         descriptor = os.open(
             self._lock_path(session_id),
@@ -505,7 +556,7 @@ class RootSessionLeaseStoreV2:
                 finite_file_lock_v2.acquire_flock_v2(
                     descriptor,
                     exclusive=True,
-                    timeout_seconds=_LEASE_LOCK_TIMEOUT_SECONDS,
+                    timeout_seconds=lock_timeout,
                     timeout_code="RESUME_LEASE_LOCK_TIMEOUT",
                 )
             except finite_file_lock_v2.FileLockTimeoutV2 as exc:
@@ -514,6 +565,7 @@ class RootSessionLeaseStoreV2:
                     "аренда корневого сеанса временно занята",
                 ) from exc
             acquired = True
+            _require_deadline_remaining(deadline)
             yield
         finally:
             if acquired:
@@ -674,15 +726,23 @@ def discover_resume_candidate_v2(
     return None
 
 
-def route_is_terminal_v2(database_path: Path, route_id: str) -> bool:
+def route_is_terminal_v2(
+    database_path: Path,
+    route_id: str,
+    *,
+    deadline: float | None = None,
+) -> bool:
     _require_text(route_id, "routeId")
+    timeout_seconds = _deadline_limited_timeout(deadline, 0.2)
     connection = sqlite3.connect(
         database_path.resolve().as_uri() + "?mode=ro",
         uri=True,
-        timeout=0.2,
+        timeout=timeout_seconds,
     )
     try:
+        _require_deadline_remaining(deadline)
         connection.execute("pragma query_only=on")
+        _require_deadline_remaining(deadline)
         row = connection.execute(
             "select state from routes where route_id=?",
             (route_id,),

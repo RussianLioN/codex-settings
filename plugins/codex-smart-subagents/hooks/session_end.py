@@ -20,6 +20,7 @@ from integration_runtime import (  # noqa: E402
     write_hook_output,
 )
 from integration_runtime_v2 import IntegrationConfigV2  # noqa: E402
+from hook_deadline import fail_open_response  # noqa: E402
 from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
     RootIdentityV2,
     RootSessionLeaseStoreV2,
@@ -27,7 +28,7 @@ from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
 )
 
 
-def handle(payload: dict[str, Any], environ: Mapping[str, str]) -> None:
+def handle(payload: dict[str, Any], environ: Mapping[str, str]) -> dict[str, Any] | None:
     if not environment_is_active(environ) or payload.get("agent_id"):
         return None
     if payload.get("hook_event_name") != "SessionEnd":
@@ -47,14 +48,22 @@ def handle(payload: dict[str, Any], environ: Mapping[str, str]) -> None:
             root=root,
         )
     except Exception:
-        return None
+        return fail_open_response(
+            "SessionEnd не освободил умный сеанс; состояние останется проверяемым"
+        )
     return None
 
 
 def main() -> int:
-    payload = read_hook_input(sys.stdin)
-    response = handle(payload, os.environ)
-    write_hook_output(sys.stdout, response)
+    try:
+        payload = read_hook_input(sys.stdin)
+        response = handle(payload, os.environ)
+        write_hook_output(sys.stdout, response)
+    except Exception:
+        write_hook_output(
+            sys.stdout,
+            fail_open_response("SessionEnd завершился ошибкой чтения события"),
+        )
     return 0
 
 

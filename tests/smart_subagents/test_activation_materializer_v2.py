@@ -500,14 +500,15 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
                 installed_marketplace / ".claude-plugin" / "marketplace.json"
             ).read_bytes(),
         )
-        expected_shebang = f"#!{Path(sys.executable).resolve(strict=True)} -B\n".encode(
-            "utf-8"
-        )
+        runtime = Path(sys.executable).resolve(strict=True)
         installed_bin = (
             installed_marketplace / "plugins" / "codex-smart-subagents" / "bin"
         )
         for entrypoint in sorted(installed_bin.iterdir()):
             if entrypoint.is_file() and entrypoint.stat().st_mode & stat.S_IXUSR:
+                expected_shebang = f"#!{runtime} -B\n".encode("utf-8")
+                if entrypoint.name == "codex-smart-subagents-hook":
+                    expected_shebang = f"#!{runtime} -S -B\n".encode("utf-8")
                 with self.subTest(entrypoint=entrypoint.name):
                     self.assertTrue(
                         entrypoint.read_bytes().startswith(expected_shebang),
@@ -522,7 +523,6 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
             / "config"
             / "runtime-schemas"
         )
-
         self.assertEqual(names, {path.name for path in installed.iterdir()})
         for name in names:
             self.assertEqual(
@@ -613,6 +613,43 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
         )
         self.assertNotEqual(0, failed.returncode)
         self.assertIn("SCHEMA_DEPENDENCY_MISSING", failed.stderr)
+
+    def test_bind_python_entrypoints_preserves_isolated_python_shebang(
+        self,
+    ) -> None:
+        bin_root = Path(self.temporary.name) / "bin-isolated"
+        bin_root.mkdir()
+        entrypoint = bin_root / "codex-smart-subagents-hook"
+        entrypoint.write_bytes(
+            b"#!/usr/bin/env -S python3 -S\nprint('ok')\n"
+        )
+        entrypoint.chmod(0o700)
+
+        activation_materializer_v2._bind_python_entrypoints(bin_root)
+
+        expected_shebang = (
+            f"#!{Path(sys.executable).resolve(strict=True)} -S -B\n".encode(
+                "utf-8"
+            )
+        )
+        self.assertTrue(entrypoint.read_bytes().startswith(expected_shebang))
+        self.assertEqual(0o500, stat.S_IMODE(entrypoint.stat().st_mode))
+
+    def test_bind_python_entrypoints_rejects_unknown_env_s_arguments(
+        self,
+    ) -> None:
+        bin_root = Path(self.temporary.name) / "bin-unknown-args"
+        bin_root.mkdir()
+        entrypoint = bin_root / "tool"
+        entrypoint.write_bytes(
+            b"#!/usr/bin/env -S python3 -I\nprint('ok')\n"
+        )
+        entrypoint.chmod(0o700)
+
+        with self.assertRaises(ActivationMaterializationV2Error) as captured:
+            activation_materializer_v2._bind_python_entrypoints(bin_root)
+
+        self.assertEqual("PYTHON_ENTRYPOINT_INVALID", captured.exception.code)
 
     def test_materialized_marketplace_is_a_self_contained_installer_source(
         self,
