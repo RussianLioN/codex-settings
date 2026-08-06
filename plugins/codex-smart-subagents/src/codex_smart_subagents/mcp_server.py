@@ -219,4 +219,3 @@ def _tool_error_output(
     else:
         raise ContractError("UNKNOWN_TOOL", f"unknown tool: {name}")
     return validate_tool_output(name, output)
-
