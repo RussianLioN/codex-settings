@@ -3,21 +3,36 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from codex_capacity import DEFAULT_CAPACITY, CapacityStore, request_hash
 
 
 HOME = Path.home().resolve()
 CODEX_HOME = Path(os.environ.get("CODEX_HOME", HOME / ".codex")).expanduser().resolve()
 AUDIT_LOG = CODEX_HOME / "audit" / "hooks.jsonl"
-FAIL_CLOSED_EVENTS = {"PreToolUse", "PermissionRequest", "SubagentStart"}
+FAIL_CLOSED_EVENTS = {"PreToolUse", "PermissionRequest"}
+KNOWN_EVENTS = {
+    "PreToolUse",
+    "PermissionRequest",
+    "PostToolUse",
+    "SubagentStart",
+    "SubagentStop",
+    "Stop",
+    "SessionEnd",
+}
+CAPACITY_ENFORCEMENT_ENV = "CODEX_CAPACITY_ENFORCEMENT"
+CAPACITY_QUEUED = "CAPACITY_QUEUED"
 KNOWN_AGENTS = {
     "default",
     "worker",
@@ -70,6 +85,7 @@ GH_GLOBAL_VALUE_FLAGS = {"-R", "--repo", "--hostname"}
 
 
 def main() -> int:
+    started = time.perf_counter()
     event = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("CODEX_HOOK_EVENT", "")
     raw = sys.stdin.read()
     try:
@@ -79,6 +95,7 @@ def main() -> int:
 
     try:
         decision, reason, details = evaluate(event, payload)
+        details["hook_elapsed_ms"] = round((time.perf_counter() - started) * 1000, 3)
         write_audit(event, decision, reason, payload, details)
     except Exception as exc:  # pragma: no cover - fail closed by design
         fallback_payload = payload if isinstance(payload, dict) else {}
@@ -91,7 +108,7 @@ def main() -> int:
             print(reason, file=sys.stderr)
             return 2
         print(reason, file=sys.stderr)
-        return 1
+        return 0
 
     if decision == "block":
         print(reason, file=sys.stderr)
@@ -100,7 +117,7 @@ def main() -> int:
 
 
 def evaluate(event: str, payload: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
-    if event not in {"PreToolUse", "PermissionRequest", "PostToolUse", "SubagentStart", "SubagentStop", "Stop"}:
+    if event not in KNOWN_EVENTS:
         return "block", "unknown hook event", {}
 
     tool_name = find_first(payload, ("tool_name", "toolName", "tool", "name", "subagent_type", "agent", "agent_name"))
@@ -108,26 +125,26 @@ def evaluate(event: str, payload: dict[str, Any]) -> tuple[str, str, dict[str, A
     command = extract_command(payload)
     details = {
         "tool": tool_name,
-        "command_excerpt": redact(command)[:500] if command else "",
+        "command_sha256": stable_hash(command) if command else "",
     }
     autonomous_agent = bool(find_first(payload, ("agent_id", "agentId", "agent_type", "agentType")))
     if autonomous_agent:
         details["agent_type"] = str(find_first(payload, ("agent_type", "agentType")) or "unknown")
 
-    if event in {"PostToolUse", "SubagentStop", "Stop"}:
-        return "allow", "audit-only event", details
+    if event == "PostToolUse":
+        return handle_post_tool_use(payload, tool_name, details)
+
+    if event == "SubagentStop":
+        return handle_subagent_stop(payload, details)
+
+    if event == "Stop":
+        return handle_stop(payload, details)
+
+    if event == "SessionEnd":
+        return handle_session_end(payload, details)
 
     if event == "SubagentStart":
-        raw_agent_type = find_first(payload, ("agent_type", "agentType"))
-        agent_type = normalize_agent(
-            str(raw_agent_type or tool_name or find_first(payload, ("type", "kind")) or "")
-        )
-        details["agent_type"] = agent_type
-        if not agent_type:
-            return "block", "subagent start payload did not identify agent type", details
-        if agent_type not in KNOWN_AGENTS:
-            return "block", f"subagent type is not in the approved role set: {agent_type}", details
-        return "allow", "approved subagent role", details
+        return handle_subagent_start(payload, tool_name, details)
 
     if is_side_effect_mcp_or_app(tool_name):
         return "block", f"side-effect capable MCP/app tool is blocked: {tool_name}", details
@@ -146,7 +163,281 @@ def evaluate(event: str, payload: dict[str, Any]) -> tuple[str, str, dict[str, A
     if event in FAIL_CLOSED_EVENTS and not tool_name and not command:
         return "block", "fail-closed event lacked tool or command identity", details
 
+    if event == "PreToolUse" and is_spawn_agent_tool(tool_name):
+        role_decision = evaluate_spawn_role(payload, tool_name)
+        details.update(role_decision[2])
+        if role_decision[0] == "block":
+            return role_decision[0], role_decision[1], details
+        return handle_spawn_capacity(payload, details)
+
     return "allow", "policy allowed", details
+
+
+def handle_spawn_capacity(payload: dict[str, Any], details: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
+    request = capacity_request(payload)
+    details.update(request.audit_details)
+    if request.error:
+        return "block", request.error, details
+    if not capacity_enforcement_enabled():
+        details["capacity_state"] = "BYPASS"
+        details["capacity_enforcement"] = "disabled"
+        return "allow", "capacity enforcement bypass", details
+
+    result = CapacityStore(capacity=DEFAULT_CAPACITY).acquire_or_queue(
+        session_id=request.session_id,
+        turn_id=request.turn_id,
+        task_name=request.task_name,
+    )
+    details["capacity"] = sanitize_capacity_result(result)
+    state = str(result.get("state") or "")
+    if state == "LEASED":
+        return "allow", "capacity leased", details
+    if state == CAPACITY_QUEUED:
+        return "block", capacity_queue_deny_json(result), details
+    if state == "ERROR":
+        reason = str(result.get("reason") or "unknown_capacity_error")
+        return "block", f"capacity error: {reason}", details
+    return "block", f"unexpected capacity state: {state or 'missing'}", details
+
+
+def handle_post_tool_use(
+    payload: dict[str, Any],
+    tool_name: str,
+    details: dict[str, Any],
+) -> tuple[str, str, dict[str, Any]]:
+    if not is_spawn_agent_tool(tool_name):
+        return "allow", "audit-only event", details
+    if not tool_response_failed(payload.get("tool_response")):
+        details["capacity_release"] = "not_failed"
+        return "allow", "spawn succeeded or failure was not proven", details
+
+    request = capacity_request(payload)
+    details.update(request.audit_details)
+    if request.error:
+        details["capacity_release_error"] = request.error
+        return "allow", "spawn failure could not be mapped to capacity request", details
+    result = CapacityStore(capacity=DEFAULT_CAPACITY).release_request(
+        request.request_id,
+        expected_state="PROVISIONAL",
+    )
+    details["capacity"] = sanitize_capacity_result(result)
+    if result.get("state") == "ERROR":
+        details["capacity_release_error"] = str(result.get("reason") or "unknown_capacity_error")
+    return "allow", "failed spawn provisional release attempted", details
+
+
+def handle_subagent_start(
+    payload: dict[str, Any],
+    tool_name: str,
+    details: dict[str, Any],
+) -> tuple[str, str, dict[str, Any]]:
+    role_decision = evaluate_spawn_role(payload, tool_name)
+    details.update(role_decision[2])
+    session_id = hook_string(payload, "session_id")
+    turn_id = hook_string(payload, "turn_id")
+    agent_id = hook_string(payload, "agent_id")
+    if not session_id or not turn_id or not agent_id:
+        details["capacity_lifecycle_error"] = "missing_session_turn_or_agent_id"
+        return "allow", "subagent start lifecycle identity incomplete", details
+    result = CapacityStore(capacity=DEFAULT_CAPACITY).activate_next(
+        session_id=session_id,
+        turn_id=turn_id,
+        agent_id=agent_id,
+    )
+    details["capacity"] = sanitize_capacity_result(result)
+    return "allow", "subagent start capacity activation attempted", details
+
+
+def handle_subagent_stop(payload: dict[str, Any], details: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
+    session_id = hook_string(payload, "session_id")
+    agent_id = hook_string(payload, "agent_id")
+    if not session_id or not agent_id:
+        details["capacity_lifecycle_error"] = "missing_session_or_agent_id"
+        return "allow", "subagent stop lifecycle identity incomplete", details
+    result = CapacityStore(capacity=DEFAULT_CAPACITY).release_agent(session_id=session_id, agent_id=agent_id)
+    details["capacity"] = sanitize_capacity_result(result)
+    return "allow", "subagent stop capacity release attempted", details
+
+
+def handle_stop(payload: dict[str, Any], details: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
+    session_id = hook_string(payload, "session_id")
+    turn_id = hook_string(payload, "turn_id")
+    if not session_id or not turn_id:
+        details["capacity_lifecycle_error"] = "missing_session_or_turn_id"
+        return "allow", "stop lifecycle identity incomplete", details
+    result = CapacityStore(capacity=DEFAULT_CAPACITY).cancel_turn(session_id=session_id, turn_id=turn_id)
+    details["capacity"] = sanitize_capacity_result(result)
+    return "allow", "turn capacity cancellation attempted", details
+
+
+def handle_session_end(payload: dict[str, Any], details: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
+    session_id = hook_string(payload, "session_id")
+    if not session_id:
+        details["capacity_lifecycle_error"] = "missing_session_id"
+        return "allow", "session end lifecycle identity incomplete", details
+    store = CapacityStore(capacity=DEFAULT_CAPACITY)
+    canceled = store.cancel_session(session_id=session_id)
+    reconciled = store.reconcile(session_id=session_id)
+    details["capacity_cancel_session"] = sanitize_capacity_result(canceled)
+    details["capacity_reconcile"] = sanitize_capacity_result(reconciled)
+    return "allow", "session capacity cleanup attempted", details
+
+
+class CapacityRequest:
+    def __init__(
+        self,
+        *,
+        session_id: str = "",
+        turn_id: str = "",
+        task_name: str = "",
+        request_id: str = "",
+        error: str = "",
+    ) -> None:
+        self.session_id = session_id
+        self.turn_id = turn_id
+        self.task_name = task_name
+        self.request_id = request_id
+        self.error = error
+
+    @property
+    def audit_details(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "turn_id": self.turn_id,
+            "request_id": self.request_id,
+            "task_name_present": bool(self.task_name),
+        }
+
+
+def capacity_request(payload: dict[str, Any]) -> CapacityRequest:
+    session_id = hook_string(payload, "session_id")
+    turn_id = hook_string(payload, "turn_id")
+    tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    task_name = ""
+    if isinstance(tool_input, dict):
+        task_name = str(tool_input.get("task_name") or tool_input.get("taskName") or "")
+    if not session_id or not turn_id:
+        return CapacityRequest(session_id=session_id, turn_id=turn_id, task_name=task_name, error="capacity request lacked session_id or turn_id")
+    if not task_name:
+        return CapacityRequest(session_id=session_id, turn_id=turn_id, task_name=task_name, error="capacity request lacked task_name")
+    request_id = request_hash(session_id, turn_id, task_name)
+    return CapacityRequest(session_id=session_id, turn_id=turn_id, task_name=task_name, request_id=request_id)
+
+
+def hook_string(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    return str(value) if value not in (None, "") else ""
+
+
+def capacity_enforcement_enabled() -> bool:
+    return os.getenv(CAPACITY_ENFORCEMENT_ENV, "1") != "0"
+
+
+def capacity_queue_deny_json(result: dict[str, Any]) -> str:
+    payload = {
+        "decision": "deny",
+        "permissionDecision": "deny",
+        "reason": CAPACITY_QUEUED,
+        "code": CAPACITY_QUEUED,
+        "request_id": result.get("request_id"),
+        "ticket_id": result.get("ticket_id"),
+        "ticket_position": result.get("ticket_position"),
+        "retry_delay_ms": result.get("retry_delay_ms"),
+        "wait_command": result.get("wait_command"),
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def sanitize_capacity_result(result: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "state",
+        "reason",
+        "request_id",
+        "lease_id",
+        "fencing_epoch",
+        "lease_state",
+        "ticket_id",
+        "ticket_state",
+        "ticket_position",
+        "retry_delay_ms",
+        "wait_command",
+        "session_id",
+        "turn_id",
+        "agent_id",
+        "canceled",
+        "canceled_tickets",
+        "leases_marked",
+        "tickets_canceled",
+        "ttl_released",
+    }
+    return {key: value for key, value in result.items() if key in allowed}
+
+
+def tool_response_failed(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key in ("error", "exception", "failure"):
+            if value.get(key):
+                return True
+        for key in ("is_error", "isError", "failed"):
+            if value.get(key) is True:
+                return True
+        for key in ("ok", "success"):
+            if value.get(key) is False:
+                return True
+        for key in ("status", "state", "result"):
+            status = str(value.get(key) or "").strip().lower()
+            if status in {"error", "failed", "failure", "denied", "blocked"}:
+                return True
+        for key in ("exit_code", "exitCode", "returncode", "return_code"):
+            code = value.get(key)
+            if isinstance(code, int) and code != 0:
+                return True
+        return False
+    if isinstance(value, str):
+        text_value = value.strip()
+        if not text_value:
+            return False
+        try:
+            decoded = json.loads(text_value)
+        except json.JSONDecodeError:
+            return text_value.lower().startswith(("error:", "failed:", "failure:"))
+        return tool_response_failed(decoded)
+    return False
+
+
+def evaluate_spawn_role(
+    payload: dict[str, Any],
+    tool_name: str,
+) -> tuple[str, str, dict[str, Any]]:
+    raw_agent_type = find_first(payload, ("agent_type", "agentType", "agent_type_override", "agentTypeOverride"))
+    if raw_agent_type in (None, ""):
+        tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+        if isinstance(tool_input, dict):
+            raw_agent_type = tool_input.get("agent_type") or tool_input.get("agentType")
+    agent_type = normalize_agent(str(raw_agent_type or tool_name or ""))
+    details = {"agent_type": agent_type}
+    if not agent_type:
+        return "block", "subagent start payload did not identify agent type", details
+    if agent_type not in KNOWN_AGENTS and not is_spawn_agent_tool(tool_name):
+        return "block", f"subagent type is not in the approved role set: {agent_type}", details
+    if is_spawn_agent_tool(tool_name) and raw_agent_type not in (None, "") and agent_type not in KNOWN_AGENTS:
+        return "block", f"subagent type is not in the approved role set: {agent_type}", details
+    return "allow", "approved subagent role", details
+
+
+def is_spawn_agent_tool(tool_name: str) -> bool:
+    lower = tool_name.strip().lower()
+    if not lower:
+        return False
+    parts = [part for part in re.split(r"[^a-z0-9]+", lower) if part]
+    collapsed = "".join(parts)
+    if collapsed in {"agent", "spawnagent", "collaborationspawnagent"}:
+        return True
+    if len(parts) >= 2 and parts[-2:] == ["spawn", "agent"]:
+        return True
+    if len(parts) >= 2 and parts[-1] == "agent" and parts[-2].startswith("collaboration") and parts[-2].endswith("spawn"):
+        return True
+    return False
 
 
 def is_apply_patch_tool(tool_name: str) -> bool:
@@ -476,6 +767,10 @@ def redact(value: str) -> str:
     value = SECRET_ASSIGNMENT.sub(lambda match: match.group(1) + "=<redacted>", value)
     value = re.sub(r"(?i)(bearer\s+)[a-z0-9._~+/=-]+", r"\1<redacted>", value)
     return value
+
+
+def stable_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
 
 
 def write_audit(event: str, decision: str, reason: str, payload: dict[str, Any], details: dict[str, Any]) -> None:
