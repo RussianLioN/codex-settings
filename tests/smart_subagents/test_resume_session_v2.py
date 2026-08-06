@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import fcntl
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -21,6 +23,7 @@ from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
     RootIdentityV2,
     RootSessionLeaseStoreV2,
     discover_resume_candidate_v2,
+    route_is_terminal_v2,
 )
 
 
@@ -82,6 +85,119 @@ class RootSessionLeaseStoreV2Tests(unittest.TestCase):
             timeout_seconds=0.25,
             timeout_code="RESUME_LEASE_LOCK_TIMEOUT",
         )
+
+    def test_load_honors_shared_deadline_while_lease_lock_is_busy(self) -> None:
+        original = self._root(101, "start-original")
+        self.store.register_startup(
+            session_id="codex-session",
+            shell_session_id="cas2_original",
+            root=original,
+            project=self.project,
+        )
+        descriptor = os.open(self.store._lock_path("codex-session"), os.O_RDWR)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        try:
+            started = time.monotonic()
+            with self.assertRaises(ResumeSessionV2Error) as captured:
+                self.store.load("codex-session", deadline=started + 0.05)
+            elapsed = time.monotonic() - started
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
+        self.assertEqual("RESUME_LEASE_BUSY", captured.exception.code)
+        self.assertLess(elapsed, 0.20)
+        self.assertEqual(original, self.store.load("codex-session").root)
+
+    def test_defer_deadline_does_not_apply_partial_resume_transition(self) -> None:
+        original = self._root(101, "start-original")
+        self.store.register_startup(
+            session_id="codex-session",
+            shell_session_id="cas2_original",
+            root=original,
+            project=self.project,
+        )
+        self.observed[101] = None
+        resumed = self._root(202, "start-resumed")
+        candidate = self._candidate()
+        self.store.prepare_resume(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            root=resumed,
+            project=self.project,
+            candidate=candidate,
+        )
+        bound = self.store.bind_resume(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            turn_id="turn-new",
+            root=resumed,
+            project=self.project,
+        )
+        descriptor = os.open(self.store._lock_path("codex-session"), os.O_RDWR)
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        try:
+            with self.assertRaises(ResumeSessionV2Error):
+                self.store.defer_resume_to_next_turn(
+                    session_id="codex-session",
+                    shell_session_id="cas2_resumed",
+                    turn_id="turn-new",
+                    root=resumed,
+                    project=self.project,
+                    route_id=candidate.route_id,
+                    deadline=time.monotonic() + 0.05,
+                )
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
+        self.assertEqual(bound, self.store.load("codex-session"))
+        pending = self.store.defer_resume_to_next_turn(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            turn_id="turn-new",
+            root=resumed,
+            project=self.project,
+            route_id=candidate.route_id,
+            deadline=time.monotonic() + 1.0,
+        )
+        self.assertEqual("PENDING_NEXT_TURN", pending.attachment.state)
+
+    def test_route_terminal_lookup_honors_expired_deadline(self) -> None:
+        database_path = self.state_home / "routes.sqlite3"
+        connection = sqlite3.connect(database_path)
+        try:
+            connection.execute("create table routes(route_id text primary key,state text)")
+            connection.execute(
+                "insert into routes(route_id,state) values(?,?)",
+                ("route2_" + "4" * 32, "SUCCEEDED"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        with self.assertRaises(ResumeSessionV2Error) as captured:
+            route_is_terminal_v2(
+                database_path,
+                "route2_" + "4" * 32,
+                deadline=time.monotonic() - 0.01,
+            )
+
+        self.assertEqual("RESUME_DEADLINE_EXCEEDED", captured.exception.code)
+
+    def test_authorize_route_does_not_hide_expired_deadline(self) -> None:
+        with self.assertRaises(ResumeSessionV2Error) as captured:
+            self.store.authorize_route(
+                route_id=self._candidate().route_id,
+                session_id="codex-session",
+                shell_session_id="cas2_resumed",
+                turn_id="turn-new",
+                root=self._root(202, "start-resumed"),
+                project=self.project,
+                deadline=time.monotonic() - 0.01,
+            )
+
+        self.assertEqual("RESUME_DEADLINE_EXCEEDED", captured.exception.code)
 
     def test_live_original_root_blocks_resume_without_replacing_owner(self) -> None:
         original = self._root(101, "start-original")

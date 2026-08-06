@@ -40,6 +40,7 @@ from hook_deadline import (  # noqa: E402
 )
 from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
     ProjectIdentityV2,
+    ResumeSessionV2Error,
     RootIdentityV2,
     RootSessionLeaseStoreV2,
     route_is_terminal_v2,
@@ -135,7 +136,7 @@ def handle(
                 if outcome == "complete":
                     _acknowledge_resume_result_v2(
                         config_v2,
-                        store_v2.load(),
+                        store_v2.load(deadline=deadline),
                         environ,
                         deadline=deadline,
                     )
@@ -144,7 +145,7 @@ def handle(
                 if outcome == "bounded-route":
                     _defer_resume_to_next_turn_v2(
                         config_v2,
-                        store_v2.load(),
+                        store_v2.load(deadline=deadline),
                         environ,
                         deadline=deadline,
                     )
@@ -241,6 +242,16 @@ def handle(
             "decision": "block",
             "reason": f"{reason} {instruction}",
         }
+    except ResumeSessionV2Error as exc:
+        if exc.code == "RESUME_DEADLINE_EXCEEDED":
+            return fail_open_response(exc.message)
+        if environ.get("CODEX_SMART_LAUNCH_KIND") == "resume":
+            return fail_open_response(
+                "ошибка resume-подтверждения Stop; состояние будет сохранено для следующего хода"
+            )
+        return fail_open_response(
+            "ошибка проверки Stop; состояние будет сохранено для следующего хода"
+        )
     except HookDeadlineExceeded as exc:
         return fail_open_response(str(exc))
     except Exception:
@@ -267,18 +278,18 @@ def _acknowledge_resume_result_v2(
         pid=int(environ.get("CODEX_SMART_ROOT_PID", "")),
         process_start_marker=environ.get("CODEX_SMART_ROOT_START_MARKER", ""),
     )
-    binding = FreshActivationProviderV2(config).runtime_binding()
+    binding = FreshActivationProviderV2(config).runtime_binding(deadline=deadline)
     require_time_remaining(deadline, "истёк срок подтверждения resume")
     store = RootSessionLeaseStoreV2(
         config.state_home,
         process_marker_reader=system_process_marker_reader_v2,
     )
-    lease = store.load(record.session_id)
+    lease = store.load(record.session_id, deadline=deadline)
     require_time_remaining(deadline, "истёк срок подтверждения resume")
     if lease is None or lease.attachment is None:
         return
     route_id = lease.attachment.candidate.route_id
-    if not route_is_terminal_v2(binding.database_path, route_id):
+    if not route_is_terminal_v2(binding.database_path, route_id, deadline=deadline):
         return
     require_time_remaining(deadline, "истёк срок подтверждения resume")
     project = ProjectIdentityV2(
@@ -294,6 +305,7 @@ def _acknowledge_resume_result_v2(
         turn_id=record.turn_id,
         root=root,
         project=project,
+        deadline=deadline,
     ):
         return
     require_time_remaining(deadline, "истёк срок подтверждения resume")
@@ -303,6 +315,7 @@ def _acknowledge_resume_result_v2(
         turn_id=record.turn_id,
         root=root,
         route_id=route_id,
+        deadline=deadline,
     )
 
 
@@ -324,7 +337,7 @@ def _defer_resume_to_next_turn_v2(
         config.state_home,
         process_marker_reader=system_process_marker_reader_v2,
     )
-    lease = store.load(record.session_id)
+    lease = store.load(record.session_id, deadline=deadline)
     require_time_remaining(deadline, "истёк срок передачи resume")
     if lease is None or lease.attachment is None:
         return
@@ -346,6 +359,7 @@ def _defer_resume_to_next_turn_v2(
         root=root,
         project=project,
         route_id=route_id,
+        deadline=deadline,
     )
 
 

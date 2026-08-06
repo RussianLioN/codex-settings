@@ -25,7 +25,7 @@ STOP_HOOK_DEADLINE_MONOTONIC_NS_ENV = "CODEX_SMART_HOOK_DEADLINE_MONOTONIC_NS"
 WORKER_ARG = "--codex-smart-stop-worker"
 WORKER_MAGIC = b"codex-smart-stop-worker-v1\n"
 MAX_WORKER_STDOUT_BYTES = 64 * 1024
-PARENT_RESPONSE_RESERVE_NS = 350_000_000
+PARENT_RESPONSE_RESERVE_NS = 25_000_000
 
 
 def _plugin_root() -> str:
@@ -85,9 +85,11 @@ def _collect_worker(
     deadline_ns: int,
 ) -> int:
     stdout_chunks: list[bytes] = []
+    stdout_size = 0
     open_fds = {stdout_fd, stderr_fd}
     status: int | None = None
     timed_out = False
+    stdout_too_large = False
     try:
         os.set_blocking(stdout_fd, False)
         os.set_blocking(stderr_fd, False)
@@ -108,7 +110,6 @@ def _collect_worker(
                 except ProcessLookupError:
                     pass
                 _wait_for_child(pid)
-                _drain_fd(stdout_fd, stdout_chunks)
                 break
             timeout = min(remaining, 0.05) if status is None else 0.0
             try:
@@ -125,13 +126,43 @@ def _collect_worker(
                 break
             if not readable and status is not None:
                 for descriptor in list(open_fds):
-                    _drain_fd(descriptor, stdout_chunks if descriptor == stdout_fd else None)
+                    if descriptor == stdout_fd:
+                        while True:
+                            data = _read_chunk(descriptor)
+                            if not data:
+                                break
+                            stdout_size += len(data)
+                            if stdout_size > MAX_WORKER_STDOUT_BYTES:
+                                stdout_too_large = True
+                                break
+                            stdout_chunks.append(data)
+                    else:
+                        _drain_fd(descriptor, None)
                     open_fds.discard(descriptor)
-                break
+                    try:
+                        os.close(descriptor)
+                    except OSError:
+                        pass
             for descriptor in readable:
                 data = _read_chunk(descriptor)
                 if data:
                     if descriptor == stdout_fd:
+                        stdout_size += len(data)
+                        if stdout_size > MAX_WORKER_STDOUT_BYTES:
+                            stdout_too_large = True
+                            try:
+                                os.kill(pid, 9)
+                            except ProcessLookupError:
+                                pass
+                            _wait_for_child(pid)
+                            status = 0
+                            for open_descriptor in list(open_fds):
+                                try:
+                                    os.close(open_descriptor)
+                                except OSError:
+                                    pass
+                            open_fds.clear()
+                            break
                         stdout_chunks.append(data)
                 else:
                     open_fds.discard(descriptor)
@@ -147,6 +178,9 @@ def _collect_worker(
     stdout = b"".join(stdout_chunks)
     if timed_out:
         _write_json(_deferred("истёк общий срок Stop worker"))
+        return 0
+    if stdout_too_large:
+        _write_json(_deferred("worker Stop превысил предел stdout"))
         return 0
     if status is None or not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0:
         _write_json(_deferred("worker Stop завершился ошибкой"))
@@ -194,11 +228,21 @@ def _supervise_stop() -> int:
     environment[STOP_HOOK_STARTED_MONOTONIC_NS_ENV] = str(started_ns)
     environment[STOP_HOOK_DEADLINE_MONOTONIC_NS_ENV] = str(deadline_ns)
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    os.environ.update(environment)
+    pipe_descriptors: list[int] = []
     try:
         control_read, control_write = os.pipe()
+        pipe_descriptors.extend((control_read, control_write))
         stdout_read, stdout_write = os.pipe()
+        pipe_descriptors.extend((stdout_read, stdout_write))
         stderr_read, stderr_write = os.pipe()
+        pipe_descriptors.extend((stderr_read, stderr_write))
     except OSError:
+        for descriptor in pipe_descriptors:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
         _write_json(_deferred("worker Stop не запустился"))
         return 0
     try:
@@ -222,10 +266,12 @@ def _supervise_stop() -> int:
                 if descriptor > 2:
                     os.close(descriptor)
             os.set_inheritable(control_read, True)
-            executable = sys.executable
-            argv = [executable, os.path.abspath(__file__), WORKER_ARG, str(control_read)]
-            os.execve(executable, argv, environment)
-        except BaseException:
+            try:
+                worker_status = _run_stop_worker(control_read)
+            except SystemExit as exc:
+                worker_status = exc.code if type(exc.code) is int else 0
+            os._exit(worker_status)
+        except Exception:
             os._exit(127)
     os.close(control_read)
     os.close(stdout_write)

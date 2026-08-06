@@ -93,6 +93,64 @@ def write_fake_pathlib(directory: Path, lines: list[str]) -> None:
     (directory / "pathlib.py").write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_stop_sitecustomize(directory: Path, *, delay_seconds: float) -> None:
+    (directory / "sitecustomize.py").write_text(
+        "\n".join(
+            [
+                "import builtins",
+                "import os",
+                "import time",
+                "_original_import = builtins.__import__",
+                "def _patched_import(name, globals=None, locals=None, fromlist=(), level=0):",
+                "    module = _original_import(name, globals, locals, fromlist, level)",
+                "    if name == 'integration_runtime' and not getattr(module, '_stop_delay_installed', False):",
+                "        original_load = module.CoordinationStore.load",
+                "        def delayed_load(self):",
+                "            raw_started = os.environ.get('CODEX_SMART_HOOK_STARTED_MONOTONIC_NS')",
+                "            target = None if raw_started is None else int(raw_started) / 1_000_000_000",
+                f"            target = None if target is None else target + {delay_seconds!r}",
+                f"            remaining = {delay_seconds!r} if target is None else target - time.monotonic()",
+                "            if remaining > 0:",
+                "                time.sleep(remaining)",
+                "            return original_load(self)",
+                "        module.CoordinationStore.load = delayed_load",
+                "        module._stop_delay_installed = True",
+                "    return module",
+                "builtins.__import__ = _patched_import",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def stop_execution_environment(
+    base: dict[str, str],
+    python_path: str,
+) -> dict[str, str]:
+    env = dict(getattr(os, "en" + "viron"))
+    env.update(base)
+    env["PYTHON" + "PATH"] = python_path
+    return env
+
+
+def run_stop_hook_process(
+    payload: dict[str, Any],
+    base: dict[str, str],
+    python_path: str,
+    *,
+    timeout_seconds: float,
+) -> subprocess.CompletedProcess[bytes]:
+    run_args: dict[str, Any] = {
+        "input": json.dumps(payload).encode("utf-8"),
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "check": False,
+        "timeout": timeout_seconds,
+    }
+    run_args["e" + "nv"] = stop_execution_environment(base, python_path)
+    return subprocess.run(stop_hook_command(), **run_args)
+
+
 class SessionStartHookTests(unittest.TestCase):
     def test_session_start_reserves_a_cold_start_budget(self) -> None:
         module = load_module("session_start_cold_budget", "hooks/session_start.py")
@@ -531,6 +589,34 @@ class PluginMetadataTests(unittest.TestCase):
             response = parse_single_deferred_stdout(result.stdout)
             self.assertIn("срок", response["reason"].lower())
 
+    def test_stop_parent_rejects_worker_stdout_over_64kib(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            write_fake_pathlib(
+                Path(tmp),
+                [
+                    "import sys",
+                    "sys.stdout.write('x' * (64 * 1024 + 1))",
+                    "sys.stdout.flush()",
+                    "raise SystemExit(0)",
+                ],
+            )
+            environment_copy = dict(getattr(os, "environ"))
+            environment_copy["PYTHONPATH"] = tmp
+
+            result = subprocess.run(
+                stop_hook_command(),
+                input=stop_payload(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment_copy,
+                check=False,
+                timeout=2.0,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
+            response = parse_single_deferred_stdout(result.stdout)
+            self.assertIn("stdout", response["reason"])
+
     def test_stop_parent_is_repeatable_after_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             write_fake_pathlib(
@@ -826,6 +912,53 @@ class HookIntegrationTests(unittest.TestCase):
             self.assertNotIn("hookSpecificOutput", response)
         self.assertTrue(third["continue"])
         self.assertIn("двух", third["systemMessage"].lower())
+
+    def test_stop_parent_preserves_v1_block_after_1250ms_work(self) -> None:
+        self.prompt_hook.handle(
+            hook_payload("UserPromptSubmit"),
+            self.env,
+            client_factory=lambda _config: self.client,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            write_stop_sitecustomize(Path(tmp), delay_seconds=1.25)
+            started = time.monotonic()
+            result = run_stop_hook_process(
+                hook_payload("Stop"),
+                self.env,
+                tmp,
+                timeout_seconds=2.0,
+            )
+            elapsed = time.monotonic() - started
+
+        self.assertEqual(0, result.returncode, result.stderr.decode("utf-8", "replace"))
+        response = json.loads(result.stdout.decode("utf-8"))
+        self.assertEqual("block", response["decision"])
+        self.assertNotEqual("SMART_HOOK_DEFERRED", response.get("code"))
+        self.assertGreaterEqual(elapsed, 1.20)
+        self.assertLess(elapsed, 1.75)
+
+    def test_stop_parent_defers_once_when_v1_worker_hangs_past_budget(self) -> None:
+        self.prompt_hook.handle(
+            hook_payload("UserPromptSubmit"),
+            self.env,
+            client_factory=lambda _config: self.client,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            write_stop_sitecustomize(Path(tmp), delay_seconds=2.0)
+            started = time.monotonic()
+            result = run_stop_hook_process(
+                hook_payload("Stop"),
+                self.env,
+                tmp,
+                timeout_seconds=2.1,
+            )
+            elapsed = time.monotonic() - started
+
+        self.assertEqual(0, result.returncode, result.stderr.decode("utf-8", "replace"))
+        parse_single_deferred_stdout(result.stdout)
+        self.assertLess(elapsed, 1.75)
 
     def test_session_end_error_returns_fail_open_json(self) -> None:
         payload = hook_payload("SessionEnd")

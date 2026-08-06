@@ -935,6 +935,29 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         self.assertEqual(decision.activation_gate, provider.activation_gate())
         self.assertEqual(decision.runtime_binding, provider.runtime_binding())
 
+    def test_provider_runtime_binding_scopes_shared_deadline_for_resolver(self) -> None:
+        observed_deadlines = []
+        decision = self._decision()
+
+        class ObservingResolver:
+            def resolve(self) -> GatewayDecision:
+                observed_deadlines.append(
+                    operation_deadline_v2.current_operation_deadline_v2()
+                )
+                return decision
+
+        provider = FreshActivationProviderV2(
+            self.config,
+            resolver_factory=lambda _config: ObservingResolver(),
+        )
+
+        self.assertEqual(
+            decision.runtime_binding,
+            provider.runtime_binding(deadline=time.monotonic() + 1.0),
+        )
+        self.assertEqual(1, len(observed_deadlines))
+        self.assertIsNotNone(observed_deadlines[0])
+
     def test_provider_rejects_activation_changed_after_root_session_launch(self) -> None:
         TurnContextStoreV2(self.config).save(self.record)
         decision = self._decision()
