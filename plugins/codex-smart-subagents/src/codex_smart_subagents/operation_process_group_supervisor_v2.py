@@ -419,6 +419,7 @@ class OperationProcessGroupSupervisorV2:
             if return_code is not None and not self._unverified_group_alive(
                 record
             ):
+                _close_process_streams(record.process)
                 del self._unverified[launch_id]
                 removed.append(launch_id)
         return tuple(removed)
@@ -830,6 +831,7 @@ class OperationProcessGroupSupervisorV2:
         except (AttributeError, OSError):
             return_code = None
         if return_code is not None and not self._unverified_group_alive(record):
+            _close_process_streams(record.process)
             del self._unverified[launch_id]
 
     def _unverified_group_alive(
@@ -1396,6 +1398,35 @@ def _default_process_identity_v2(pid: int) -> ProcessIdentityV2 | None:
         session_id=second_session,
         start_marker=start_marker,
     )
+
+
+def _close_process_streams(process: Any) -> None:
+    """Закрыть каналы процесса, который уже нельзя вернуть вызывающей стороне."""
+
+    for name in ("stdin", "stdout", "stderr"):
+        stream = getattr(process, name, None)
+        if stream is None:
+            continue
+        try:
+            if stream.closed:
+                continue
+        except (AttributeError, OSError, ValueError):
+            pass
+        descriptor: int | None = None
+        try:
+            candidate = stream.fileno()
+            if type(candidate) is int and candidate >= 0:
+                descriptor = candidate
+        except (AttributeError, OSError, ValueError):
+            pass
+        try:
+            stream.close()
+        except (BrokenPipeError, OSError, ValueError):
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
 
 
 def _default_group_exists(process_group_id: int) -> bool:

@@ -903,6 +903,9 @@ class OperationProcessGroupSupervisorV2Tests(unittest.TestCase):
                 pass
 
         process = StubbornInvalidProcess(pid=0)
+        process.stdin = _TrackedStream()
+        process.stdout = _TrackedStream()
+        process.stderr = _TrackedStream()
         supervisor = module.OperationProcessGroupSupervisorV2(
             popen_factory=lambda _argv, **_kwargs: process,
             killpg=lambda _pgid, _signum: self.fail(
@@ -919,6 +922,9 @@ class OperationProcessGroupSupervisorV2Tests(unittest.TestCase):
             )
 
         self.assertEqual(1, len(supervisor.unverified_launch_ids()))
+        self.assertFalse(process.stdin.closed)
+        self.assertFalse(process.stdout.closed)
+        self.assertFalse(process.stderr.closed)
         with self.assertRaises(
             module.OutstandingProcessCleanupObligationV2
         ):
@@ -928,6 +934,9 @@ class OperationProcessGroupSupervisorV2Tests(unittest.TestCase):
         removed = supervisor.reconcile_unverified_launches()
         self.assertEqual(1, len(removed))
         self.assertEqual((), supervisor.unverified_launch_ids())
+        self.assertTrue(process.stdin.closed)
+        self.assertTrue(process.stdout.closed)
+        self.assertTrue(process.stderr.closed)
         supervisor.assert_continuation_allowed()
 
     def test_unverified_valid_pid_keeps_gate_closed_until_group_disappears(
