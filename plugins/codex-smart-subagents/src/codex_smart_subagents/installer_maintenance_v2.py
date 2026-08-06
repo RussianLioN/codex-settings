@@ -759,7 +759,7 @@ def _observe_activation_entries(
             or not stat.S_ISDIR(info.st_mode)
             or stat.S_ISLNK(info.st_mode)
             or info.st_uid != os.getuid()
-            or stat.S_IMODE(info.st_mode) != 0o700
+            or stat.S_IMODE(info.st_mode) not in {0o500, 0o700}
         ):
             _issue(issues, "ACTIVATION_OWNERSHIP_AMBIGUOUS", path, "неизвестный путь или ссылка в корне активаций")
             continue
@@ -858,7 +858,7 @@ def _tree_projection(path: Path) -> JsonObject:
         not stat.S_ISDIR(info.st_mode)
         or stat.S_ISLNK(info.st_mode)
         or info.st_uid != os.getuid()
-        or stat.S_IMODE(info.st_mode) != 0o700
+        or stat.S_IMODE(info.st_mode) not in {0o500, 0o700}
     ):
         raise InstallerMaintenanceV2Error("ACTIVATION_PROJECTION_CHANGED", f"небезопасный каталог: {path}")
     entries: list[JsonObject] = []
@@ -874,13 +874,21 @@ def _tree_projection(path: Path) -> JsonObject:
             if stat.S_ISLNK(child_info.st_mode):
                 entries.append({"path": relative, "type": "symlink", "mode": stat.S_IMODE(child_info.st_mode), "target": os.readlink(child)})
             elif stat.S_ISDIR(child_info.st_mode):
-                if child_info.st_uid != os.getuid() or stat.S_IMODE(child_info.st_mode) != 0o700:
+                if (
+                    child_info.st_uid != os.getuid()
+                    or stat.S_IMODE(child_info.st_mode) not in {0o500, 0o700}
+                ):
                     raise InstallerMaintenanceV2Error("ACTIVATION_PROJECTION_CHANGED", f"небезопасный подкаталог: {child}")
                 entries.append({"path": relative, "type": "directory", "mode": stat.S_IMODE(child_info.st_mode)})
                 count += 1
                 pending.append(child)
             elif stat.S_ISREG(child_info.st_mode):
-                if child_info.st_uid != os.getuid() or child_info.st_nlink != 1:
+                if (
+                    child_info.st_uid != os.getuid()
+                    or child_info.st_nlink != 1
+                    or stat.S_IMODE(child_info.st_mode)
+                    not in {0o400, 0o500, 0o600}
+                ):
                     raise InstallerMaintenanceV2Error("ACTIVATION_PROJECTION_CHANGED", f"небезопасный файл: {child}")
                 entries.append({"path": relative, "type": "regular", "mode": stat.S_IMODE(child_info.st_mode), "size": child_info.st_size, "sha256": _sha256_file(child)})
                 count += 1
@@ -1677,6 +1685,7 @@ def _remove_tree_exact(path: Path, expected: Mapping[str, Any]) -> None:
 
 
 def _remove_directory_contents(descriptor: int) -> None:
+    os.fchmod(descriptor, 0o700)
     for name in sorted(os.listdir(descriptor), key=lambda value: value.encode("utf-8")):
         info = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
         if stat.S_ISDIR(info.st_mode):

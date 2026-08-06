@@ -324,6 +324,24 @@ class CandidateControllerV2Tests(unittest.TestCase):
         )
         self.assertEqual(expected_controller_identity, config.controller_identity)
 
+    def test_loader_accepts_sealed_activation_tree(self) -> None:
+        (self.activation_dir / "activation.json").chmod(0o400)
+        for path in sorted(
+            self.activation_dir.rglob("*"),
+            key=lambda item: len(item.parts),
+            reverse=True,
+        ):
+            path.chmod(0o500 if path.is_dir() else 0o400)
+        self.activation_dir.chmod(0o500)
+
+        config = load_candidate_controller_config_v2(
+            plugin_root=self.plugin_root,
+            environment=self.environment,
+        )
+
+        self.assertEqual(self.activation_dir, config.activation_dir)
+        self.assertEqual(self.plugin_root, config.plugin_root)
+
     def test_loader_accepts_owned_readable_codex_home(self) -> None:
         self.codex_home.chmod(0o755)
 

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import os
 import re
 import sqlite3
+import stat
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
@@ -640,10 +642,18 @@ def _validate_main_journal_binding(
 
 
 def _verify_stable_artifacts(snapshot: ActivationTransitionProofSnapshotV2) -> None:
+    activation_root_mode = stat.S_IMODE(os.lstat(snapshot.activation_dir).st_mode)
+    if activation_root_mode not in {0o500, 0o700}:
+        raise ActivationTransitionRehydrationV2Error(
+            "ACTIVE_TREE_CHANGED: activation directory mode changed"
+        )
     activation_raw, activation = _read_private_json_bytes(
         snapshot.activation_dir / "activation.json",
         code="ACTIVE_TREE_CHANGED",
         require_canonical=True,
+        expected_modes=frozenset(
+            {0o400 if activation_root_mode == 0o500 else 0o600}
+        ),
     )
     activation_tree = _projection(
         "tree-object-v2",

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -27,6 +28,7 @@ from .activation_transition_v2 import (
     ActivationTransitionProofV2,
     reverify_activation_transition_proof_v2,
 )
+from .activation_gateway_v2 import _tree_sha256
 from .canonical_json import canonical_json_bytes, domain_fingerprint
 from .lifecycle_controller_protocol_v2 import (
     LifecycleControllerCommandProofV2,
@@ -183,6 +185,255 @@ class RecoveryInspectionV2:
     def __post_init__(self) -> None:
         if self.document is not None:
             object.__setattr__(self, "document", copy.deepcopy(dict(self.document)))
+
+
+@dataclass(frozen=True)
+class ActivationBytecodeRepairV2:
+    status: str
+    reason_code: str | None
+    activation_dir: Path
+    expected_tree_sha256: str
+    bytecode_files: tuple[Path, ...] = ()
+    cache_directories: tuple[Path, ...] = ()
+
+
+def inspect_activation_bytecode_repair_v2(
+    *,
+    activation_dir: Path,
+    expected_tree_sha256: str,
+) -> ActivationBytecodeRepairV2:
+    """Доказывает, что расхождение дерева состоит только из Python-байткода."""
+
+    if not activation_dir.is_absolute() or _SHA256.fullmatch(expected_tree_sha256) is None:
+        _fail("ACTIVATION_BYTECODE_REPAIR_UNSAFE", "цель восстановления неверна")
+    try:
+        if _tree_sha256(activation_dir) == expected_tree_sha256:
+            return ActivationBytecodeRepairV2(
+                status="unchanged",
+                reason_code=None,
+                activation_dir=activation_dir,
+                expected_tree_sha256=expected_tree_sha256,
+            )
+    except Exception:
+        pass
+
+    root_info = os.lstat(activation_dir)
+    root_mode = stat.S_IMODE(root_info.st_mode)
+    if (
+        not stat.S_ISDIR(root_info.st_mode)
+        or stat.S_ISLNK(root_info.st_mode)
+        or root_info.st_uid != os.getuid()
+        or root_mode not in {0o500, 0o700}
+    ):
+        _fail("ACTIVATION_BYTECODE_REPAIR_UNSAFE", "корень активации небезопасен")
+
+    entries: list[dict[str, object]] = []
+    bytecode_files: list[Path] = []
+    cache_directories: list[Path] = []
+    pending = [activation_dir]
+    while pending:
+        directory = pending.pop()
+        for child in sorted(
+            directory.iterdir(),
+            key=lambda path: path.name.encode("utf-8"),
+            reverse=True,
+        ):
+            info = os.lstat(child)
+            relative = child.relative_to(activation_dir).as_posix()
+            if child.name == "__pycache__":
+                _inspect_bytecode_cache_v2(
+                    child,
+                    bytecode_files=bytecode_files,
+                    cache_directories=cache_directories,
+                )
+                continue
+            if child.suffix == ".pyc":
+                _fail(
+                    "ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+                    "байткод находится вне __pycache__",
+                )
+            if stat.S_ISLNK(info.st_mode):
+                entries.append(
+                    {
+                        "path": relative,
+                        "type": "symlink",
+                        "mode": stat.S_IMODE(info.st_mode),
+                        "target": os.readlink(child),
+                    }
+                )
+            elif stat.S_ISDIR(info.st_mode):
+                if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != root_mode:
+                    _fail(
+                        "ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+                        "режим каталога активации изменён",
+                    )
+                entries.append(
+                    {
+                        "path": relative,
+                        "type": "directory",
+                        "mode": stat.S_IMODE(info.st_mode),
+                    }
+                )
+                pending.append(child)
+            elif stat.S_ISREG(info.st_mode):
+                allowed_modes = {0o400, 0o500} if root_mode == 0o500 else {0o500, 0o600}
+                if (
+                    info.st_uid != os.getuid()
+                    or info.st_nlink != 1
+                    or stat.S_IMODE(info.st_mode) not in allowed_modes
+                ):
+                    _fail(
+                        "ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+                        "обычный файл активации изменён",
+                    )
+                entries.append(
+                    {
+                        "path": relative,
+                        "type": "regular",
+                        "mode": stat.S_IMODE(info.st_mode),
+                        "size": info.st_size,
+                        "sha256": _sha256_file_v2(child),
+                    }
+                )
+            else:
+                _fail(
+                    "ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+                    "активация содержит особый объект",
+                )
+    entries.sort(key=lambda item: str(item["path"]).encode("utf-8"))
+    projected = hashlib.sha256(canonical_json_bytes(entries)).hexdigest()
+    if projected != expected_tree_sha256 or not bytecode_files:
+        _fail(
+            "ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+            "дерево отличается не только доказанным байткодом",
+        )
+    return ActivationBytecodeRepairV2(
+        status="planned",
+        reason_code="ACTIVATION_BYTECODE_REPAIR_REQUIRED",
+        activation_dir=activation_dir,
+        expected_tree_sha256=expected_tree_sha256,
+        bytecode_files=tuple(sorted(bytecode_files)),
+        cache_directories=tuple(
+            sorted(cache_directories, key=lambda path: len(path.parts), reverse=True)
+        ),
+    )
+
+
+def apply_activation_bytecode_repair_v2(
+    plan: ActivationBytecodeRepairV2,
+) -> ActivationBytecodeRepairV2:
+    """Удаляет только повторно доказанный набор байткода."""
+
+    if not isinstance(plan, ActivationBytecodeRepairV2):
+        _fail("ACTIVATION_BYTECODE_REPAIR_UNSAFE", "план восстановления неверен")
+    if plan.status == "unchanged":
+        return plan
+    repeated = inspect_activation_bytecode_repair_v2(
+        activation_dir=plan.activation_dir,
+        expected_tree_sha256=plan.expected_tree_sha256,
+    )
+    if (
+        repeated.bytecode_files != plan.bytecode_files
+        or repeated.cache_directories != plan.cache_directories
+    ):
+        _fail(
+            "ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+            "набор байткода изменился перед восстановлением",
+        )
+    root_mode = stat.S_IMODE(os.lstat(plan.activation_dir).st_mode)
+    writable_parents = tuple(
+        sorted(
+            {path.parent for path in repeated.cache_directories},
+            key=lambda path: len(path.parts),
+            reverse=True,
+        )
+    )
+    changed_parents: list[Path] = []
+    try:
+        if root_mode == 0o500:
+            for parent in writable_parents:
+                info = os.lstat(parent)
+                if (
+                    not stat.S_ISDIR(info.st_mode)
+                    or stat.S_ISLNK(info.st_mode)
+                    or info.st_uid != os.getuid()
+                    or stat.S_IMODE(info.st_mode) != 0o500
+                ):
+                    _fail(
+                        "ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+                        "родитель кэша изменился перед восстановлением",
+                    )
+                parent.chmod(0o700)
+                changed_parents.append(parent)
+        for path in repeated.bytecode_files:
+            path.unlink()
+        for path in repeated.cache_directories:
+            path.rmdir()
+    finally:
+        for parent in reversed(changed_parents):
+            parent.chmod(root_mode)
+    if _tree_sha256(plan.activation_dir) != plan.expected_tree_sha256:
+        _fail(
+            "ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+            "контрольная сумма после восстановления не совпала",
+        )
+    return ActivationBytecodeRepairV2(
+        status="recovered",
+        reason_code=None,
+        activation_dir=plan.activation_dir,
+        expected_tree_sha256=plan.expected_tree_sha256,
+    )
+
+
+def _inspect_bytecode_cache_v2(
+    cache: Path,
+    *,
+    bytecode_files: list[Path],
+    cache_directories: list[Path],
+) -> None:
+    info = os.lstat(cache)
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or info.st_uid != os.getuid()
+        or stat.S_IMODE(info.st_mode) not in {0o500, 0o700, 0o755}
+    ):
+        _fail("ACTIVATION_BYTECODE_REPAIR_UNSAFE", "каталог байткода небезопасен")
+    cache_directories.append(cache)
+    for child in sorted(cache.iterdir(), key=lambda path: path.name.encode("utf-8")):
+        child_info = os.lstat(child)
+        if stat.S_ISDIR(child_info.st_mode) and not stat.S_ISLNK(child_info.st_mode):
+            _inspect_bytecode_cache_v2(
+                child,
+                bytecode_files=bytecode_files,
+                cache_directories=cache_directories,
+            )
+            continue
+        match = re.fullmatch(
+            r"(.+)\.(?:cpython|pypy)-[0-9]+(?:\.opt-[0-9]+)?\.pyc",
+            child.name,
+        )
+        source = cache.parent / ((match.group(1) if match else "") + ".py")
+        if (
+            match is None
+            or not stat.S_ISREG(child_info.st_mode)
+            or stat.S_ISLNK(child_info.st_mode)
+            or child_info.st_uid != os.getuid()
+            or child_info.st_nlink != 1
+            or stat.S_IMODE(child_info.st_mode) not in {0o400, 0o600, 0o644}
+            or not source.is_file()
+            or source.is_symlink()
+        ):
+            _fail("ACTIVATION_BYTECODE_REPAIR_UNSAFE", "файл байткода не доказан")
+        bytecode_files.append(child)
+
+
+def _sha256_file_v2(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True)

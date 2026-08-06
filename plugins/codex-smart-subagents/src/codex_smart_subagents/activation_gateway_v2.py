@@ -448,9 +448,16 @@ class ActivationResolver:
                         "ACTIVATION_LINK_MISMATCH",
                         "marketplace-current resolves outside the active activation",
                     )
+                activation_root_mode = stat.S_IMODE(os.lstat(activation_dir).st_mode)
+                if activation_root_mode not in {0o500, 0o700}:
+                    raise _ProofError(
+                        "ACTIVATION_INVALID", "activation directory mode is invalid"
+                    )
                 activation = _read_owned_json(
                     activation_dir / "activation.json",
-                    expected_mode=0o600,
+                    expected_mode=(
+                        0o400 if activation_root_mode == 0o500 else 0o600
+                    ),
                     code="ACTIVATION_INVALID",
                 )
                 identity = self._validate_activation(
@@ -2459,13 +2466,20 @@ def _shared_installation_lock(path: Path):
             os.close(descriptor)
 
 
-def _verify_directory(path: Path, *, private: bool, code: str) -> os.stat_result:
+def _verify_directory(
+    path: Path,
+    *,
+    private: bool,
+    code: str,
+    expected_mode: int | None = None,
+) -> os.stat_result:
     info = os.lstat(path)
     mode = stat.S_IMODE(info.st_mode)
+    required_mode = 0o700 if expected_mode is None else expected_mode
     if (
         not stat.S_ISDIR(info.st_mode)
         or info.st_uid != os.getuid()
-        or (private and mode != 0o700)
+        or (private and mode != required_mode)
         or (not private and mode & 0o022)
     ):
         raise _ProofError(code, f"directory metadata is invalid: {path}")
@@ -2587,10 +2601,16 @@ def _validate_artifacts(value, codex_home: Path) -> None:
                 )
         elif kind == "directory":
             _sha256(item["treeSha256"], "MANIFEST_INVALID")
-            info = _verify_directory(path, private=True, code="MANIFEST_ARTIFACT_MISMATCH")
-            if stat.S_IMODE(info.st_mode) != _mode_integer(
-                item["mode"], "MANIFEST_INVALID"
-            ) or _tree_sha256(path) != item["treeSha256"]:
+            expected_mode = _mode_integer(item["mode"], "MANIFEST_INVALID")
+            if expected_mode not in {0o500, 0o700}:
+                raise _ProofError("MANIFEST_INVALID", "artifact mode is invalid")
+            _verify_directory(
+                path,
+                private=True,
+                code="MANIFEST_ARTIFACT_MISMATCH",
+                expected_mode=expected_mode,
+            )
+            if _tree_sha256(path) != item["treeSha256"]:
                 raise _ProofError(
                     "MANIFEST_ARTIFACT_MISMATCH", "artifact tree differs"
                 )
@@ -2781,7 +2801,15 @@ def _mode_integer(value, code: str) -> int:
 
 
 def _tree_sha256(root: Path) -> str:
-    _verify_directory(root, private=True, code="ACTIVATION_TREE_MISMATCH")
+    root_info = os.lstat(root)
+    if (
+        not stat.S_ISDIR(root_info.st_mode)
+        or stat.S_ISLNK(root_info.st_mode)
+        or root_info.st_uid != os.getuid()
+        or stat.S_IMODE(root_info.st_mode) not in {0o500, 0o700}
+    ):
+        raise _ProofError("ACTIVATION_TREE_MISMATCH", "tree root is unsafe")
+    root_mode = stat.S_IMODE(root_info.st_mode)
     entries: list[dict[str, object]] = []
     pending = [root]
     while pending:
@@ -2804,7 +2832,7 @@ def _tree_sha256(root: Path) -> str:
                     }
                 )
             elif stat.S_ISDIR(info.st_mode):
-                if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+                if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != root_mode:
                     raise _ProofError(
                         "ACTIVATION_TREE_MISMATCH", "tree directory is not private"
                     )
@@ -2820,6 +2848,13 @@ def _tree_sha256(root: Path) -> str:
                 if info.st_uid != os.getuid() or info.st_nlink != 1:
                     raise _ProofError(
                         "ACTIVATION_TREE_MISMATCH", "tree file metadata is unsafe"
+                    )
+                if root_mode == 0o500 and stat.S_IMODE(info.st_mode) not in {
+                    0o400,
+                    0o500,
+                }:
+                    raise _ProofError(
+                        "ACTIVATION_TREE_MISMATCH", "sealed tree file is writable"
                     )
                 entries.append(
                     {

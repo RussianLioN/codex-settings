@@ -239,6 +239,12 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.controller_socket.close()
+        for path in sorted(
+            self.root.rglob("*"),
+            key=lambda item: len(item.parts),
+        ):
+            if path.is_dir() and not path.is_symlink():
+                path.chmod(0o700)
         self.temporary.cleanup()
 
     def _materialize(self, *, source_root: Path = ROOT):
@@ -328,6 +334,37 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
             result.bundled_catalog_path.read_text(encoding="utf-8")
         )
         self.assertEqual(result.bundled_catalog, catalog_projection)
+        self.assertEqual(0o500, stat.S_IMODE(result.activation_dir.stat().st_mode))
+        for path in result.activation_dir.rglob("*"):
+            with self.subTest(sealed_path=path.relative_to(result.activation_dir)):
+                mode = stat.S_IMODE(path.lstat().st_mode)
+                if path.is_dir():
+                    self.assertEqual(0o500, mode)
+                elif path.is_file():
+                    self.assertIn(mode, {0o400, 0o500})
+        helper = (
+            result.activation_dir
+            / "marketplace"
+            / "plugins"
+            / "codex-smart-subagents"
+            / "scripts"
+            / "prepare_smart_plan.py"
+        )
+        before = activation_materializer_v2._tree_sha256(result.activation_dir)
+        completed = subprocess.run(
+            [sys.executable, str(helper), "--help"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={
+                key: value
+                for key, value in os.environ.items()
+                if key != "PYTHONDONTWRITEBYTECODE"
+            },
+        )
+        self.assertEqual(0, completed.returncode, completed.stderr.decode())
+        self.assertEqual(before, activation_materializer_v2._tree_sha256(result.activation_dir))
+        self.assertFalse(any(result.activation_dir.rglob("__pycache__")))
         self.assertEqual(
             {
                 "model": "gpt-5.6-sol",
@@ -549,10 +586,31 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
             ),
         )
 
-        (installed / "context-bundle-v1.schema.json").unlink()
+        with self.assertRaises(PermissionError):
+            (installed / "context-bundle-v1.schema.json").unlink()
         self._installed_tool_definitions(result)
-        (cached / "context-bundle-v1.schema.json").unlink()
-        failed = self._installed_tool_definitions(result, check=False)
+        mutable_activation = self.root / "mutable-activation-copy"
+        shutil.copytree(result.activation_dir, mutable_activation)
+        for path in mutable_activation.rglob("*"):
+            if path.is_dir():
+                path.chmod(0o700)
+            elif path.is_file():
+                path.chmod(0o500 if path.stat().st_mode & stat.S_IXUSR else 0o600)
+        mutable_activation.chmod(0o700)
+        (
+            mutable_activation
+            / "marketplace"
+            / "plugins"
+            / "codex-smart-subagents"
+            / "config"
+            / "runtime-schemas"
+            / "context-bundle-v1.schema.json"
+        ).unlink()
+        failed = self._installed_tool_definitions(
+            result,
+            check=False,
+            activation_dir=mutable_activation,
+        )
         self.assertNotEqual(0, failed.returncode)
         self.assertIn("SCHEMA_DEPENDENCY_MISSING", failed.stderr)
 
@@ -604,30 +662,21 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
             (
                 "changed",
                 lambda: schema.write_bytes(original + b"\n"),
-                lambda: schema.write_bytes(original),
             ),
             (
                 "extra",
                 lambda: extra.write_bytes(b"{}\n"),
-                extra.unlink,
             ),
         )
-        for name, mutate, restore in mutations:
+        before = activation_materializer_v2._tree_sha256(result.activation_dir)
+        for name, mutate in mutations:
             with self.subTest(mutation=name):
-                mutate()
-                try:
-                    with self.assertRaises(
-                        ActivationMaterializationV2Error
-                    ) as captured:
-                        activation_materializer_v2._validate_source_catalog_identity_v2(
-                            source_root
-                        )
-                    self.assertEqual(
-                        "SOURCE_GENERATED_PATH_CONFLICT",
-                        captured.exception.code,
-                    )
-                finally:
-                    restore()
+                with self.assertRaises(PermissionError):
+                    mutate()
+                self.assertEqual(
+                    before,
+                    activation_materializer_v2._tree_sha256(result.activation_dir),
+                )
 
     def test_manifest_tracks_immutable_artifacts_and_preserves_user_config(
         self,
@@ -683,9 +732,15 @@ class ActivationMaterializerV2Tests(unittest.TestCase):
         )
         return response
 
-    def _installed_tool_definitions(self, result, *, check: bool = True):
+    def _installed_tool_definitions(
+        self,
+        result,
+        *,
+        check: bool = True,
+        activation_dir: Path | None = None,
+    ):
         source = (
-            result.activation_dir
+            (activation_dir or result.activation_dir)
             / "marketplace"
             / "plugins"
             / "codex-smart-subagents"

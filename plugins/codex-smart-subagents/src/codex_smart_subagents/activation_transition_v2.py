@@ -45,13 +45,14 @@ from .activation_materializer_v2 import (
     _fsync_directory,
     _manifest_artifacts,
     _materialize_marketplace,
-    _normalize_private_tree,
+    _make_activation_tree_removable_v2,
     _read_json,
     _required_sha256,
     _sha256_file,
     _validate_snapshot_subject,
     _validate_source_catalog_identity_v2,
     normalize_state_home_v2,
+    seal_activation_tree_v2,
 )
 from .canonical_json import canonical_json_bytes, domain_fingerprint
 from .codex_binary_snapshot import CodexBinarySnapshotter, SnapshotCommandExecutor
@@ -1457,10 +1458,16 @@ def capture_activation_transition_proof_v2(
 
     activation_dir = layout.managed_root / "activations" / activation_id
     activation_path = activation_dir / "activation.json"
+    activation_root_mode = stat.S_IMODE(os.lstat(activation_dir).st_mode)
+    if activation_root_mode not in {0o500, 0o700}:
+        _fail("ACTIVE_TREE_CHANGED", "режим каталога активации неверен")
     activation_raw, activation = _read_private_json_bytes(
         activation_path,
         code="ACTIVE_TREE_CHANGED",
         require_canonical=True,
+        expected_modes=frozenset(
+            {0o400 if activation_root_mode == 0o500 else 0o600}
+        ),
     )
     if (
         activation.get("activationId") != activation_id
@@ -1632,10 +1639,16 @@ def reverify_activation_transition_proof_v2(
     ):
         _fail("ACTIVE_LINK_CHANGED", "активная ссылка заменена после снимка")
 
+    activation_root_mode = stat.S_IMODE(os.lstat(proof.activation_dir).st_mode)
+    if activation_root_mode not in {0o500, 0o700}:
+        _fail("ACTIVE_TREE_CHANGED", "режим каталога активации неверен")
     activation_raw, activation = _read_private_json_bytes(
         proof.activation_dir / "activation.json",
         code="ACTIVE_TREE_CHANGED",
         require_canonical=True,
+        expected_modes=frozenset(
+            {0o400 if activation_root_mode == 0o500 else 0o600}
+        ),
     )
     try:
         tree = _projection(
@@ -1767,7 +1780,6 @@ def stage_upgrade_activation_v2(
                 plugin_root=plugin_root,
                 bundled_catalog=observation.bundled_catalog.projection,
             )
-            _normalize_private_tree(temporary_stage)
             marketplace_sha = _tree_sha256(marketplace)
             generation_sha = _tree_sha256(plugin_root)
             database_id = "db2_" + secrets.token_hex(16)
@@ -1839,6 +1851,7 @@ def stage_upgrade_activation_v2(
                 "identity": identity,
             }
             _atomic_write_json(activation_dir / "activation.json", activation_document)
+            seal_activation_tree_v2(activation_dir)
             _fsync_directory(activation_dir)
             _fsync_directory(layout.managed_root / "activations")
             compatibility_fingerprint = str(
@@ -1909,9 +1922,11 @@ def stage_upgrade_activation_v2(
             return staged
         except Exception:
             if activation_dir is not None and activation_dir.is_dir():
+                _make_activation_tree_removable_v2(activation_dir)
                 shutil.rmtree(activation_dir)
                 _fsync_directory(layout.managed_root / "activations")
             if temporary_stage is not None and temporary_stage.is_dir():
+                _make_activation_tree_removable_v2(temporary_stage)
                 shutil.rmtree(temporary_stage)
                 _fsync_directory(layout.managed_root / "activations")
             raise
@@ -2113,11 +2128,16 @@ def _manifest_artifacts_for_preparation(
     fallback_path: Path,
     lock_path: Path,
 ) -> list[dict[str, object]]:
+    activation_mode = (
+        stat.S_IMODE(activation_dir.stat().st_mode)
+        if activation_dir.exists()
+        else 0o500
+    )
     artifacts: list[dict[str, object]] = [
         {
             "type": "directory",
             "relativePath": str(activation_dir.relative_to(codex_home)),
-            "mode": "0700",
+            "mode": f"0{activation_mode:03o}",
             "treeSha256": activation_tree_sha256,
         }
     ]
@@ -2365,10 +2385,16 @@ def _verify_original_manifest_and_owned_receipts(
         != dict(proof.manifest_file_projection)
     ):
         _fail("MANIFEST_CHANGED", "манифест изменён до фиксации")
+    activation_root_mode = stat.S_IMODE(os.lstat(proof.activation_dir).st_mode)
+    if activation_root_mode not in {0o500, 0o700}:
+        _fail("ACTIVE_TREE_CHANGED", "режим каталога активации неверен")
     activation_raw, activation = _read_private_json_bytes(
         proof.activation_dir / "activation.json",
         code="ACTIVE_TREE_CHANGED",
         require_canonical=True,
+        expected_modes=frozenset(
+            {0o400 if activation_root_mode == 0o500 else 0o600}
+        ),
     )
     if (
         activation_raw != proof.activation_raw
@@ -2898,6 +2924,7 @@ def _read_private_json_bytes(
     *,
     code: str,
     require_canonical: bool,
+    expected_modes: frozenset[int] = frozenset({0o600}),
 ) -> tuple[bytes, dict[str, Any]]:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     descriptor = os.open(path, flags)
@@ -2906,7 +2933,7 @@ def _read_private_json_bytes(
         if (
             not stat.S_ISREG(before.st_mode)
             or before.st_uid != os.getuid()
-            or stat.S_IMODE(before.st_mode) != 0o600
+            or stat.S_IMODE(before.st_mode) not in expected_modes
             or before.st_nlink != 1
             or before.st_size <= 0
             or before.st_size > _MAX_CONTROL_BYTES

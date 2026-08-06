@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
 
+sys.dont_write_bytecode = True
+
 _REPO = Path(__file__).resolve().parents[1]
 _PLUGIN_SOURCE = _REPO / "plugins" / "codex-smart-subagents" / "src"
 if str(_PLUGIN_SOURCE) not in sys.path:
@@ -88,13 +90,16 @@ from codex_smart_subagents.installer_receipt_reconciliation_v2 import (  # noqa:
     reconcile_installer_receipt_v2,
 )
 from codex_smart_subagents.installer_recovery_v2 import (  # noqa: E402
+    ActivationBytecodeRepairV2,
     InstallerLifecycleAdapterResultV2,
     MainJournalRecoveryV2,
     PreparationJournalRecoveryV2,
     RecoveryPlanV2,
     execute_recovery_v2,
+    apply_activation_bytecode_repair_v2,
     execute_rollback_v2,
     inspect_recovery_v2,
+    inspect_activation_bytecode_repair_v2,
     plan_recovery_v2,
     plan_rollback_v2,
     read_rollback_v2,
@@ -2749,6 +2754,7 @@ def _registration_runtime_layout_v2(layout: InstallLayout) -> InstallLayout:
     activation = _read_private_json(
         activation_dir / "activation.json",
         code="REGISTRATION_RUNTIME_INVALID",
+        expected_modes=frozenset({0o400, 0o600}),
     )
     identity = activation.get("identity")
     activation_snapshot = (
@@ -3700,14 +3706,19 @@ def _command_environment(
     return result
 
 
-def _read_private_json(path: Path, *, code: str) -> dict[str, Any]:
+def _read_private_json(
+    path: Path,
+    *,
+    code: str,
+    expected_modes: frozenset[int] = frozenset({0o600}),
+) -> dict[str, Any]:
     try:
         info = os.lstat(path)
         if (
             not stat.S_ISREG(info.st_mode)
             or info.st_uid != os.getuid()
             or info.st_nlink != 1
-            or stat.S_IMODE(info.st_mode) != 0o600
+            or stat.S_IMODE(info.st_mode) not in expected_modes
         ):
             raise InstallError(code, f"небезопасный закрытый файл: {path}")
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -4847,6 +4858,7 @@ def _lifecycle_adapter_public_result_v2(
     result: InstallerLifecycleAdapterResultV2,
     *,
     extra_environment: Mapping[str, str] | None,
+    bytecode_repair: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     diagnosis = doctor(layout, extra_environment=extra_environment)
     readiness = _public_readiness(diagnosis)
@@ -4864,6 +4876,8 @@ def _lifecycle_adapter_public_result_v2(
         extensions["durableProcessOwnership"] = (
             _durable_process_ownership_projection_v2(layout.codex_home)
         )
+    if bytecode_repair is not None:
+        extensions["bytecodeRepair"] = dict(bytecode_repair)
     return build_lifecycle_command_result_v2(
         command=result.command,
         status=result.status,
@@ -5362,6 +5376,77 @@ def _inspect_installation_recovery_v2(layout: InstallLayout):
     )
 
 
+def _inspect_active_bytecode_repair_v2(
+    layout: InstallLayout,
+) -> ActivationBytecodeRepairV2:
+    gateway = layout.gateway_layout
+    manifest = _read_private_json(
+        gateway.manifest_path,
+        code="ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+    )
+    active = manifest.get("activeActivation")
+    artifacts = manifest.get("artifacts")
+    if not isinstance(active, Mapping) or not isinstance(artifacts, list):
+        raise InstallError(
+            "ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+            "манифест не содержит активную активацию",
+        )
+    activation_id = active.get("activationId")
+    installation_id = manifest.get("installationId")
+    if not _activation_identifier(activation_id) or not _identifier(
+        installation_id, "ins2_", 32
+    ):
+        raise InstallError(
+            "ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+            "идентичность активной активации неверна",
+        )
+    activation_dir = gateway.managed_root / "activations" / str(activation_id)
+    relative = str(activation_dir.relative_to(layout.codex_home))
+    matches = [
+        item
+        for item in artifacts
+        if isinstance(item, Mapping)
+        and item.get("type") == "directory"
+        and item.get("relativePath") == relative
+    ]
+    if len(matches) != 1 or not _SHA256_PATTERN.fullmatch(
+        str(matches[0].get("treeSha256"))
+    ):
+        raise InstallError(
+            "ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+            "квитанция дерева активной активации отсутствует",
+        )
+    expected_target = f"activations/{activation_id}/marketplace"
+    if (
+        not gateway.marketplace_link.is_symlink()
+        or os.readlink(gateway.marketplace_link) != expected_target
+        or active.get("symlinkTarget") != expected_target
+    ):
+        raise InstallError(
+            "ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+            "публичная ссылка активации изменилась",
+        )
+    receipt = _load_installer_receipt(layout.installer_receipt_path)
+    if (
+        receipt.get("installationId") != installation_id
+        or receipt.get("activationId") != activation_id
+        or receipt.get("registeredMarketplacePath")
+        != str(activation_dir / "marketplace")
+    ):
+        raise InstallError(
+            "ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+            "квитанция установщика относится к другой активации",
+        )
+    try:
+        return inspect_activation_bytecode_repair_v2(
+            activation_dir=activation_dir,
+            expected_tree_sha256=str(matches[0]["treeSha256"]),
+        )
+    except Exception as error:
+        code = getattr(error, "code", "ACTIVATION_BYTECODE_REPAIR_UNSAFE")
+        raise InstallError(str(code), "дерево активации нельзя безопасно восстановить") from error
+
+
 def _recover_pending_install_journal_v2(
     layout: InstallLayout,
     *,
@@ -5507,6 +5592,59 @@ def recover_installation_v2(
             result,
             extra_environment=extra_environment,
         )
+
+    initial_inspection = _inspect_installation_recovery_v2(layout)
+    if (
+        initial_inspection.journal_kind == "none"
+        and os.path.lexists(layout.installer_receipt_path)
+        and os.path.lexists(layout.gateway_layout.manifest_path)
+    ):
+        bytecode_plan = _inspect_active_bytecode_repair_v2(layout)
+        if bytecode_plan.status == "planned":
+            operation_id = "op2_" + domain_fingerprint(
+                "codex-smart/activation-bytecode-repair/v2",
+                {
+                    "activationDir": str(bytecode_plan.activation_dir),
+                    "expectedTreeSha256": bytecode_plan.expected_tree_sha256,
+                },
+            )[:32]
+            if not execute:
+                return _lifecycle_adapter_public_result_v2(
+                    layout,
+                    InstallerLifecycleAdapterResultV2(
+                        command="recover",
+                        status="planned",
+                        operation_id=operation_id,
+                        journal_kind="activation-bytecode",
+                    ),
+                    extra_environment=extra_environment,
+                    bytecode_repair={
+                        "reasonCode": bytecode_plan.reason_code,
+                        "fileCount": len(bytecode_plan.bytecode_files),
+                    },
+                )
+            with installation_lock(layout.lock_path):
+                if _inspect_installation_recovery_v2(layout).journal_kind != "none":
+                    raise InstallError(
+                        "ACTIVATION_BYTECODE_REPAIR_BUSY",
+                        "во время восстановления появился журнал установщика",
+                    )
+                bytecode_plan = _inspect_active_bytecode_repair_v2(layout)
+                repaired = apply_activation_bytecode_repair_v2(bytecode_plan)
+            return _lifecycle_adapter_public_result_v2(
+                layout,
+                InstallerLifecycleAdapterResultV2(
+                    command="recover",
+                    status="recovered",
+                    operation_id=operation_id,
+                    journal_kind="activation-bytecode",
+                ),
+                extra_environment=extra_environment,
+                bytecode_repair={
+                    "reasonCode": repaired.reason_code,
+                    "fileCount": len(bytecode_plan.bytecode_files),
+                },
+            )
 
     def build_plan(inspection):
         if inspection.journal_kind == "none":

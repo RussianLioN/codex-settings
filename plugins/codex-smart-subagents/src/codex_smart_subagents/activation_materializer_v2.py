@@ -551,6 +551,7 @@ def stage_activation_identity_v2(
                 "identity": identity,
             }
             _atomic_write_json(activation_dir / "activation.json", activation_document)
+            seal_activation_tree_v2(activation_dir)
             _fsync_directory(activation_dir)
             _fsync_directory(layout.managed_root / "activations")
             activation_tree = _capture_owned_tree_v2(activation_dir)
@@ -620,8 +621,10 @@ def stage_activation_identity_v2(
             )
         except Exception:
             if activation_dir is not None and activation_dir.is_dir():
+                _make_activation_tree_removable_v2(activation_dir)
                 shutil.rmtree(activation_dir)
             if temporary_stage is not None and temporary_stage.is_dir():
+                _make_activation_tree_removable_v2(temporary_stage)
                 shutil.rmtree(temporary_stage)
             _rollback_staging_ownership_v2(current_ownership())
             raise
@@ -1052,6 +1055,7 @@ def cleanup_accepted_activation_v2(
         removed.append(database_path)
         receipt_path.unlink()
         removed.append(receipt_path)
+        _make_activation_tree_removable_v2(activation_dir)
         shutil.rmtree(activation_dir)
         removed.append(activation_dir)
         layout.manifest_path.unlink()
@@ -1629,6 +1633,7 @@ def materialize_activation_v2(
                 activation_dir / "activation.json",
                 activation_document,
             )
+            seal_activation_tree_v2(activation_dir)
             _fsync_directory(activation_dir)
             _fsync_directory(layout.managed_root / "activations")
 
@@ -2176,7 +2181,7 @@ def _materialize_marketplace(
                 f"вектор скопирован неверно: {name}",
             )
     _atomic_write_json(config_root / "bundled-catalog-v1.json", bundled_catalog)
-    _normalize_private_tree(marketplace)
+    seal_activation_tree_v2(marketplace)
 
 
 def _validate_source_catalog_identity_v2(source_root: Path) -> None:
@@ -2224,11 +2229,13 @@ def _is_materialized_capsule_source_v2(source_root: Path) -> bool:
         installer_info = os.lstat(installer)
         bundled_info = os.lstat(bundled_catalog)
         runtime_schemas_info = os.lstat(runtime_schemas)
+        root_mode = stat.S_IMODE(root_info.st_mode)
+        regular_mode = 0o400 if root_mode == 0o500 else 0o600
         if (
             not stat.S_ISDIR(root_info.st_mode)
             or stat.S_ISLNK(root_info.st_mode)
             or root_info.st_uid != os.getuid()
-            or stat.S_IMODE(root_info.st_mode) != 0o700
+            or root_mode not in {0o500, 0o700}
             or not stat.S_ISREG(installer_info.st_mode)
             or stat.S_ISLNK(installer_info.st_mode)
             or installer_info.st_uid != os.getuid()
@@ -2238,7 +2245,7 @@ def _is_materialized_capsule_source_v2(source_root: Path) -> bool:
             or stat.S_ISLNK(bundled_info.st_mode)
             or bundled_info.st_uid != os.getuid()
             or bundled_info.st_nlink != 1
-            or stat.S_IMODE(bundled_info.st_mode) != 0o600
+            or stat.S_IMODE(bundled_info.st_mode) != regular_mode
             or not isinstance(
                 json.loads(bundled_catalog.read_text(encoding="utf-8")),
                 dict,
@@ -2250,7 +2257,7 @@ def _is_materialized_capsule_source_v2(source_root: Path) -> bool:
             or not stat.S_ISDIR(runtime_schemas_info.st_mode)
             or stat.S_ISLNK(runtime_schemas_info.st_mode)
             or runtime_schemas_info.st_uid != os.getuid()
-            or stat.S_IMODE(runtime_schemas_info.st_mode) != 0o700
+            or stat.S_IMODE(runtime_schemas_info.st_mode) != root_mode
             or {path.name for path in runtime_schemas.iterdir()}
             != set(_MCP_RUNTIME_SCHEMA_FILES)
         ):
@@ -2265,7 +2272,7 @@ def _is_materialized_capsule_source_v2(source_root: Path) -> bool:
                     or stat.S_ISLNK(info.st_mode)
                     or info.st_uid != os.getuid()
                     or info.st_nlink != 1
-                    or stat.S_IMODE(info.st_mode) != 0o600
+                    or stat.S_IMODE(info.st_mode) != regular_mode
                 ):
                     return False
             if _sha256_file(cached) != _sha256_file(canonical):
@@ -2280,7 +2287,7 @@ def _is_materialized_capsule_source_v2(source_root: Path) -> bool:
                     or stat.S_ISLNK(info.st_mode)
                     or info.st_uid != os.getuid()
                     or info.st_nlink != 1
-                    or stat.S_IMODE(info.st_mode) != 0o600
+                    or stat.S_IMODE(info.st_mode) != regular_mode
                 ):
                     return False
             if _sha256_file(cached) != _sha256_file(canonical):
@@ -2376,6 +2383,37 @@ def _normalize_private_tree(root: Path) -> None:
     root.chmod(0o700)
 
 
+def seal_activation_tree_v2(root: Path) -> None:
+    """Закрывает полностью подготовленное дерево от записи владельцем."""
+
+    checkpoint_current_operation_deadline_if_scoped_v2()
+    for path in sorted(
+        root.rglob("*"),
+        key=lambda item: (len(item.parts), item.as_posix()),
+        reverse=True,
+    ):
+        checkpoint_current_operation_deadline_if_scoped_v2()
+        info = path.lstat()
+        if stat.S_ISDIR(info.st_mode):
+            path.chmod(0o500)
+        elif stat.S_ISREG(info.st_mode):
+            path.chmod(0o500 if info.st_mode & stat.S_IXUSR else 0o400)
+        else:
+            _fail("UNSAFE_SOURCE_TREE", f"особый объект в активации: {path}")
+    root.chmod(0o500)
+
+
+def _make_activation_tree_removable_v2(root: Path) -> None:
+    """Открывает только уже выбранное локальное дерево перед удалением."""
+
+    if not root.is_dir() or root.is_symlink():
+        return
+    root.chmod(0o700)
+    for path in root.rglob("*"):
+        if path.is_dir() and not path.is_symlink():
+            path.chmod(0o700)
+
+
 def _publish_fallback(
     *,
     layout: GatewayLayout,
@@ -2409,7 +2447,7 @@ def _manifest_artifacts(
         {
             "type": "directory",
             "relativePath": str(activation_dir.relative_to(codex_home)),
-            "mode": "0700",
+            "mode": f"0{stat.S_IMODE(activation_dir.stat().st_mode):03o}",
             "treeSha256": _tree_sha256(activation_dir),
         }
     ]
@@ -2863,8 +2901,10 @@ def _cleanup_failed_materialization(
     if layout.manifest_path.exists():
         layout.manifest_path.unlink()
     if activation_dir is not None and activation_dir.is_dir():
+        _make_activation_tree_removable_v2(activation_dir)
         shutil.rmtree(activation_dir)
     if stage is not None and stage.is_dir():
+        _make_activation_tree_removable_v2(stage)
         shutil.rmtree(stage)
     if database_path is not None:
         for path in (
@@ -3132,16 +3172,30 @@ def _remove_owned_tree_v2(entries: tuple[_OwnedTreeEntryV2, ...]) -> None:
         _owned_tree_entry_matches_v2(entry) for entry in entries
     ):
         return
+    for entry in sorted(entries, key=lambda item: len(item.path.parts)):
+        if entry.kind == "directory":
+            entry.path.chmod(0o700)
     ordered = sorted(
         entries,
         key=lambda entry: (entry.kind == "directory", -len(entry.path.parts)),
     )
     for entry in ordered:
-        matches = (
-            _owned_tree_directory_identity_matches_v2(entry)
-            if entry.kind == "directory"
-            else _owned_tree_entry_matches_v2(entry)
-        )
+        if entry.kind == "directory":
+            try:
+                info = os.lstat(entry.path)
+            except FileNotFoundError:
+                continue
+            matches = (
+                stat.S_ISDIR(info.st_mode)
+                and not stat.S_ISLNK(info.st_mode)
+                and info.st_dev == entry.device
+                and info.st_ino == entry.inode
+                and info.st_uid == entry.owner_uid
+                and info.st_gid == entry.owner_gid
+                and stat.S_IMODE(info.st_mode) == 0o700
+            )
+        else:
+            matches = _owned_tree_entry_matches_v2(entry)
         if not matches:
             continue
         try:

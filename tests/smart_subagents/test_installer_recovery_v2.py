@@ -28,6 +28,7 @@ from codex_smart_subagents.canonical_json import (  # noqa: E402
     domain_fingerprint,
 )
 from codex_smart_subagents.installer_recovery_v2 import (  # noqa: E402
+    apply_activation_bytecode_repair_v2,
     ControllerRecoveryIntentV2,
     InstallerRecoveryV2Error,
     MainJournalRecoveryV2,
@@ -35,11 +36,13 @@ from codex_smart_subagents.installer_recovery_v2 import (  # noqa: E402
     execute_recovery_v2,
     execute_rollback_v2,
     inspect_recovery_v2,
+    inspect_activation_bytecode_repair_v2,
     plan_recovery_v2,
     plan_rollback_v2,
     read_rollback_v2,
     read_rollback_from_transition_v2,
 )
+from codex_smart_subagents.activation_gateway_v2 import _tree_sha256  # noqa: E402
 from codex_smart_subagents.activation_transition_v2 import (  # noqa: E402
     ActivationTransitionProofV2,
 )
@@ -400,6 +403,65 @@ class _ControllerPort:
 
 
 class InstallerRecoveryV2Tests(unittest.TestCase):
+    def test_exact_bytecode_drift_is_repaired_idempotently(self) -> None:
+        activation = self.root / "bytecode-activation"
+        package = activation / "marketplace" / "package"
+        package.mkdir(parents=True, mode=0o700)
+        activation.chmod(0o700)
+        (activation / "marketplace").chmod(0o700)
+        package.chmod(0o700)
+        source = package / "module.py"
+        source.write_text("VALUE = 1\n", encoding="utf-8")
+        source.chmod(0o600)
+        expected = _tree_sha256(activation)
+        cache = package / "__pycache__"
+        cache.mkdir(mode=0o755)
+        bytecode = cache / "module.cpython-313.pyc"
+        bytecode.write_bytes(b"bytecode")
+        bytecode.chmod(0o644)
+
+        plan = inspect_activation_bytecode_repair_v2(
+            activation_dir=activation,
+            expected_tree_sha256=expected,
+        )
+
+        self.assertEqual("ACTIVATION_BYTECODE_REPAIR_REQUIRED", plan.reason_code)
+        self.assertEqual((bytecode,), plan.bytecode_files)
+        applied = apply_activation_bytecode_repair_v2(plan)
+        self.assertEqual("recovered", applied.status)
+        self.assertEqual(expected, _tree_sha256(activation))
+        repeated = inspect_activation_bytecode_repair_v2(
+            activation_dir=activation,
+            expected_tree_sha256=expected,
+        )
+        self.assertEqual("unchanged", repeated.status)
+
+    def test_bytecode_repair_rejects_any_foreign_drift(self) -> None:
+        activation = self.root / "unsafe-bytecode-activation"
+        package = activation / "marketplace" / "package"
+        package.mkdir(parents=True, mode=0o700)
+        activation.chmod(0o700)
+        (activation / "marketplace").chmod(0o700)
+        package.chmod(0o700)
+        source = package / "module.py"
+        source.write_text("VALUE = 1\n", encoding="utf-8")
+        source.chmod(0o600)
+        expected = _tree_sha256(activation)
+        cache = package / "__pycache__"
+        cache.mkdir(mode=0o755)
+        (cache / "foreign.txt").write_text("not bytecode", encoding="utf-8")
+
+        with self.assertRaises(InstallerRecoveryV2Error) as captured:
+            inspect_activation_bytecode_repair_v2(
+                activation_dir=activation,
+                expected_tree_sha256=expected,
+            )
+
+        self.assertEqual(
+            "ACTIVATION_BYTECODE_REPAIR_UNSAFE",
+            captured.exception.code,
+        )
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="installer-recovery-v2-")
         self.root = Path(self.temporary.name).resolve()

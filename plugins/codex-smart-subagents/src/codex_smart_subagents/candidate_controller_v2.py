@@ -156,7 +156,11 @@ def load_candidate_controller_config_v2(
             "CANDIDATE_ENVIRONMENT_FORBIDDEN",
             "путь базы берётся только из неизменяемой активации",
         )
-    plugin_root = _private_directory(plugin_root, "CANDIDATE_PLUGIN_ROOT_INVALID")
+    plugin_root = _private_directory(
+        plugin_root,
+        "CANDIDATE_PLUGIN_ROOT_INVALID",
+        allowed_modes=frozenset({0o500, 0o700}),
+    )
     try:
         activation_dir = plugin_root.parents[2]
     except IndexError as error:
@@ -180,6 +184,7 @@ def load_candidate_controller_config_v2(
     activation_document = _read_private_canonical_json(
         activation_path,
         "CANDIDATE_ACTIVATION_INVALID",
+        allowed_modes=frozenset({0o400, 0o600}),
     )
     identity = activation_document.get("identity")
     activation_id = activation_document.get("activationId")
@@ -570,7 +575,12 @@ def _wait_for_gateway_ready_v2(
         time.sleep(0.05)
 
 
-def _private_directory(path: Path, code: str) -> Path:
+def _private_directory(
+    path: Path,
+    code: str,
+    *,
+    allowed_modes: frozenset[int] = frozenset({0o700}),
+) -> Path:
     if not isinstance(path, Path) or not path.is_absolute():
         _fail(code, "путь должен быть абсолютным Path")
     try:
@@ -581,7 +591,7 @@ def _private_directory(path: Path, code: str) -> Path:
         not stat.S_ISDIR(info.st_mode)
         or stat.S_ISLNK(info.st_mode)
         or info.st_uid != os.getuid()
-        or stat.S_IMODE(info.st_mode) != 0o700
+        or stat.S_IMODE(info.st_mode) not in allowed_modes
     ):
         _fail(code, f"каталог не является частным: {path}")
     return path.absolute()
@@ -628,14 +638,21 @@ def _executable_from_environment(
     return _private_regular_file(Path(raw), code, executable=True)
 
 
-def _private_regular_file(path: Path, code: str, *, executable: bool) -> Path:
+def _private_regular_file(
+    path: Path,
+    code: str,
+    *,
+    executable: bool,
+    allowed_modes: frozenset[int] | None = None,
+) -> Path:
     if not isinstance(path, Path) or not path.is_absolute():
         _fail(code, "путь должен быть абсолютным Path")
     try:
         info = os.lstat(path)
     except OSError as error:
         raise CandidateControllerV2Error(code, f"файл недоступен: {path}") from error
-    allowed_modes = {0o500, 0o700} if executable else {0o600}
+    if allowed_modes is None:
+        allowed_modes = frozenset({0o500, 0o700} if executable else {0o600})
     if (
         not stat.S_ISREG(info.st_mode)
         or stat.S_ISLNK(info.st_mode)
@@ -648,8 +665,18 @@ def _private_regular_file(path: Path, code: str, *, executable: bool) -> Path:
     return path.absolute()
 
 
-def _read_private_canonical_json(path: Path, code: str) -> dict[str, Any]:
-    path = _private_regular_file(path, code, executable=False)
+def _read_private_canonical_json(
+    path: Path,
+    code: str,
+    *,
+    allowed_modes: frozenset[int] = frozenset({0o600}),
+) -> dict[str, Any]:
+    path = _private_regular_file(
+        path,
+        code,
+        allowed_modes=allowed_modes,
+        executable=False,
+    )
     try:
         raw = path.read_bytes()
         value = json.loads(raw.decode("utf-8"))

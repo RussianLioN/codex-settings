@@ -824,16 +824,32 @@ class InstallerV2ContractTests(_InstallerBase):
         original = schema.read_bytes()
         extra = cached / "extra.schema.json"
 
+        def mutate_schema() -> None:
+            schema.chmod(0o600)
+            schema.write_bytes(original + b"\n")
+
+        def restore_schema() -> None:
+            schema.write_bytes(original)
+            schema.chmod(0o400)
+
+        def add_extra() -> None:
+            cached.chmod(0o700)
+            extra.write_bytes(b"{}\n")
+
+        def remove_extra() -> None:
+            extra.unlink()
+            cached.chmod(0o500)
+
         mutations = (
             (
                 "changed",
-                lambda: schema.write_bytes(original + b"\n"),
-                lambda: schema.write_bytes(original),
+                mutate_schema,
+                restore_schema,
             ),
             (
                 "extra",
-                lambda: extra.write_bytes(b"{}\n"),
-                extra.unlink,
+                add_extra,
+                remove_extra,
             ),
         )
         for name, mutate, restore in mutations:
@@ -1520,6 +1536,25 @@ class InstallerV2ApplyTests(_InstallerBase):
                 "--json",
             ]
 
+        def recovery_command(source_root: Path, *, apply: bool) -> list[str]:
+            return [
+                sys.executable,
+                str(source_root / "scripts" / "install_adaptive_subagents.py"),
+                "--source-root",
+                str(source_root),
+                "--codex-home",
+                str(codex_home),
+                "--bin-dir",
+                str(bin_dir),
+                "--state-home",
+                str(state_home),
+                "--codex-binary",
+                str(codex_binary),
+                "--recover",
+                "--apply" if apply else "--preview",
+                "--json",
+            ]
+
         unrelated = root / "unrelated-workdir"
         unrelated.mkdir(mode=0o700)
         environment = {
@@ -1611,6 +1646,62 @@ class InstallerV2ApplyTests(_InstallerBase):
                 first_result["extensions"]["doctor"]["activationId"],
                 second_result["extensions"]["doctor"]["activationId"],
             )
+
+            active_activation = (
+                activations_root
+                / first_result["extensions"]["doctor"]["activationId"]
+            )
+            package_root = (
+                active_activation
+                / "marketplace"
+                / "plugins"
+                / "codex-smart-subagents"
+                / "src"
+                / "codex_smart_subagents"
+            )
+            cache = package_root / "__pycache__"
+            package_root.chmod(0o700)
+            cache.mkdir(mode=0o700)
+            bytecode = cache / "catalog.cpython-313.pyc"
+            bytecode.write_bytes(b"test-only-bytecode")
+            bytecode.chmod(0o600)
+            package_root.chmod(0o500)
+
+            preview = subprocess.run(
+                recovery_command(capsule_source, apply=False),
+                cwd=unrelated,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(2, preview.returncode, preview.stderr or preview.stdout)
+            preview_result = json.loads(preview.stdout)
+            self.assertEqual("planned", preview_result["status"])
+            self.assertEqual(
+                "ACTIVATION_BYTECODE_REPAIR_REQUIRED",
+                preview_result["extensions"]["bytecodeRepair"]["reasonCode"],
+            )
+
+            recovery = subprocess.run(
+                recovery_command(capsule_source, apply=True),
+                cwd=unrelated,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+            self.assertEqual(
+                0,
+                recovery.returncode,
+                recovery.stderr or recovery.stdout,
+            )
+            recovery_result = json.loads(recovery.stdout)
+            self.assertEqual("recovered", recovery_result["status"])
+            self.assertFalse(cache.exists())
+            self.assertEqual(0o500, stat.S_IMODE(package_root.stat().st_mode))
         finally:
             admin = bin_dir / "codex-smart-subagents-admin"
             if admin.exists():

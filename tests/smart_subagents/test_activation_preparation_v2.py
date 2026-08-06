@@ -353,6 +353,30 @@ class _Fixture:
 
 
 class ActivationPreparationV2Tests(unittest.TestCase):
+    def test_sealed_activation_tree_has_a_stable_content_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "activation"
+            package = root / "marketplace" / "package"
+            package.mkdir(parents=True, mode=0o700)
+            source = package / "module.py"
+            source.write_text("VALUE = 1\n", encoding="utf-8")
+            executable = package / "runner"
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o700)
+            source.chmod(0o600)
+            for directory in (package, package.parent, root):
+                directory.chmod(0o500)
+            source.chmod(0o400)
+            executable.chmod(0o500)
+
+            first = tree_content_sha256_v2(root)
+            second = tree_content_sha256_v2(root)
+
+            self.assertEqual(first, second)
+            root.chmod(0o700)
+            package.parent.chmod(0o700)
+            package.chmod(0o700)
+
     def test_deadline_after_step_intent_preserves_preparation_journal(
         self,
     ) -> None:

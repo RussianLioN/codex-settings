@@ -824,7 +824,9 @@ os._exit(0)
             activation_dirs = list((self.layout.managed_root / "activations").iterdir())
             self.assertEqual(1, len(activation_dirs))
             foreign = activation_dirs[0] / "foreign"
+            activation_dirs[0].chmod(0o700)
             foreign.write_text("keep", encoding="utf-8")
+            activation_dirs[0].chmod(0o500)
             raise RuntimeError("forced snapshot rejection")
 
         with self.assertRaises(ActivationMaterializationV2Error):

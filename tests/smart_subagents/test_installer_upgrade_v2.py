@@ -787,6 +787,7 @@ class InstallerUpgradePreparationV2Tests(unittest.TestCase):
             callbacks=preparation.callbacks,
         ).execute()
         activation_file = proof.activation_dir / "activation.json"
+        activation_file.chmod(0o600)
         activation_file.write_bytes(activation_file.read_bytes() + b"\n")
 
         with self.assertRaises(ActivationTransitionRehydrationV2Error):
@@ -1094,6 +1095,7 @@ class InstallerUpgradePreparationV2Tests(unittest.TestCase):
             / ".codex"
             / "adaptive-subagents.toml"
         )
+        catalog.chmod(0o600)
         catalog.write_bytes(catalog.read_bytes() + b"\n# changed\n")
 
         reconstructed = installer_source_digest_from_materialized_activation_v2(

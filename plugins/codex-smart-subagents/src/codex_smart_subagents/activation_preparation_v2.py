@@ -664,12 +664,15 @@ class ActivationPreparationDefinitionV2:
             content_sha256=self.activation_tree_logical.content_sha256,
         ):
             _integrity("activation tree target is invalid")
-        if self.activation_tree_logical.mode != "0700":
-            _integrity("activation tree must use mode 0700")
+        if self.activation_tree_logical.mode not in {"0500", "0700"}:
+            _integrity("activation tree must use a supported private mode")
+        activation_file_mode = (
+            "0400" if self.activation_tree_logical.mode == "0500" else "0600"
+        )
         expected_activation_file = LogicalPreparationObjectV2(
             path=self.activation_intent.activation_file_path,
             object_type="regular-file",
-            mode="0600",
+            mode=activation_file_mode,
             content_sha256=hashlib.sha256(
                 canonical_json_bytes(self.activation_intent.activation_document)
             ).hexdigest(),
@@ -2029,9 +2032,10 @@ def tree_content_sha256_v2(root: Path) -> str:
         not stat.S_ISDIR(root_info.st_mode)
         or stat.S_ISLNK(root_info.st_mode)
         or root_info.st_uid != os.getuid()
-        or stat.S_IMODE(root_info.st_mode) != 0o700
+        or stat.S_IMODE(root_info.st_mode) not in {0o500, 0o700}
     ):
         _integrity(f"tree root is not a private directory: {root}")
+    root_mode = stat.S_IMODE(root_info.st_mode)
     entries: list[JsonObject] = []
     pending = [root]
     while pending:
@@ -2054,7 +2058,7 @@ def tree_content_sha256_v2(root: Path) -> str:
                     }
                 )
             elif stat.S_ISDIR(info.st_mode):
-                if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+                if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != root_mode:
                     _integrity(f"tree directory is not private: {child}")
                 entries.append(
                     {
@@ -2067,6 +2071,11 @@ def tree_content_sha256_v2(root: Path) -> str:
             elif stat.S_ISREG(info.st_mode):
                 if info.st_uid != os.getuid() or info.st_nlink != 1:
                     _integrity(f"tree file is unsafe: {child}")
+                if root_mode == 0o500 and stat.S_IMODE(info.st_mode) not in {
+                    0o400,
+                    0o500,
+                }:
+                    _integrity(f"sealed tree file remains writable: {child}")
                 entries.append(
                     {
                         "path": relative,

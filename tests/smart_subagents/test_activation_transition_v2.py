@@ -722,8 +722,8 @@ class ActivationTransitionV2Tests(unittest.TestCase):
             / "codex-smart-subagents"
             / "README.md"
         )
-        active_file.write_bytes(active_file.read_bytes() + b"\nforeign\n")
         active_file.chmod(0o600)
+        active_file.write_bytes(active_file.read_bytes() + b"\nforeign\n")
 
         with self.assertRaises(ActivationTransitionV2Error) as tree:
             reverify_activation_transition_proof_v2(

@@ -34,12 +34,13 @@ from .activation_materializer_v2 import (
     _ensure_private_directory,
     _fsync_directory,
     _materialize_marketplace,
-    _normalize_private_tree,
+    _make_activation_tree_removable_v2,
     _read_json,
     _required_sha256,
     _sha256_file,
     _validate_snapshot_subject,
     normalize_state_home_v2,
+    seal_activation_tree_v2,
 )
 from .activation_preparation_v2 import (
     ActivationPreparationAbortV2,
@@ -306,8 +307,9 @@ def build_initial_activation_preparation_v2(
             "identity": identity,
         }
         _atomic_write_json(template / "activation.json", activation_document)
-        _normalize_private_tree(template)
+        seal_activation_tree_v2(template)
         activation_tree_sha256 = tree_content_sha256_v2(template)
+        _make_activation_tree_removable_v2(template)
     intent = ActivationPreparationIntentV2(
         source_root=source_root,
         codex_home=codex_home,
@@ -366,13 +368,13 @@ def build_initial_activation_preparation_v2(
         activation_tree_logical=LogicalPreparationObjectV2(
             path=activation_dir,
             object_type="directory",
-            mode="0700",
+            mode="0500",
             content_sha256=activation_tree_sha256,
         ),
         activation_file_logical=LogicalPreparationObjectV2(
             path=activation_dir / "activation.json",
             object_type="regular-file",
-            mode="0600",
+            mode="0400",
             content_sha256=hashlib.sha256(
                 canonical_json_bytes(activation_document)
             ).hexdigest(),
@@ -465,7 +467,7 @@ def _initial_callbacks_for_intent_v2(
                 _atomic_write_json(
                     stage / "activation.json", received.activation_document
                 )
-                _normalize_private_tree(stage)
+                seal_activation_tree_v2(stage)
                 if tree_content_sha256_v2(stage) != expected_activation_tree_sha256:
                     raise ValueError(
                         "materialized initial activation differs from intent"
@@ -847,7 +849,6 @@ def build_upgrade_preparation_v2(
             plugin_root=plugin_root,
             bundled_catalog=observation.bundled_catalog.projection,
         )
-        _normalize_private_tree(template)
         marketplace_sha = _tree_sha256(marketplace)
         generation_sha = _tree_sha256(plugin_root)
         schema_manifest = _read_json(
@@ -905,7 +906,7 @@ def build_upgrade_preparation_v2(
             "identity": identity,
         }
         _atomic_write_json(template / "activation.json", activation_document)
-        _normalize_private_tree(template)
+        seal_activation_tree_v2(template)
         if source_digest is not None:
             materialized_source_digest = (
                 installer_source_digest_from_materialized_activation_v2(
@@ -921,6 +922,7 @@ def build_upgrade_preparation_v2(
                     "sourceDigest differs from immutable candidate"
                 )
         activation_tree_sha256 = tree_content_sha256_v2(template)
+        _make_activation_tree_removable_v2(template)
     controller_identity = _controller_identity(
         codex_home=proof.codex_home,
         state_home=state_home,
@@ -989,13 +991,13 @@ def build_upgrade_preparation_v2(
         activation_tree_logical=LogicalPreparationObjectV2(
             path=activation_dir,
             object_type="directory",
-            mode="0700",
+            mode="0500",
             content_sha256=activation_tree_sha256,
         ),
         activation_file_logical=LogicalPreparationObjectV2(
             path=activation_dir / "activation.json",
             object_type="regular-file",
-            mode="0600",
+            mode="0400",
             content_sha256=hashlib.sha256(
                 canonical_json_bytes(activation_document)
             ).hexdigest(),
@@ -1395,7 +1397,7 @@ def _callbacks_for_intent(
                     stage / "activation.json",
                     received.activation_document,
                 )
-                _normalize_private_tree(stage)
+                seal_activation_tree_v2(stage)
                 if expected_source_digest is not None:
                     observed_source_digest = (
                         installer_source_digest_from_materialized_activation_v2(
@@ -1598,6 +1600,11 @@ def _validate_owned_stage_tree_v2(
     *,
     normalized: bool,
 ) -> None:
+    normalized_root_mode = None
+    if normalized:
+        normalized_root_mode = stat.S_IMODE(os.lstat(root).st_mode)
+        if normalized_root_mode not in {0o500, 0o700}:
+            raise ValueError("activation preparation stage root mode changed")
     pending = [root]
     while pending:
         path = pending.pop()
@@ -1606,7 +1613,7 @@ def _validate_owned_stage_tree_v2(
         if info.st_uid != os.getuid() or stat.S_ISLNK(info.st_mode):
             raise ValueError("activation preparation stage is not owned")
         if stat.S_ISDIR(info.st_mode):
-            if normalized and mode != 0o700:
+            if normalized and mode != normalized_root_mode:
                 raise ValueError("activation preparation stage directory mode changed")
             if not normalized:
                 if (mode & 0o7000) != 0:
@@ -1638,7 +1645,12 @@ def _validate_owned_stage_tree_v2(
             not stat.S_ISREG(info.st_mode)
             or info.st_nlink != 1
             or (
-                mode not in {0o500, 0o600}
+                mode
+                not in (
+                    {0o400, 0o500}
+                    if normalized_root_mode == 0o500
+                    else {0o500, 0o600}
+                )
                 if normalized
                 else (mode & 0o7000) != 0
             )
@@ -1927,7 +1939,7 @@ def _recovery_source_file_v2(
         or stat.S_ISLNK(info.st_mode)
         or info.st_uid != os.getuid()
         or info.st_nlink != 1
-        or mode not in {0o500, 0o600}
+        or mode not in {0o400, 0o500, 0o600}
     ):
         raise ValueError(f"unsafe persisted source file: {path}")
     payload = path.read_bytes()
@@ -2166,13 +2178,13 @@ def _definition_from_preparation_receipt_v2(
         activation_tree_logical=LogicalPreparationObjectV2(
             path=intent.activation_dir,
             object_type="directory",
-            mode="0700",
+            mode=str(receipt.activation_tree.value["mode"]),
             content_sha256=str(receipt.activation_tree.value["treeSha256"]),
         ),
         activation_file_logical=LogicalPreparationObjectV2(
             path=intent.activation_file_path,
             object_type="regular-file",
-            mode="0600",
+            mode=str(receipt.activation_file.value["mode"]),
             content_sha256=str(receipt.activation_file.value["sha256"]),
         ),
         database_empty_file_logical=LogicalPreparationObjectV2(
