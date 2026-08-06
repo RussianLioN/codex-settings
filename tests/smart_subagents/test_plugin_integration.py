@@ -366,11 +366,12 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertGreaterEqual(start_command["timeout"], 9)
         self.assertEqual("command", prompt["type"])
         self.assertIn("$PLUGIN_ROOT", prompt["command"])
-        self.assertEqual(2, prompt["timeout"])
+        self.assertEqual(5, prompt["timeout"])
         self.assertEqual("command", stop["type"])
         self.assertIn("$PLUGIN_ROOT", stop["command"])
-        self.assertLessEqual(stop["timeout"], 2)
+        self.assertEqual(5, stop["timeout"])
         self.assertIn("session-end", session_end["command"])
+        self.assertEqual(5, session_end["timeout"])
 
     def test_bundled_entrypoints_are_executable_regular_files(self) -> None:
         for relative in (

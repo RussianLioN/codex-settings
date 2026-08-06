@@ -1408,6 +1408,43 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
 
         self.assertEqual(["absence", "health", "absence", "health"], calls)
 
+    def test_stop_recheck_keeps_second_health_probe_under_hook_deadline(self) -> None:
+        runtime = sys.modules["integration_runtime_v2"]
+        database_id = "db2_" + "f" * 32
+        self._write_schema_routes_database(database_id, include_route=False)
+        self._write_active_manifest(database_id)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        self._publish_launch_gate(environment)
+        config = IntegrationConfigV2.from_environ(environment)
+        remaining_budgets: list[int | None] = []
+
+        def health_checker(**_kwargs: object) -> None:
+            current = runtime.operation_deadline_v2.current_operation_deadline_v2()
+            remaining_budgets.append(
+                None if current is None else current.remaining_nanoseconds()
+            )
+
+        self.assertEqual(
+            "MISSING",
+            runtime.durable_stop_smart_turn_state_v2(
+                config,
+                self.record,
+                environ=environment,
+                deadline=time.monotonic() + 0.5,
+                absence_checker=lambda *_args, **_kwargs: None,
+                health_checker=health_checker,
+            ),
+        )
+
+        self.assertEqual(2, len(remaining_budgets))
+        self.assertTrue(
+            all(
+                remaining is not None and 0 < remaining <= 500_000_000
+                for remaining in remaining_budgets
+            )
+        )
+
     def test_resume_binding_uses_pinned_database_without_waiting_for_controller(
         self,
     ) -> None:
