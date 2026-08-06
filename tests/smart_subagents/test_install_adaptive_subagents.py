@@ -2708,6 +2708,27 @@ class InstallerV2RepeatTests(_InstallerBase):
             self.installer._source_implementation_digest_v2(self.layout),
         )
 
+    def test_merged_release_advances_from_the_protected_generation_one(self) -> None:
+        lineage = self.installer._source_lineage_v2(self.layout)
+        previous = {
+            "extensions": {
+                "sourceLineage": {
+                    "schemaVersion": 1,
+                    "generation": 1,
+                    "implementationDigest": (
+                        "b0c25ba4d73897afc7cca5b046c5ce88"
+                        "919796db693f4d1d67cee6fef8d0fad3"
+                    ),
+                }
+            }
+        }
+
+        self.assertEqual(2, lineage["generation"])
+        self.installer._require_monotonic_source_lineage_v2(
+            previous,
+            lineage,
+        )
+
     def test_lifecycle_without_installer_receipt_is_not_adopted(self) -> None:
         self.publish_fake_activation()
 
