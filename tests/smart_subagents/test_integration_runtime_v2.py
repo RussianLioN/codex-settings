@@ -34,6 +34,7 @@ from integration_runtime_v2 import (  # noqa: E402
     HookTurnContextV2,
     IntegrationConfigV2,
     IntegrationV2Error,
+    PinnedResumeBindingV2,
     TurnContextStoreV2,
 )
 from integration_runtime import _git_identity  # noqa: E402
@@ -1890,7 +1891,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
 
     def test_bounded_resumed_route_hands_off_to_next_user_prompt(self) -> None:
         database_id = "db2_" + "f" * 32
-        self._write_schema_routes_database(
+        database_path = self._write_schema_routes_database(
             database_id,
             include_route=True,
             state="RUNNING",
@@ -2044,7 +2045,12 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
                 },
                 environment,
                 v2_mcp_contract_checker=lambda _plugin_root: None,
-                v2_controller_checker=lambda _config, _environ, *, deadline: None,
+                v2_controller_checker=lambda _config, _environ, *, deadline: (
+                    PinnedResumeBindingV2(
+                        database_path,
+                        self.compatibility_fingerprint,
+                    )
+                ),
             )
 
         self.assertIn("hookSpecificOutput", response)
@@ -2059,6 +2065,95 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         rebound = store.load(current.session_id)
         self.assertEqual("BOUND", rebound.attachment.state)
         self.assertEqual("turn-next", rebound.attachment.bound_turn_id)
+
+    def test_live_compatibility_mismatch_detaches_instead_of_binding_old_route(self) -> None:
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        environment["CODEX_SMART_ROOT_PID"] = str(os.getpid())
+        environment["CODEX_SMART_ROOT_START_MARKER"] = "test-root-start"
+        repo_root, base_sha, worktree_fingerprint = _git_identity(
+            str(ROOT), deadline=time.monotonic() + 2
+        )
+        old_compatibility = "a" * 64
+        live_compatibility = "b" * 64
+        project = ProjectIdentityV2(
+            repo_root=repo_root,
+            base_sha=base_sha,
+            worktree_fingerprint=worktree_fingerprint,
+            compatibility_fingerprint=old_compatibility,
+        )
+        root = RootIdentityV2(os.getpid(), "test-root-start")
+        store = RootSessionLeaseStoreV2(
+            self.state_home,
+            process_marker_reader=(
+                lambda pid: "test-root-start" if pid == os.getpid() else None
+            ),
+        )
+        store.register_startup(
+            session_id="session-from-hook",
+            shell_session_id=self.config.shell_session_id,
+            root=RootIdentityV2(999999, "old-root-start"),
+            project=project,
+        )
+        candidate = ResumeCandidateV2(
+            route_id="route2_" + "1" * 32,
+            original_shell_session_id=self.config.shell_session_id,
+            original_session_id="session-from-hook",
+            original_turn_id="turn-original",
+            route_state="RUNNING",
+            start_request_id="sr2_" + "2" * 32,
+            node_id="node2_" + "3" * 32,
+            terminal_result_unacknowledged=False,
+        )
+        store.prepare_resume(
+            session_id="session-from-hook",
+            shell_session_id=self.config.shell_session_id,
+            root=root,
+            project=project,
+            candidate=candidate,
+        )
+        prompt_path = PLUGIN / "hooks" / "user_prompt_submit.py"
+        prompt_spec = importlib.util.spec_from_file_location(
+            "smart_prompt_live_compatibility_mismatch_test",
+            prompt_path,
+        )
+        assert prompt_spec is not None and prompt_spec.loader is not None
+        prompt_module = importlib.util.module_from_spec(prompt_spec)
+        sys.modules[prompt_spec.name] = prompt_module
+        prompt_spec.loader.exec_module(prompt_module)
+
+        with mock.patch.object(
+            prompt_module,
+            "system_process_marker_reader_v2",
+            side_effect=lambda pid: (
+                "test-root-start" if pid == os.getpid() else None
+            ),
+        ):
+            response = prompt_module.handle(
+                {
+                    "session_id": "session-from-hook",
+                    "turn_id": "turn-live-compatibility",
+                    "cwd": repo_root,
+                    "hook_event_name": "UserPromptSubmit",
+                },
+                environment,
+                v2_mcp_contract_checker=lambda _plugin_root: None,
+                v2_controller_checker=lambda _config, _environ, *, deadline: (
+                    PinnedResumeBindingV2(
+                        self.state_home / "live.sqlite3",
+                        live_compatibility,
+                    )
+                ),
+            )
+
+        self.assertIn("hookSpecificOutput", response)
+        context = response["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Умный режим версии 2 активен", context)
+        self.assertNotIn(candidate.route_id, context)
+        self.assertNotIn(candidate.start_request_id, context)
+        lease = store.load("session-from-hook")
+        self.assertEqual("DETACHED", lease.attachment.state)
+        self.assertEqual(live_compatibility, lease.project.compatibility_fingerprint)
 
     def test_next_prompt_recovers_claim_after_context_write_before_finalize(self) -> None:
         environment, publisher = self._proven_environment()
