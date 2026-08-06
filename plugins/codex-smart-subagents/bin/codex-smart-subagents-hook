@@ -60,9 +60,7 @@ def _json_string(value: str) -> str:
 def _write_deferred(reason: str) -> None:
     system_message = "SMART_HOOK_DEFERRED: " + reason
     line = (
-        '{"continue":true,"code":"SMART_HOOK_DEFERRED","reason":'
-        + _json_string(reason)
-        + ',"systemMessage":'
+        '{"continue":true,"systemMessage":'
         + _json_string(system_message)
         + "}\n"
     )

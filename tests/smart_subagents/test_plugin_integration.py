@@ -25,7 +25,7 @@ SRC = PLUGIN_ROOT / "src"
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SRC))
 
-from hook_deadline import stop_deadline_from_environ  # noqa: E402
+from hook_deadline import fail_open_response, stop_deadline_from_environ  # noqa: E402
 
 
 def load_module(name: str, relative_path: str) -> ModuleType:
@@ -82,11 +82,32 @@ def parse_single_deferred_stdout(stdout: bytes) -> dict[str, Any]:
     if len(lines) != 1:
         raise AssertionError(f"expected one JSON line, got {text!r}")
     response = json.loads(lines[0])
-    if response.get("code") != "SMART_HOOK_DEFERRED":
+    if set(response) != {"continue", "systemMessage"}:
         raise AssertionError(response)
     if response.get("continue") is not True:
         raise AssertionError(response)
+    deferred_reason(response)
     return response
+
+
+def deferred_reason(response: dict[str, Any]) -> str:
+    prefix = "SMART_HOOK_DEFERRED: "
+    system_message = response.get("systemMessage")
+    if not isinstance(system_message, str) or not system_message.startswith(prefix):
+        raise AssertionError(response)
+    return system_message[len(prefix) :]
+
+
+class HookDeadlineContractTests(unittest.TestCase):
+    def test_fail_open_response_uses_only_universal_codex_fields(self) -> None:
+        response = fail_open_response("synthetic")
+
+        self.assertEqual({"continue", "systemMessage"}, set(response))
+        self.assertTrue(response["continue"])
+        self.assertEqual(
+            "SMART_HOOK_DEFERRED: synthetic",
+            response["systemMessage"],
+        )
 
 
 def write_fake_pathlib(directory: Path, lines: list[str]) -> None:
@@ -575,10 +596,8 @@ class PluginMetadataTests(unittest.TestCase):
             )
 
             self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
-            response = json.loads(result.stdout.decode("utf-8"))
-            self.assertTrue(response["continue"])
-            self.assertEqual("SMART_HOOK_DEFERRED", response["code"])
-            self.assertIn("срок", response["reason"].lower())
+            response = parse_single_deferred_stdout(result.stdout)
+            self.assertIn("срок", deferred_reason(response).lower())
 
     def test_stop_parent_supervises_slow_import_before_main(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -671,8 +690,9 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertEqual(0, result.returncode)
         self.assertEqual(b"", result.stderr)
         response = parse_single_deferred_stdout(result.stdout)
-        self.assertIn("ошиб", response["reason"].lower())
-        self.assertNotIn("срок", response["reason"].lower())
+        reason = deferred_reason(response).lower()
+        self.assertIn("ошиб", reason)
+        self.assertNotIn("срок", reason)
         self.assertLess(elapsed, 1.5)
 
     def test_stop_parent_timeout_distribution_stays_below_internal_budget(self) -> None:
@@ -819,7 +839,7 @@ class PluginMetadataTests(unittest.TestCase):
 
             self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
             response = parse_single_deferred_stdout(result.stdout)
-            self.assertIn("worker", response["reason"])
+            self.assertIn("worker", deferred_reason(response))
 
     def test_stop_parent_supervises_open_stdin(self) -> None:
         process = subprocess.Popen(
@@ -870,7 +890,7 @@ class PluginMetadataTests(unittest.TestCase):
 
             self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
             response = parse_single_deferred_stdout(result.stdout)
-            self.assertIn("срок", response["reason"].lower())
+            self.assertIn("срок", deferred_reason(response).lower())
 
     def test_stop_parent_kills_worker_process_group_on_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -904,7 +924,7 @@ class PluginMetadataTests(unittest.TestCase):
 
             self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
             response = parse_single_deferred_stdout(result.stdout)
-            self.assertIn("срок", response["reason"].lower())
+            self.assertIn("срок", deferred_reason(response).lower())
             pid = int(pid_file.read_text(encoding="utf-8"))
             alive = True
             try:
@@ -949,7 +969,7 @@ class PluginMetadataTests(unittest.TestCase):
 
             self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
             response = parse_single_deferred_stdout(result.stdout)
-            self.assertIn("stdout", response["reason"])
+            self.assertIn("stdout", deferred_reason(response))
 
     def test_stop_parent_is_repeatable_after_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1268,7 +1288,7 @@ class HookIntegrationTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr.decode("utf-8", "replace"))
         response = json.loads(result.stdout.decode("utf-8"))
         self.assertEqual("block", response["decision"])
-        self.assertNotEqual("SMART_HOOK_DEFERRED", response.get("code"))
+        self.assertNotIn("systemMessage", response)
         self.assertGreaterEqual(elapsed, 1.20)
         self.assertLess(elapsed, 1.75)
 
@@ -1310,9 +1330,9 @@ class HookIntegrationTests(unittest.TestCase):
         ):
             response = self.session_end_hook.handle(payload, self.env)
 
+        self.assertEqual({"continue", "systemMessage"}, set(response))
         self.assertTrue(response["continue"])
-        self.assertEqual("SMART_HOOK_DEFERRED", response["code"])
-        self.assertIn("SessionEnd", response["reason"])
+        self.assertIn("SessionEnd", deferred_reason(response))
 
     def test_new_turn_best_effort_cancels_superseded_active_route(self) -> None:
         self.prompt_hook.handle(

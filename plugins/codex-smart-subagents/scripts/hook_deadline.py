@@ -42,7 +42,5 @@ def require_time_remaining(deadline: float, reason: str) -> None:
 def fail_open_response(reason: str) -> dict[str, object]:
     return {
         "continue": True,
-        "code": SMART_HOOK_DEFERRED_CODE,
-        "reason": reason,
         "systemMessage": f"{SMART_HOOK_DEFERRED_CODE}: {reason}",
     }

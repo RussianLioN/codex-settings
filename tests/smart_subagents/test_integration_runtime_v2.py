@@ -81,6 +81,14 @@ from codex_smart_subagents.schema_projection import (  # noqa: E402
 )
 
 
+def deferred_reason(response: dict[str, object]) -> str:
+    prefix = "SMART_HOOK_DEFERRED: "
+    system_message = response.get("systemMessage")
+    if not isinstance(system_message, str) or not system_message.startswith(prefix):
+        raise AssertionError(response)
+    return system_message[len(prefix) :]
+
+
 class _Resolver:
     def __init__(self, decision: GatewayDecision) -> None:
         self.decision = decision
@@ -2806,8 +2814,9 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
                 v2_plan_state_provider=terminal_after_deadline,
             )
 
+        self.assertEqual({"continue", "systemMessage"}, set(response))
         self.assertTrue(response["continue"])
-        self.assertEqual("SMART_HOOK_DEFERRED", response["code"])
+        deferred_reason(response)
         acknowledge.assert_not_called()
 
     def test_v2_stop_resume_acknowledgement_error_is_fail_open_and_repeatable(
@@ -2853,9 +2862,9 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             )
 
         for response in (first, second):
+            self.assertEqual({"continue", "systemMessage"}, set(response))
             self.assertTrue(response["continue"])
-            self.assertEqual("SMART_HOOK_DEFERRED", response["code"])
-            self.assertIn("resume", response["reason"])
+            self.assertIn("resume", deferred_reason(response))
 
     def test_stop_parent_supervises_slow_resume_lease_route_worker(self) -> None:
         database_id = "db2_" + "f" * 32
@@ -2990,7 +2999,8 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
 
         self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
         response = json.loads(result.stdout.decode("utf-8"))
-        self.assertEqual("SMART_HOOK_DEFERRED", response["code"])
+        self.assertEqual({"continue", "systemMessage"}, set(response))
+        deferred_reason(response)
         self.assertLess(elapsed, 1.75)
         self.assertIsNotNone(marker_value)
         self.assertGreater(float(marker_value or "0"), started)
