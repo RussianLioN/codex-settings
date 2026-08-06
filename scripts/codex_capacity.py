@@ -7,10 +7,12 @@ import argparse
 import fcntl
 import hashlib
 import json
+import math
 import os
 import shlex
 import sqlite3
 import stat
+import subprocess
 import sys
 import threading
 import time
@@ -22,7 +24,8 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 DEFAULT_CAPACITY = 6
 MAX_CAPACITY = 20
 MAX_OPERATION_SECONDS = 0.45
-SQLITE_BUSY_TIMEOUT_MS = 20
+OPERATION_BUDGET_ENV = "CODEX_CAPACITY_MAX_OPERATION_SECONDS"
+SQLITE_BUSY_TIMEOUT_MS = 1
 DEFAULT_RETRY_DELAY_MS = 250
 CLEANUP_TTL_SECONDS = 30
 PROVISIONAL_TTL_SECONDS = 30
@@ -51,6 +54,7 @@ class CapacityStore:
         capacity: int = DEFAULT_CAPACITY,
         cleanup_ttl_seconds: float = CLEANUP_TTL_SECONDS,
         provisional_ttl_seconds: float = PROVISIONAL_TTL_SECONDS,
+        max_operation_seconds: Optional[float] = None,
     ) -> None:
         self.home = Path(home or Path.home()).expanduser()
         self.state_dir = Path(state_dir or self.home / ".local" / "state" / "codex-capacity-v1").expanduser()
@@ -60,9 +64,12 @@ class CapacityStore:
         self.capacity = int(capacity)
         self.cleanup_ttl_seconds = max(0.0, float(cleanup_ttl_seconds))
         self.provisional_ttl_seconds = max(0.0, float(provisional_ttl_seconds))
+        self.max_operation_seconds = operation_budget_seconds(max_operation_seconds)
         self.invalid_reason = None
         if self.capacity < 0 or self.capacity > MAX_CAPACITY:
             self.invalid_reason = f"invalid_capacity: capacity must be between 0 and {MAX_CAPACITY}"
+        if not math.isfinite(self.max_operation_seconds) or self.max_operation_seconds < 0:
+            self.invalid_reason = "invalid_operation_budget: must be a finite non-negative number"
 
     def acquire_or_queue(
         self,
@@ -481,10 +488,12 @@ class CapacityStore:
         *,
         write: bool,
     ) -> dict[str, Any]:
-        deadline = time.monotonic() + MAX_OPERATION_SECONDS
         try:
             if self.invalid_reason:
                 raise CapacityError(self.invalid_reason)
+            if self.max_operation_seconds <= 0:
+                raise CapacityError("operation_timeout")
+            deadline = time.monotonic() + self.max_operation_seconds
             self._prepare_state_dir()
             conn = sqlite3.connect(
                 self.db_path,
@@ -499,6 +508,7 @@ class CapacityStore:
             if write:
                 self._begin_immediate(conn, deadline)
             try:
+                self._pending_log_lines: list[str] = []
                 result = callback(conn)
             except Exception:
                 if write:
@@ -506,6 +516,7 @@ class CapacityStore:
                 raise
             if write:
                 conn.commit()
+                self._flush_pending_logs()
             self._chmod_state_files()
             return result
         except sqlite3.DatabaseError as exc:
@@ -621,20 +632,20 @@ class CapacityStore:
 
     def _acquire_initialization_lock(self, deadline: float) -> int:
         lock_fd = os.open(self.lock_path, os.O_RDWR)
-        delay = 0.005
+        delay = 0.001
         while time.monotonic() < deadline:
             try:
                 fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return lock_fd
             except BlockingIOError:
                 time.sleep(min(delay, max(0.0, deadline - time.monotonic())))
-                delay = min(delay * 2, 0.04)
+                delay = min(delay * 2, 0.01)
         os.close(lock_fd)
         raise CapacityError("database_error: initialization_lock_timeout")
 
     def _run_initialization_transaction(self, conn: sqlite3.Connection, deadline: float) -> None:
         last_error: Optional[sqlite3.OperationalError] = None
-        delay = 0.005
+        delay = 0.001
         while time.monotonic() < deadline:
             try:
                 conn.execute("pragma journal_mode = wal")
@@ -652,7 +663,7 @@ class CapacityStore:
                 if "locked" not in message and "busy" not in message:
                     raise
                 time.sleep(min(delay, max(0.0, deadline - time.monotonic())))
-                delay = min(delay * 2, 0.04)
+                delay = min(delay * 2, 0.01)
         raise CapacityError(f"database_error: {last_error or 'initialization_timeout'}")
 
     def _database_identity(self) -> Tuple[int, int]:
@@ -670,7 +681,7 @@ class CapacityStore:
             return False
 
     def _begin_immediate(self, conn: sqlite3.Connection, deadline: float) -> None:
-        delay = 0.005
+        delay = 0.001
         last_error: Optional[sqlite3.OperationalError] = None
         while time.monotonic() < deadline:
             try:
@@ -682,7 +693,7 @@ class CapacityStore:
                 if "locked" not in message and "busy" not in message:
                     raise
                 time.sleep(min(delay, max(0.0, deadline - time.monotonic())))
-                delay = min(delay * 2, 0.04)
+                delay = min(delay * 2, 0.01)
         raise CapacityError(f"database_error: {last_error or 'begin_immediate_timeout'}")
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
@@ -1050,7 +1061,10 @@ class CapacityStore:
         ).rowcount
 
     def _expire_stale_leases(self, conn: sqlite3.Connection, now: float) -> int:
-        return self._expire_cleanup_leases(conn, now) + self._expire_unbound_provisional_leases(conn, now)
+        return (
+            self._expire_cleanup_leases(conn, now)
+            + self._expire_unbound_provisional_leases(conn, now)
+        )
 
     def _lease_result_from_row(
         self,
@@ -1078,12 +1092,21 @@ class CapacityStore:
         return str(row["value"])
 
     def _log(self, conn: sqlite3.Connection, now: float, event: str, **payload: Any) -> None:
-        conn.execute(
-            "insert into events (created_at, event, payload_json) values (?, ?, ?)",
-            (now, event, json.dumps(payload, sort_keys=True, separators=(",", ":"))),
-        )
+        del conn
+        line = json.dumps({"created_at": now, "event": event, **payload}, sort_keys=True) + "\n"
+        if hasattr(self, "_pending_log_lines"):
+            self._pending_log_lines.append(line)
+        else:
+            with self.log_path.open("a", encoding="utf-8") as handle:
+                handle.write(line)
+
+    def _flush_pending_logs(self) -> None:
+        lines = getattr(self, "_pending_log_lines", [])
+        if not lines:
+            return
         with self.log_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps({"created_at": now, "event": event, **payload}, sort_keys=True) + "\n")
+            handle.writelines(lines)
+        self._pending_log_lines = []
 
 
 def request_hash(session_id: str, turn_id: str, task_name: str) -> str:
@@ -1098,6 +1121,18 @@ def request_hash(session_id: str, turn_id: str, task_name: str) -> str:
 
 def current_time() -> float:
     return time.time()
+
+
+def operation_budget_seconds(value: Optional[float]) -> float:
+    if value is not None:
+        return float(value)
+    raw = os.environ.get(OPERATION_BUDGET_ENV)
+    if raw is None or raw == "":
+        return MAX_OPERATION_SECONDS
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise CapacityError("invalid_operation_budget: must be numeric") from exc
 
 
 def placeholders(values: Iterable[Any]) -> str:
@@ -1140,6 +1175,92 @@ def load_json_object(path: Path) -> dict[str, Any]:
     return payload
 
 
+def default_manifest_validator() -> Path:
+    return Path(__file__).resolve().parent / "validate_wide_wave_manifest.py"
+
+
+def test_mode_enabled() -> bool:
+    return os.environ.get("CODEX_CAPACITY_TEST_MODE") == "1"
+
+
+def default_trusted_registry() -> Path:
+    codex_home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").expanduser()
+    installed = codex_home / "config" / "trusted-wide-wave-skills.json"
+    if installed.is_file():
+        return installed
+    return Path(__file__).resolve().parents[1] / "config" / "trusted-wide-wave-skills.json"
+
+
+def validator_reasons(output: str) -> list[str]:
+    for line in output.splitlines():
+        if line.startswith("reasons="):
+            raw = line.split("=", 1)[1]
+            if raw == "none" or not raw:
+                return []
+            return [item for item in raw.split(",") if item]
+    return []
+
+
+def validate_wide_wave_trust(
+    *,
+    requested_wave_size: int,
+    skill_id: Optional[str],
+    skill_file: Optional[Path],
+    manifest: Optional[Path],
+    trusted_registry: Optional[Path],
+    manifest_validator: Optional[Path],
+) -> dict[str, Any]:
+    supplied = [skill_id, skill_file, manifest, trusted_registry]
+    if not any(supplied):
+        return {"trusted": False, "reason": "wide_wave_trust_not_requested", "validator_reasons": []}
+    if not skill_id or skill_file is None or manifest is None:
+        return {"trusted": False, "reason": "wide_wave_requires_trust_manifest", "validator_reasons": []}
+    if not test_mode_enabled() and (trusted_registry is not None or manifest_validator is not None):
+        return {"trusted": False, "reason": "wide_wave_trust_override_forbidden", "validator_reasons": []}
+    registry = trusted_registry if test_mode_enabled() and trusted_registry is not None else default_trusted_registry()
+    validator = manifest_validator if test_mode_enabled() and manifest_validator is not None else default_manifest_validator()
+    if not validator.is_file():
+        return {"trusted": False, "reason": "wide_wave_manifest_validator_missing", "validator_reasons": []}
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(validator),
+                "--manifest",
+                str(manifest),
+                "--skill-id",
+                skill_id,
+                "--skill-file",
+                str(skill_file),
+                "--trusted-registry",
+                str(registry),
+                "--expected-wave-size",
+                str(requested_wave_size),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=MAX_OPERATION_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return {"trusted": False, "reason": "wide_wave_manifest_validator_timeout", "validator_reasons": []}
+    reasons = validator_reasons(completed.stdout)
+    if completed.returncode != 0:
+        return {"trusted": False, "reason": "wide_wave_manifest_untrusted", "validator_reasons": reasons}
+    return {"trusted": True, "reason": "wide_wave_manifest_trusted", "validator_reasons": reasons}
+
+
+def net_observer_admission(
+    *,
+    observation: dict[str, Any],
+    capacity_cap: int,
+    external_roots: int,
+) -> int:
+    admission = max(0, min(MAX_CAPACITY, int(observation.get("admission_capacity") or 0)))
+    capped_admission = min(admission, int(capacity_cap))
+    return max(0, capped_admission - external_roots)
+
+
 def prepare_wave(
     store: CapacityStore,
     *,
@@ -1147,6 +1268,11 @@ def prepare_wave(
     observer_snapshot_json: Optional[Path] = None,
     observer_state_dir: Optional[Path] = None,
     workload_class: str = "normal",
+    wide_wave_skill_id: Optional[str] = None,
+    wide_wave_skill_file: Optional[Path] = None,
+    wide_wave_manifest: Optional[Path] = None,
+    wide_wave_trusted_registry: Optional[Path] = None,
+    wide_wave_manifest_validator: Optional[Path] = None,
 ) -> dict[str, Any]:
     if requested_wave_size < 0 or requested_wave_size > MAX_CAPACITY:
         return {"state": "ERROR", "reason": f"invalid_wave_size: must be in 0..{MAX_CAPACITY}"}
@@ -1170,12 +1296,42 @@ def prepare_wave(
     )
     measurements = observation.get("measurements") if isinstance(observation.get("measurements"), dict) else {}
     external_roots = max(0, int(float(measurements.get("external_codex_roots") or 0)))
-    admission_capacity = int(observation.get("admission_capacity") or 0)
+    observer_admission_capacity = int(observation.get("admission_capacity") or 0)
     mode = str(observation.get("capacity_mode") or "")
-    max_wave_size = min(int(observation.get("max_wave_size") or 0), DEFAULT_CAPACITY)
-    available_capacity = max(0, min(admission_capacity, DEFAULT_CAPACITY) - external_roots)
-    allowed = max(0, min(requested_wave_size, max_wave_size, available_capacity))
     status = str(observation.get("status") or "RED")
+    trust = validate_wide_wave_trust(
+        requested_wave_size=requested_wave_size,
+        skill_id=wide_wave_skill_id,
+        skill_file=wide_wave_skill_file,
+        manifest=wide_wave_manifest,
+        trusted_registry=wide_wave_trusted_registry,
+        manifest_validator=wide_wave_manifest_validator,
+    )
+    partial_trust = any([wide_wave_skill_id, wide_wave_skill_file, wide_wave_manifest, wide_wave_trusted_registry]) and not trust["trusted"]
+    if status == "RED":
+        max_wave_size = 0
+        available_capacity = 0
+    elif status == "YELLOW":
+        admission_capacity = net_observer_admission(
+            observation=observation,
+            capacity_cap=DEFAULT_CAPACITY,
+            external_roots=external_roots,
+        )
+        max_wave_size = min(2, int(observation.get("max_wave_size") or 0), DEFAULT_CAPACITY, admission_capacity)
+        available_capacity = admission_capacity
+    else:
+        trust_cap = MAX_CAPACITY if trust["trusted"] else DEFAULT_CAPACITY
+        admission_capacity = net_observer_admission(
+            observation=observation,
+            capacity_cap=trust_cap,
+            external_roots=external_roots,
+        )
+        max_wave_size = min(int(observation.get("max_wave_size") or 0), trust_cap, admission_capacity)
+        available_capacity = admission_capacity
+    if requested_wave_size > DEFAULT_CAPACITY and partial_trust:
+        allowed = 0
+    else:
+        allowed = max(0, min(requested_wave_size, max_wave_size, available_capacity))
     decision = "ALLOW" if allowed == requested_wave_size and status == "GREEN" else "DEGRADED" if allowed > 0 else "BLOCK"
     return {
         "state": "OK",
@@ -1185,11 +1341,14 @@ def prepare_wave(
         "observer_status": status,
         "observer_reasons": observation.get("reasons") or [],
         "capacity_mode": mode,
-        "admission_capacity": admission_capacity,
+        "admission_capacity": observer_admission_capacity,
         "max_wave_size": max_wave_size,
         "external_codex_roots": external_roots,
         "managed_active_count": managed_active,
         "managed_reserved_count": managed_reserved,
+        "wide_wave_trusted": bool(trust["trusted"]),
+        "wide_wave_trust_reason": trust["reason"],
+        "wide_wave_validator_reasons": trust["validator_reasons"],
     }
 
 
@@ -1197,6 +1356,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state-dir", type=Path)
     parser.add_argument("--capacity", type=int, default=None, dest="global_capacity")
+    parser.add_argument("--max-operation-seconds", type=float, default=None)
     sub = parser.add_subparsers(dest="command", required=True)
 
     acquire = sub.add_parser("acquire-or-queue")
@@ -1262,6 +1422,11 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("--observer-snapshot-json", type=Path)
     prepare.add_argument("--observer-state-dir", type=Path)
     prepare.add_argument("--workload-class", default="normal")
+    prepare.add_argument("--wide-wave-skill-id")
+    prepare.add_argument("--wide-wave-skill-file", type=Path)
+    prepare.add_argument("--wide-wave-manifest", type=Path)
+    prepare.add_argument("--wide-wave-trusted-registry", type=Path)
+    prepare.add_argument("--wide-wave-manifest-validator", type=Path)
     add_capacity_argument(prepare)
     return parser
 
@@ -1282,8 +1447,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     capacity = args.local_capacity if args.local_capacity is not None else args.global_capacity
     if capacity is None:
         capacity = DEFAULT_CAPACITY
-    store = CapacityStore(state_dir=args.state_dir, capacity=capacity)
     try:
+        store = CapacityStore(state_dir=args.state_dir, capacity=capacity, max_operation_seconds=args.max_operation_seconds)
         if args.command == "acquire-or-queue":
             result = store.acquire_or_queue(
                 session_id=args.session_id,
@@ -1351,6 +1516,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                 observer_snapshot_json=args.observer_snapshot_json,
                 observer_state_dir=args.observer_state_dir,
                 workload_class=args.workload_class,
+                wide_wave_skill_id=args.wide_wave_skill_id,
+                wide_wave_skill_file=args.wide_wave_skill_file,
+                wide_wave_manifest=args.wide_wave_manifest,
+                wide_wave_trusted_registry=args.wide_wave_trusted_registry,
+                wide_wave_manifest_validator=args.wide_wave_manifest_validator,
             )
             print_json(result)
             return exit_for_result(result)

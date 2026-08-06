@@ -101,13 +101,14 @@ def observe(
 ) -> dict[str, Any]:
     now = float(time.time() if now_epoch is None else now_epoch)
     deadline = time.monotonic() + OBSERVE_TIMEOUT_SECONDS
+    observed_state_dir = Path(state_dir or default_state_dir())
     try:
-        raw_snapshot = snapshot if snapshot is not None else collect_snapshot(deadline=deadline)
+        raw_snapshot = snapshot if snapshot is not None else collect_snapshot(state_dir=observed_state_dir, deadline=deadline)
         if active_slots is not None:
             raw_snapshot = dict(raw_snapshot)
             raw_snapshot["active_slots"] = active_slots
         current_snapshot = normalize_snapshot(raw_snapshot)
-        store = ObserverStore(state_dir or default_state_dir())
+        store = ObserverStore(observed_state_dir)
         return store.update(
             lambda state: evaluate_snapshot(
                 current_snapshot,
@@ -990,12 +991,12 @@ class ObserverStore:
             os.chmod(path, STATE_FILE_MODE)
 
 
-def collect_snapshot(*, deadline: float | None = None) -> dict[str, Any]:
+def collect_snapshot(*, state_dir: Path | None = None, deadline: float | None = None) -> dict[str, Any]:
     sysctl_values = collect_sysctl(deadline=deadline)
     vm_values = collect_vm_stat(deadline=deadline)
     pressure_values = collect_memory_pressure(sysctl_values["total_ram_bytes"], deadline=deadline)
     process_values = collect_process_snapshot(deadline=deadline)
-    disk_values = collect_disk()
+    disk_values = collect_disk(state_dir=state_dir, deadline=deadline)
     snapshot: dict[str, Any] = {"heavy_lanes_in_use": 0.0, "active_slots": 0.0}
     snapshot.update(sysctl_values)
     snapshot.update(vm_values)
@@ -1215,12 +1216,27 @@ def root_fd_usage_for_codex_roots(
     return {"root_fd_used": max(counts.values(), default=0), "root_fd_state": state}
 
 
-def collect_disk() -> dict[str, Any]:
-    stats = os.statvfs(str(default_state_dir().parent))
+def collect_disk(*, state_dir: Path | None = None, deadline: float | None = None) -> dict[str, Any]:
+    check_deadline(deadline)
+    observed_path = Path(state_dir or default_state_dir()).expanduser()
+    stat_path = existing_stat_path(observed_path)
+    check_deadline(deadline)
+    stats = os.statvfs(str(stat_path))
+    check_deadline(deadline)
     return {
         "disk_free_bytes": float(stats.f_bavail * stats.f_frsize),
         "disk_total_bytes": float(stats.f_blocks * stats.f_frsize),
     }
+
+
+def existing_stat_path(path: Path) -> Path:
+    candidate = path
+    while not candidate.exists():
+        parent = candidate.parent
+        if parent == candidate:
+            raise ObservationError("measurement_unavailable:disk_path")
+        candidate = parent
+    return candidate
 
 
 def remaining_seconds(deadline: float | None) -> float:

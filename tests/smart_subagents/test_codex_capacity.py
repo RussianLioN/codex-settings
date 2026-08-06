@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import math
 import multiprocessing
@@ -113,6 +114,75 @@ class CodexCapacityTests(unittest.TestCase):
         path = self.root / "observer-snapshot.json"
         path.write_text(json.dumps(snapshot), encoding="utf-8")
         return path
+
+    def write_trusted_wide_wave_inputs(self, *, wave_size: int = 8) -> tuple[Path, Path, Path]:
+        skill = self.root / "trusted-wide-skill.md"
+        skill.write_text("---\nname: trusted-wide\n---\n", encoding="utf-8")
+        registry = self.root / "trusted-wide-registry.json"
+        registry.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "trusted_skills": [
+                        {
+                            "skill_id": "trusted-wide",
+                            "sha256": hashlib.sha256(skill.read_bytes()).hexdigest(),
+                            "max_live_wave": 20,
+                            "execution_kind": "wide-wave",
+                            "fallback": "block",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        repo = self.root / "repo"
+        repo.mkdir(exist_ok=True)
+        manifest = self.root / "trusted-wide-manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "skill_id": "trusted-wide",
+                    "wave_size": wave_size,
+                    "repository_root": str(repo),
+                    "base_commit": "1318542fb00df4eaef4fc4e8abfa8cd99e656bb3",
+                    "participants": [
+                        {"id": f"reader-{index}", "access": "read-only", "owned_write_scope": []}
+                        for index in range(wave_size)
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        return skill, registry, manifest
+
+    def write_dynamic_green_observer_state(self, state_dir: Path, *, effective_capacity: int = 20) -> None:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        samples = [
+            {"memory_bytes": 1, "processes": 1, "root_fds": 1, "system_fds": 1, "heavy_lanes": 0}
+            for _ in range(30)
+        ]
+        (state_dir / "observer_state.json").write_text(
+            json.dumps(
+                {
+                    "protocol_version": 1,
+                    "last_observed_at": 100.0,
+                    "last_status": "GREEN",
+                    "last_snapshot": None,
+                    "recovery": {"from_status": None, "started_at": None, "normal_count": 0, "last_normal_at": None},
+                    "observations": [],
+                    "successful_observations": 30,
+                    "clean_cycles": 0,
+                    "effective_capacity": effective_capacity,
+                    "proven_capacity": effective_capacity,
+                    "cost_samples": {"normal": samples},
+                    "cost_estimates": {},
+                    "cost_updated_at": {},
+                }
+            ),
+            encoding="utf-8",
+        )
 
     def request(self, index: int, *, session: str = "s1", turn: str = "t1") -> dict[str, str]:
         return {"session_id": session, "turn_id": turn, "task_name": f"task-{index}"}
@@ -520,7 +590,7 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertLessEqual(store.snapshot()["active_count"], 20)
 
     def test_process_clients_share_start_and_report_lock_busy_and_p99(self) -> None:
-        client_count = 12
+        client_count = 64
         context = multiprocessing.get_context("spawn")
         start_event = context.Event()
         queue = context.Queue()
@@ -542,7 +612,8 @@ class CodexCapacityTests(unittest.TestCase):
 
         self.assertEqual(0, locked_busy, records)
         self.assertTrue(all(record["state"] in {"LEASED", "CAPACITY_QUEUED"} for record in records), records)
-        self.assertLess(p99, 0.75, records)
+        self.assertLess(p99, 0.250, records)
+        self.assertLessEqual(locked_busy / client_count, 0.001, records)
         self.assertLessEqual(self.manager(limit=20).snapshot()["active_count"], 20)
 
     def test_recreated_database_same_path_is_migrated_again(self) -> None:
@@ -611,6 +682,236 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertEqual("YELLOW", result["observer_status"])
         self.assertEqual(2, result["allowed_wave_size"])
         self.assertEqual("DEGRADED", result["decision"])
+
+    def test_prepare_wave_without_trust_never_allows_more_than_six(self) -> None:
+        snapshot = self.write_observer_snapshot()
+
+        result = self.read_cli_json(
+            "prepare-wave",
+            "--wave-size",
+            "8",
+            "--observer-snapshot-json",
+            str(snapshot),
+        )
+
+        self.assertEqual("GREEN", result["observer_status"])
+        self.assertEqual(6, result["allowed_wave_size"])
+        self.assertEqual("DEGRADED", result["decision"])
+        self.assertEqual(False, result["wide_wave_trusted"])
+
+    def test_prepare_wave_subtracts_external_roots_exactly_once(self) -> None:
+        snapshot = self.write_observer_snapshot(external_codex_roots=2)
+
+        result = self.read_cli_json(
+            "prepare-wave",
+            "--wave-size",
+            "6",
+            "--observer-snapshot-json",
+            str(snapshot),
+        )
+
+        self.assertEqual("GREEN", result["observer_status"])
+        self.assertEqual(6, result["admission_capacity"])
+        self.assertEqual(2, result["external_codex_roots"])
+        self.assertEqual(4, result["allowed_wave_size"])
+
+    def test_prepare_wave_above_six_requires_complete_trust_contract(self) -> None:
+        snapshot = self.write_observer_snapshot()
+        observer_state_dir = self.root / "dynamic-observer"
+        self.write_dynamic_green_observer_state(observer_state_dir)
+        skill, registry, manifest = self.write_trusted_wide_wave_inputs(wave_size=8)
+        test_env = dict(self.env, CODEX_CAPACITY_TEST_MODE="1")
+
+        missing = self.read_cli_json(
+            "prepare-wave",
+            "--wave-size",
+            "8",
+            "--observer-snapshot-json",
+            str(snapshot),
+            "--observer-state-dir",
+            str(observer_state_dir),
+            "--wide-wave-skill-id",
+            "trusted-wide",
+            "--wide-wave-skill-file",
+            str(skill),
+            "--wide-wave-trusted-registry",
+            str(registry),
+            env=test_env,
+        )
+        trusted = self.read_cli_json(
+            "prepare-wave",
+            "--wave-size",
+            "8",
+            "--observer-snapshot-json",
+            str(snapshot),
+            "--observer-state-dir",
+            str(observer_state_dir),
+            "--wide-wave-skill-id",
+            "trusted-wide",
+            "--wide-wave-skill-file",
+            str(skill),
+            "--wide-wave-manifest",
+            str(manifest),
+            "--wide-wave-trusted-registry",
+            str(registry),
+            env=test_env,
+        )
+
+        self.assertEqual("BLOCK", missing["decision"])
+        self.assertEqual(0, missing["allowed_wave_size"])
+        self.assertEqual("wide_wave_requires_trust_manifest", missing["wide_wave_trust_reason"])
+        self.assertEqual("ALLOW", trusted["decision"])
+        self.assertEqual(8, trusted["allowed_wave_size"])
+        self.assertEqual(True, trusted["wide_wave_trusted"])
+
+    def test_prepare_wave_validator_uses_exact_requested_wave_size(self) -> None:
+        snapshot = self.write_observer_snapshot()
+        observer_state_dir = self.root / "dynamic-observer"
+        self.write_dynamic_green_observer_state(observer_state_dir)
+        skill, registry, manifest = self.write_trusted_wide_wave_inputs(wave_size=7)
+        test_env = dict(self.env, CODEX_CAPACITY_TEST_MODE="1")
+
+        result = self.read_cli_json(
+            "prepare-wave",
+            "--wave-size",
+            "8",
+            "--observer-snapshot-json",
+            str(snapshot),
+            "--observer-state-dir",
+            str(observer_state_dir),
+            "--wide-wave-skill-id",
+            "trusted-wide",
+            "--wide-wave-skill-file",
+            str(skill),
+            "--wide-wave-manifest",
+            str(manifest),
+            "--wide-wave-trusted-registry",
+            str(registry),
+            env=test_env,
+        )
+
+        self.assertEqual("BLOCK", result["decision"])
+        self.assertEqual(0, result["allowed_wave_size"])
+        self.assertEqual("wide_wave_manifest_untrusted", result["wide_wave_trust_reason"])
+        self.assertIn("expected_wave_size_mismatch", result["wide_wave_validator_reasons"])
+
+    def test_prepare_wave_blocks_trust_registry_and_validator_overrides_outside_test_mode(self) -> None:
+        snapshot = self.write_observer_snapshot()
+        observer_state_dir = self.root / "dynamic-observer"
+        self.write_dynamic_green_observer_state(observer_state_dir)
+        skill, registry, manifest = self.write_trusted_wide_wave_inputs(wave_size=8)
+
+        result = self.read_cli_json(
+            "prepare-wave",
+            "--wave-size",
+            "8",
+            "--observer-snapshot-json",
+            str(snapshot),
+            "--observer-state-dir",
+            str(observer_state_dir),
+            "--wide-wave-skill-id",
+            "trusted-wide",
+            "--wide-wave-skill-file",
+            str(skill),
+            "--wide-wave-manifest",
+            str(manifest),
+            "--wide-wave-trusted-registry",
+            str(registry),
+            "--wide-wave-manifest-validator",
+            str(self.root / "fake-validator.py"),
+        )
+
+        self.assertEqual("BLOCK", result["decision"])
+        self.assertEqual(0, result["allowed_wave_size"])
+        self.assertEqual("wide_wave_trust_override_forbidden", result["wide_wave_trust_reason"])
+
+    def test_prepare_wave_ignores_trusted_registry_environment_override_outside_test_mode(self) -> None:
+        snapshot = self.write_observer_snapshot()
+        observer_state_dir = self.root / "dynamic-observer"
+        self.write_dynamic_green_observer_state(observer_state_dir)
+        skill, registry, manifest = self.write_trusted_wide_wave_inputs(wave_size=8)
+        env = dict(self.env, CODEX_FD_DOCTOR_TRUSTED_REGISTRY=str(registry))
+
+        result = self.read_cli_json(
+            "prepare-wave",
+            "--wave-size",
+            "8",
+            "--observer-snapshot-json",
+            str(snapshot),
+            "--observer-state-dir",
+            str(observer_state_dir),
+            "--wide-wave-skill-id",
+            "trusted-wide",
+            "--wide-wave-skill-file",
+            str(skill),
+            "--wide-wave-manifest",
+            str(manifest),
+            env=env,
+        )
+
+        self.assertEqual("BLOCK", result["decision"])
+        self.assertEqual(0, result["allowed_wave_size"])
+        self.assertEqual("wide_wave_manifest_untrusted", result["wide_wave_trust_reason"])
+        self.assertIn("unknown_skill", result["wide_wave_validator_reasons"])
+
+    def test_cli_and_store_accept_absolute_operation_budget(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, max_operation_seconds=0)
+
+        result = store.snapshot()
+        cli_result = self.cli("--max-operation-seconds", "0", "snapshot")
+
+        self.assertEqual("ERROR", result["state"])
+        self.assertEqual("operation_timeout", result["reason"])
+        self.assertNotEqual(0, cli_result.returncode)
+        self.assertIn("operation_timeout", cli_result.stdout)
+
+    def test_policy_can_limit_operation_budget_through_environment(self) -> None:
+        env = dict(self.env, CODEX_CAPACITY_MAX_OPERATION_SECONDS="0")
+
+        completed = self.cli("snapshot", env=env)
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("operation_timeout", completed.stdout)
+
+    def test_operation_budget_rejects_nan_and_infinity(self) -> None:
+        for value in ("nan", "inf", "-inf"):
+            with self.subTest(value=value):
+                env = dict(self.env, CODEX_CAPACITY_MAX_OPERATION_SECONDS=value)
+
+                completed = self.cli("snapshot", env=env)
+
+                self.assertNotEqual(0, completed.returncode)
+                self.assertIn("invalid_operation_budget", completed.stdout)
+
+    def test_old_active_lease_without_owner_missing_proof_is_not_released_by_age(self) -> None:
+        store = self.capacity.CapacityStore(
+            home=self.home,
+            capacity=1,
+            cleanup_ttl_seconds=5,
+        )
+        real_current_time = self.capacity.current_time
+        clock = {"now": 100.0}
+        self.capacity.current_time = lambda: clock["now"]
+        try:
+            lease = store.acquire_or_queue(**self.request(1, session="s1", turn="t1"))
+            store.activate(
+                lease_id=str(lease["lease_id"]),
+                fencing_epoch=int(lease["fencing_epoch"]),
+                agent_id="agent-a",
+            )
+            queued = store.acquire_or_queue(**self.request(2, session="s2", turn="t1"))
+
+            clock["now"] = 100_000.0
+            first = store.reconcile()
+        finally:
+            self.capacity.current_time = real_current_time
+
+        self.assertEqual(0, first["ttl_released"])
+        self.assertEqual(
+            ["ACTIVE"],
+            [lease["state"] for lease in store.snapshot()["leases"] if lease["agent_id"] == "agent-a"],
+        )
+        self.assertEqual("PENDING", store.wait(str(queued["ticket_id"]))["ticket_state"])
 
     def test_cancel_turn_session_reconcile_and_wait_exit_codes(self) -> None:
         store = self.manager(limit=0)

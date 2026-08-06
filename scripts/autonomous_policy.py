@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -15,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+import codex_capacity as capacity_core
+import codex_capacity_observer as capacity_observer
 from codex_capacity import DEFAULT_CAPACITY, MAX_CAPACITY, CapacityStore, request_hash
 from codex_capacity_observer import observe as observe_capacity
 
@@ -34,7 +37,15 @@ KNOWN_EVENTS = {
 }
 CAPACITY_ENFORCEMENT_ENV = "CODEX_CAPACITY_ENFORCEMENT"
 CAPACITY_OBSERVER_SNAPSHOT_ENV = "CODEX_CAPACITY_OBSERVER_SNAPSHOT"
+CAPACITY_OBSERVER_TEST_MODE_ENV = "CODEX_CAPACITY_OBSERVER_TEST_MODE"
+CAPACITY_HOOK_DEADLINE_MS_ENV = "CODEX_CAPACITY_HOOK_DEADLINE_MS"
 CAPACITY_QUEUED = "CAPACITY_QUEUED"
+CAPACITY_DEADLINE_EXHAUSTED = "CAPACITY_DEADLINE_EXHAUSTED"
+CAPACITY_HOOK_DEADLINE_SECONDS = 0.95
+CAPACITY_MIN_STAGE_SECONDS = 0.005
+CAPACITY_AFTER_SNAPSHOT_RESERVE_SECONDS = 0.58
+CAPACITY_AFTER_OBSERVER_RESERVE_SECONDS = 0.08
+CAPACITY_AFTER_ACQUIRE_RESERVE_SECONDS = 0.02
 SENSITIVE_PAYLOAD_KEYS = {"message", "messages", "task", "task_name", "taskName", "tool_input", "toolInput"}
 KNOWN_AGENTS = {
     "default",
@@ -89,6 +100,7 @@ GH_GLOBAL_VALUE_FLAGS = {"-R", "--repo", "--hostname"}
 
 def main() -> int:
     started = time.perf_counter()
+    deadline = started + capacity_hook_deadline_seconds()
     event = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("CODEX_HOOK_EVENT", "")
     raw = sys.stdin.read()
     try:
@@ -97,7 +109,7 @@ def main() -> int:
         return deny(event, {}, f"invalid hook JSON: {exc}")
 
     try:
-        decision, reason, details = evaluate(event, payload)
+        decision, reason, details = evaluate(event, payload, deadline=deadline)
         details["hook_elapsed_ms"] = round((time.perf_counter() - started) * 1000, 3)
         write_audit(event, decision, reason, payload, details)
     except Exception as exc:  # pragma: no cover - fail closed by design
@@ -119,7 +131,7 @@ def main() -> int:
     return 0
 
 
-def evaluate(event: str, payload: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
+def evaluate(event: str, payload: dict[str, Any], *, deadline: float | None = None) -> tuple[str, str, dict[str, Any]]:
     if event not in KNOWN_EVENTS:
         return "block", "unknown hook event", {}
 
@@ -171,12 +183,12 @@ def evaluate(event: str, payload: dict[str, Any]) -> tuple[str, str, dict[str, A
         details.update(role_decision[2])
         if role_decision[0] == "block":
             return role_decision[0], role_decision[1], details
-        return handle_spawn_capacity(payload, details)
+        return handle_spawn_capacity(payload, details, deadline=deadline)
 
     return "allow", "policy allowed", details
 
 
-def handle_spawn_capacity(payload: dict[str, Any], details: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
+def handle_spawn_capacity(payload: dict[str, Any], details: dict[str, Any], *, deadline: float | None = None) -> tuple[str, str, dict[str, Any]]:
     request = capacity_request(payload)
     details.update(request.audit_details)
     if request.error:
@@ -186,12 +198,30 @@ def handle_spawn_capacity(payload: dict[str, Any], details: dict[str, Any]) -> t
         details["capacity_enforcement"] = "disabled"
         return "allow", "capacity enforcement bypass", details
 
-    base_store = CapacityStore(capacity=DEFAULT_CAPACITY)
-    capacity_limit, wave_limit, observer_reason = observed_capacity_limit(base_store, details)
+    snapshot_budget, deadline_reason = capacity_stage_budget(
+        deadline,
+        reserve_seconds=CAPACITY_AFTER_SNAPSHOT_RESERVE_SECONDS,
+        details=details,
+        stage="snapshot",
+    )
+    if deadline_reason:
+        return "block", deadline_reason, details
+
+    base_store = capacity_store(capacity=DEFAULT_CAPACITY, max_operation_seconds=snapshot_budget)
+    capacity_limit, wave_limit, observer_reason = observed_capacity_limit(base_store, details, deadline=deadline)
     if observer_reason:
         return "block", observer_reason, details
 
-    result = CapacityStore(capacity=capacity_limit).acquire_or_queue(
+    acquire_budget, deadline_reason = capacity_stage_budget(
+        deadline,
+        reserve_seconds=CAPACITY_AFTER_ACQUIRE_RESERVE_SECONDS,
+        details=details,
+        stage="acquire",
+    )
+    if deadline_reason:
+        return "block", deadline_reason, details
+
+    result = capacity_store(capacity=capacity_limit, max_operation_seconds=acquire_budget).acquire_or_queue(
         session_id=request.session_id,
         turn_id=request.turn_id,
         task_name=request.task_name,
@@ -209,19 +239,42 @@ def handle_spawn_capacity(payload: dict[str, Any], details: dict[str, Any]) -> t
     return "block", f"unexpected capacity state: {state or 'missing'}", details
 
 
-def observed_capacity_limit(store: CapacityStore, details: dict[str, Any]) -> tuple[int, Optional[int], str]:
+def observed_capacity_limit(store: CapacityStore, details: dict[str, Any], *, deadline: float | None = None) -> tuple[int, Optional[int], str]:
     snapshot_result = store.snapshot()
     if snapshot_result.get("state") == "ERROR":
         details["capacity_snapshot"] = sanitize_capacity_result(snapshot_result)
         return 0, 0, f"capacity error: {snapshot_result.get('reason') or 'snapshot_failed'}"
+
+    _, deadline_reason = capacity_stage_budget(
+        deadline,
+        reserve_seconds=CAPACITY_AFTER_OBSERVER_RESERVE_SECONDS,
+        details=details,
+        stage="observer",
+    )
+    if deadline_reason:
+        return 0, 0, deadline_reason
+
     managed_active = int(snapshot_result.get("active_count") or 0)
     managed_reserved = int(snapshot_result.get("reserved_count") or managed_active)
     managed_slots = max(managed_active, managed_reserved)
     details["capacity_snapshot"] = {"active_count": managed_active, "reserved_count": managed_reserved}
-    snapshot = observer_snapshot_from_env()
+    snapshot = observer_snapshot_from_env(details)
     if snapshot is not None:
         snapshot["active_slots"] = managed_slots
-    observation = observe_capacity(snapshot=snapshot, state_dir=store.state_dir, active_slots=managed_slots)
+    observer_budget, deadline_reason = capacity_stage_budget(
+        deadline,
+        reserve_seconds=CAPACITY_AFTER_OBSERVER_RESERVE_SECONDS,
+        details=details,
+        stage="observer_run",
+    )
+    if deadline_reason:
+        return 0, 0, deadline_reason
+    observation = observe_capacity_with_budget(
+        snapshot=snapshot,
+        state_dir=store.state_dir,
+        active_slots=managed_slots,
+        max_operation_seconds=observer_budget,
+    )
     details["capacity_observer"] = sanitize_observer_result(observation)
     status = str(observation.get("status") or "RED")
     if status == "RED":
@@ -257,15 +310,93 @@ def capacity_observer_deny_json(observation: dict[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
-def observer_snapshot_from_env() -> Optional[dict[str, Any]]:
+def observer_snapshot_from_env(details: dict[str, Any]) -> Optional[dict[str, Any]]:
     path = os.getenv(CAPACITY_OBSERVER_SNAPSHOT_ENV)
     if not path:
+        details["capacity_observer_snapshot_env"] = "unset"
         return None
+    if os.getenv(CAPACITY_OBSERVER_TEST_MODE_ENV) != "1":
+        details["capacity_observer_snapshot_env"] = "ignored_without_test_mode"
+        return None
+    details["capacity_observer_snapshot_env"] = "test_mode"
     with Path(path).open("r", encoding="utf-8") as handle:
         snapshot = json.load(handle)
     if not isinstance(snapshot, dict):
         raise ValueError("capacity observer snapshot must be a JSON object")
     return snapshot
+
+
+def capacity_hook_deadline_seconds() -> float:
+    raw = os.getenv(CAPACITY_HOOK_DEADLINE_MS_ENV)
+    if raw in (None, ""):
+        return CAPACITY_HOOK_DEADLINE_SECONDS
+    try:
+        milliseconds = float(raw)
+    except ValueError:
+        return CAPACITY_HOOK_DEADLINE_SECONDS
+    return max(0.001, min(1.0, milliseconds / 1000.0))
+
+
+def capacity_stage_budget(
+    deadline: float | None,
+    *,
+    reserve_seconds: float,
+    details: dict[str, Any],
+    stage: str,
+) -> tuple[float, str]:
+    if deadline is None:
+        return CAPACITY_HOOK_DEADLINE_SECONDS, ""
+    remaining = deadline - time.perf_counter()
+    details[f"capacity_{stage}_remaining_ms"] = round(max(0.0, remaining) * 1000, 3)
+    budget = remaining - max(0.0, reserve_seconds)
+    if budget < CAPACITY_MIN_STAGE_SECONDS:
+        return 0.0, capacity_deadline_deny_json(stage, remaining)
+    return max(CAPACITY_MIN_STAGE_SECONDS, budget), ""
+
+
+def capacity_deadline_deny_json(stage: str, remaining_seconds: float) -> str:
+    payload = {
+        "decision": "deny",
+        "permissionDecision": "deny",
+        "reason": CAPACITY_DEADLINE_EXHAUSTED,
+        "code": CAPACITY_DEADLINE_EXHAUSTED,
+        "stage": stage,
+        "remaining_ms": round(max(0.0, remaining_seconds) * 1000, 3),
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def capacity_store(*, capacity: int, max_operation_seconds: float | None = None) -> CapacityStore:
+    if capacity_store_accepts_operation_budget():
+        return CapacityStore(capacity=capacity, max_operation_seconds=max_operation_seconds)
+    if max_operation_seconds is None:
+        return CapacityStore(capacity=capacity)
+    original = getattr(capacity_core, "MAX_OPERATION_SECONDS", None)
+    if original is not None:
+        capacity_core.MAX_OPERATION_SECONDS = max_operation_seconds
+    return CapacityStore(capacity=capacity)
+
+
+def capacity_store_accepts_operation_budget() -> bool:
+    try:
+        return "max_operation_seconds" in inspect.signature(CapacityStore).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def observe_capacity_with_budget(
+    *,
+    snapshot: dict[str, Any] | None,
+    state_dir: Path,
+    active_slots: int,
+    max_operation_seconds: float,
+) -> dict[str, Any]:
+    original = capacity_observer.OBSERVE_TIMEOUT_SECONDS
+    capacity_observer.OBSERVE_TIMEOUT_SECONDS = max(CAPACITY_MIN_STAGE_SECONDS, max_operation_seconds)
+    try:
+        return observe_capacity(snapshot=snapshot, state_dir=state_dir, active_slots=active_slots)
+    finally:
+        capacity_observer.OBSERVE_TIMEOUT_SECONDS = original
 
 
 def sanitize_observer_result(result: dict[str, Any]) -> dict[str, Any]:
