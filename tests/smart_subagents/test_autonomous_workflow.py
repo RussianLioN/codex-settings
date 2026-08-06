@@ -179,6 +179,94 @@ enabled = true
         self.assertIn("status=OK", completed.stdout)
         self.assertIn("agent_thread_cap=20", completed.stdout)
 
+    def test_profile_validator_requires_public_caps_and_expected_values(self) -> None:
+        valid_small = {
+            "model": "gpt-5.4-mini",
+            "model_reasoning_effort": "medium",
+            "sandbox_mode": "workspace-write",
+            "approval_policy": "on-request",
+            "agents": {
+                "max_concurrent_threads_per_session": 2,
+                "max_depth": 1,
+            },
+        }
+
+        self.assertEqual([], self.validator.profile_config_failures("small", valid_small))
+
+        legacy = {**valid_small, "agents": {"max_threads": 2, "max_depth": 1}}
+        both = {
+            **valid_small,
+            "agents": {
+                "max_threads": 2,
+                "max_concurrent_threads_per_session": 2,
+                "max_depth": 1,
+            },
+        }
+        wrong_small = {
+            **valid_small,
+            "agents": {
+                "max_concurrent_threads_per_session": 3,
+                "max_depth": 1,
+            },
+        }
+        non_int = {
+            **valid_small,
+            "agents": {
+                "max_concurrent_threads_per_session": "2",
+                "max_depth": 1,
+            },
+        }
+
+        for config, marker in (
+            (legacy, "agents.max_threads is legacy"),
+            (both, "agents.max_threads is legacy"),
+            (wrong_small, "agents.max_concurrent_threads_per_session must be 2"),
+            (non_int, "got '2'"),
+        ):
+            failures = self.validator.profile_config_failures("small", config)
+            self.assertTrue(any(marker in failure for failure in failures), failures)
+
+    def test_hook_validator_requires_session_end_managed_policy_contract(self) -> None:
+        policy_path = Path("/tmp/autonomous_policy.py")
+        document = {
+            "hooks": {
+                event: [
+                    {
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": f"/usr/bin/python3 {policy_path} {event}",
+                                "timeout": 3 if event == "SessionEnd" else 1,
+                            }
+                        ]
+                    }
+                ]
+                for event in self.validator.HOOK_EVENTS
+            }
+        }
+
+        self.assertEqual([], self.validator.managed_hook_contract_failures(document, policy_path))
+
+        missing_session_end = {"hooks": dict(document["hooks"])}
+        missing_session_end["hooks"].pop("SessionEnd")
+        failures = self.validator.managed_hook_contract_failures(missing_session_end, policy_path)
+        self.assertTrue(any("SessionEnd must contain a list" in failure for failure in failures), failures)
+
+        wrong_timeout = {"hooks": dict(document["hooks"])}
+        wrong_timeout["hooks"]["SessionEnd"] = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": f"/usr/bin/python3 {policy_path} SessionEnd",
+                        "timeout": 1,
+                    }
+                ]
+            }
+        ]
+        failures = self.validator.managed_hook_contract_failures(wrong_timeout, policy_path)
+        self.assertTrue(any("SessionEnd managed hook timeout must be 3" in failure for failure in failures), failures)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,6 +37,35 @@ FD_GUARDRAILS_TARGETS = (
     ("codex_process_inventory.py", "codex_process_inventory.py"),
     *FD_GUARDRAILS_TARGETS_V1[3:],
 )
+FD_GUARDRAILS_TARGETS_V2_BASE = FD_GUARDRAILS_TARGETS
+FD_GUARDRAILS_TARGETS_V2_FULL = (
+    *FD_GUARDRAILS_TARGETS_V2_BASE,
+    ("hooks.json", "hooks.json"),
+    ("autonomous_policy.py", "autonomous_policy.py"),
+    ("codex_capacity.py", "codex_capacity.py"),
+    ("codex_capacity_observer.py", "codex_capacity_observer.py"),
+)
+PROFILE_THREAD_CAPS = {
+    "batch-workers": 1,
+    "deep-review": 4,
+    "full-access": 4,
+    "safe-readonly": 2,
+    "small": 2,
+    "standard": 4,
+    "wide-readers-16": 16,
+    "wide-readers": 8,
+}
+PROFILE_CONFIG_NAMES = tuple(PROFILE_THREAD_CAPS)
+FD_GUARDRAILS_TARGETS_V2_PROFILES = (
+    *FD_GUARDRAILS_TARGETS_V2_FULL,
+    *((f"{name}.config.toml", f"{name}.config.toml") for name in PROFILE_CONFIG_NAMES),
+)
+FD_GUARDRAILS_TARGETS = FD_GUARDRAILS_TARGETS_V2_PROFILES
+FD_GUARDRAILS_TARGET_SETS_V2 = (
+    FD_GUARDRAILS_TARGETS_V2_BASE,
+    FD_GUARDRAILS_TARGETS_V2_FULL,
+    FD_GUARDRAILS_TARGETS_V2_PROFILES,
+)
 
 
 def main() -> int:
@@ -56,6 +85,10 @@ def main() -> int:
     parser.add_argument("--installed-process-inventory", type=Path, default=None)
     parser.add_argument("--installed-manifest-validator", type=Path, default=None)
     parser.add_argument("--installed-trusted-registry", type=Path, default=None)
+    parser.add_argument("--installed-hooks-json", type=Path, default=None)
+    parser.add_argument("--installed-autonomous-policy", type=Path, default=None)
+    parser.add_argument("--installed-capacity", type=Path, default=None)
+    parser.add_argument("--installed-capacity-observer", type=Path, default=None)
     parser.add_argument(
         "--fail-after-fd-guardrails-action",
         type=int,
@@ -85,6 +118,16 @@ def main() -> int:
         if args.installed_trusted_registry is not None
         else codex_home / "config" / "trusted-wide-wave-skills.json"
     )
+    installed_hooks_json = args.installed_hooks_json or codex_home / "hooks.json"
+    installed_autonomous_policy = (
+        args.installed_autonomous_policy
+        or codex_home / "hooks" / "autonomous_policy.py"
+    )
+    installed_capacity = args.installed_capacity or codex_home / "hooks" / "codex_capacity.py"
+    installed_capacity_observer = (
+        args.installed_capacity_observer
+        or codex_home / "hooks" / "codex_capacity_observer.py"
+    )
 
     backup = args.backup or latest_backup(codex_home)
     if backup.is_dir():
@@ -96,6 +139,10 @@ def main() -> int:
             installed_process_inventory=installed_process_inventory,
             installed_manifest_validator=installed_manifest_validator,
             installed_trusted_registry=installed_trusted_registry,
+            installed_hooks_json=installed_hooks_json,
+            installed_autonomous_policy=installed_autonomous_policy,
+            installed_capacity=installed_capacity,
+            installed_capacity_observer=installed_capacity_observer,
             fail_after_fd_guardrails_action=args.fail_after_fd_guardrails_action,
             fail_fd_guardrails_compensation=args.fail_fd_guardrails_compensation,
         )
@@ -112,6 +159,10 @@ def handle_runtime_backup(
     installed_process_inventory: Path | None = None,
     installed_manifest_validator: Path | None = None,
     installed_trusted_registry: Path | None = None,
+    installed_hooks_json: Path | None = None,
+    installed_autonomous_policy: Path | None = None,
+    installed_capacity: Path | None = None,
+    installed_capacity_observer: Path | None = None,
     fail_after_fd_guardrails_action: int | None = None,
     fail_fd_guardrails_compensation: bool = False,
 ) -> int:
@@ -130,6 +181,13 @@ def handle_runtime_backup(
                 or doctor.parent / "validate_wide_wave_manifest.py",
                 installed_trusted_registry=installed_trusted_registry
                 or codex_home / "config" / "trusted-wide-wave-skills.json",
+                installed_hooks_json=installed_hooks_json or codex_home / "hooks.json",
+                installed_autonomous_policy=installed_autonomous_policy
+                or codex_home / "hooks" / "autonomous_policy.py",
+                installed_capacity=installed_capacity
+                or codex_home / "hooks" / "codex_capacity.py",
+                installed_capacity_observer=installed_capacity_observer
+                or codex_home / "hooks" / "codex_capacity_observer.py",
             ),
             fail_after_action=fail_after_fd_guardrails_action,
             fail_compensation=fail_fd_guardrails_compensation,
@@ -211,6 +269,10 @@ def fd_guardrails_target_paths(
     installed_process_inventory: Path,
     installed_manifest_validator: Path,
     installed_trusted_registry: Path,
+    installed_hooks_json: Path | None = None,
+    installed_autonomous_policy: Path | None = None,
+    installed_capacity: Path | None = None,
+    installed_capacity_observer: Path | None = None,
 ) -> dict[str, Path]:
     return {
         "config.toml": codex_home / "config.toml",
@@ -219,6 +281,14 @@ def fd_guardrails_target_paths(
         "codex_process_inventory.py": installed_process_inventory,
         "validate_wide_wave_manifest.py": installed_manifest_validator,
         "trusted-wide-wave-skills.json": installed_trusted_registry,
+        "hooks.json": installed_hooks_json or codex_home / "hooks.json",
+        "autonomous_policy.py": installed_autonomous_policy
+        or codex_home / "hooks" / "autonomous_policy.py",
+        "codex_capacity.py": installed_capacity
+        or codex_home / "hooks" / "codex_capacity.py",
+        "codex_capacity_observer.py": installed_capacity_observer
+        or codex_home / "hooks" / "codex_capacity_observer.py",
+        **{f"{name}.config.toml": codex_home / f"{name}.config.toml" for name in PROFILE_CONFIG_NAMES},
     }
 
 
@@ -293,11 +363,18 @@ def read_fd_guardrails_manifest(backup: Path) -> dict[str, Any]:
     if manifest_path.stat().st_uid != os.getuid() or stat.S_IMODE(manifest_path.stat().st_mode) != 0o600:
         raise SystemExit(f"fd-guardrails manifest permissions are unsafe: {manifest_path}")
     try:
-        document = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+        document = json.loads(
+            manifest_path.read_text(encoding="utf-8"),
+            parse_constant=reject_json_constant,
+        )
+    except (json.JSONDecodeError, ValueError) as exc:
         raise SystemExit(f"fd-guardrails manifest is invalid JSON: {exc}") from exc
     validate_fd_guardrails_manifest_document(backup, document)
     return document
+
+
+def reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON value is unsupported: {value}")
 
 
 def validate_fd_guardrails_manifest_document(backup: Path, document: Any) -> None:
@@ -318,7 +395,6 @@ def validate_fd_guardrails_manifest_document(backup: Path, document: Any) -> Non
             "created_at",
             "targets",
         }
-        expected_targets = FD_GUARDRAILS_TARGETS
         expected_target_fields = {
             "id",
             "backup",
@@ -347,7 +423,25 @@ def validate_fd_guardrails_manifest_document(backup: Path, document: Any) -> Non
         if created_at.tzinfo is None:
             raise SystemExit("fd-guardrails manifest creation time must include a timezone")
     targets = document["targets"]
-    if not isinstance(targets, list) or len(targets) != len(expected_targets):
+    if not isinstance(targets, list):
+        raise SystemExit("fd-guardrails manifest has incomplete targets")
+    if version == FD_GUARDRAILS_MANIFEST_VERSION:
+        target_ids = [
+            entry.get("id") if isinstance(entry, dict) else None
+            for entry in targets
+        ]
+        supported_target_ids = [
+            tuple(target_id for target_id, _ in target_set)
+            for target_set in FD_GUARDRAILS_TARGET_SETS_V2
+        ]
+        if tuple(target_ids) not in supported_target_ids:
+            raise SystemExit("fd-guardrails manifest has unsupported v2 target set")
+        expected_targets = next(
+            target_set
+            for target_set in FD_GUARDRAILS_TARGET_SETS_V2
+            if tuple(target_id for target_id, _ in target_set) == tuple(target_ids)
+        )
+    if len(targets) != len(expected_targets):
         raise SystemExit("fd-guardrails manifest has incomplete targets")
     expected = dict(expected_targets)
     observed_ids: set[str] = set()
@@ -416,7 +510,7 @@ def validate_fd_guardrails_targets(
         raise SystemExit("fd-guardrails rollback target paths are incomplete")
     for entry in manifest["targets"]:
         target = target_paths[entry["id"]]
-        if manifest["version"] == FD_GUARDRAILS_MANIFEST_VERSION and entry["target_path"] != str(target.absolute()):
+        if manifest["version"] == FD_GUARDRAILS_MANIFEST_VERSION and entry["target_path"] != str(target.resolve(strict=False)):
             raise SystemExit(f"fd-guardrails rollback target path mismatch: {entry['id']}")
         validate_target_parent(target, required=target.exists())
         ensure_regular_target(target, context="rollback target")

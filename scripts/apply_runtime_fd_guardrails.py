@@ -10,6 +10,7 @@ import io
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -25,6 +26,9 @@ LEGACY_AGENT_THREAD_KEY = "max_threads"
 LEGACY_NATIVE_THREAD_KEY = "max_concurrent_threads_per_session"
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PROCESS_INVENTORY = SOURCE_ROOT / "scripts" / "codex_process_inventory.py"
+SOURCE_AUTONOMOUS_POLICY = SOURCE_ROOT / "scripts" / "autonomous_policy.py"
+SOURCE_CAPACITY = SOURCE_ROOT / "scripts" / "codex_capacity.py"
+SOURCE_CAPACITY_OBSERVER = SOURCE_ROOT / "scripts" / "codex_capacity_observer.py"
 SOURCE_MANIFEST_VALIDATOR = SOURCE_ROOT / "scripts" / "validate_wide_wave_manifest.py"
 SOURCE_TRUSTED_WIDE_WAVE_REGISTRY = SOURCE_ROOT / "config" / "trusted-wide-wave-skills.json"
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -35,6 +39,8 @@ from codex_autonomous_rollback import (  # noqa: E402
     FD_GUARDRAILS_MANIFEST_KIND,
     FD_GUARDRAILS_MANIFEST_VERSION,
     FD_GUARDRAILS_TARGETS,
+    PROFILE_CONFIG_NAMES,
+    PROFILE_THREAD_CAPS,
     fd_guardrails_target_paths,
     handle_fd_guardrails_backup,
     read_fd_guardrails_manifest,
@@ -46,6 +52,19 @@ LEGACY_PARTIAL_REQUIRED_FILES = {
     "config.toml",
 }
 LEGACY_PARTIAL_OPTIONAL_FILES = {"codex_fd_doctor.sh"}
+HOOK_EVENTS = (
+    "PreToolUse",
+    "PermissionRequest",
+    "PostToolUse",
+    "SubagentStart",
+    "SubagentStop",
+    "Stop",
+    "SessionEnd",
+)
+SHORT_HOOK_TIMEOUT_SECONDS = 1
+SESSION_END_HOOK_TIMEOUT_SECONDS = 3
+HOOK_TRUST_REVIEW_REQUIRED = "hook_trust_review_required=true"
+HOOK_TRUST_REVIEW_ACTION = "Откройте /hooks и подтвердите изменённые hooks"
 POLICY_BLOCK = f"""{POLICY_START}
 ## Ограничение ресурсов субагентов
 
@@ -78,6 +97,25 @@ def parse_args() -> argparse.Namespace:
         "--source-process-inventory",
         type=Path,
         default=SOURCE_PROCESS_INVENTORY,
+    )
+    parser.add_argument("--installed-hooks-json", type=Path, default=None)
+    parser.add_argument("--installed-autonomous-policy", type=Path, default=None)
+    parser.add_argument(
+        "--source-autonomous-policy",
+        type=Path,
+        default=SOURCE_AUTONOMOUS_POLICY,
+    )
+    parser.add_argument("--installed-capacity", type=Path, default=None)
+    parser.add_argument(
+        "--source-capacity",
+        type=Path,
+        default=SOURCE_CAPACITY,
+    )
+    parser.add_argument("--installed-capacity-observer", type=Path, default=None)
+    parser.add_argument(
+        "--source-capacity-observer",
+        type=Path,
+        default=SOURCE_CAPACITY_OBSERVER,
     )
     parser.add_argument(
         "--installed-manifest-validator",
@@ -200,6 +238,36 @@ def desired_config(text: str) -> str:
     return text
 
 
+def desired_profile_config(text: str, profile_name: str) -> str:
+    parsed = tomllib.loads(text)
+    agents = parsed.get("agents")
+    if not isinstance(agents, dict):
+        raise ValueError(f"{profile_name}: missing agents table")
+    has_legacy = LEGACY_AGENT_THREAD_KEY in agents
+    has_public = PUBLIC_THREAD_CAP_KEY in agents
+    if has_legacy and has_public:
+        raise ValueError(f"{profile_name}: duplicate agent thread cap keys")
+    if has_legacy:
+        value = validate_profile_thread_cap(agents[LEGACY_AGENT_THREAD_KEY], profile_name)
+        text = remove_table_key(text, "agents", LEGACY_AGENT_THREAD_KEY)
+        return upsert_table_integer(text, "agents", PUBLIC_THREAD_CAP_KEY, value)
+    if has_public:
+        validate_profile_thread_cap(agents[PUBLIC_THREAD_CAP_KEY], profile_name)
+        return text
+    raise ValueError(f"{profile_name}: missing agent thread cap")
+
+
+def validate_profile_thread_cap(value: object, profile_name: str) -> int:
+    expected = PROFILE_THREAD_CAPS[profile_name]
+    if type(value) is not int:
+        raise ValueError(f"{profile_name}: agent thread cap must be an integer")
+    if not 1 <= value <= SAFE_THREAD_CAP:
+        raise ValueError(f"{profile_name}: agent thread cap must be in 1..20")
+    if value != expected:
+        raise ValueError(f"{profile_name}: agent thread cap must be {expected}")
+    return value
+
+
 def desired_agents(text: str) -> str:
     start_count = text.count(POLICY_START)
     end_count = text.count(POLICY_END)
@@ -210,6 +278,157 @@ def desired_agents(text: str) -> str:
     start = text.index(POLICY_START)
     end = text.index(POLICY_END, start) + len(POLICY_END)
     return text[:start] + POLICY_BLOCK + text[end:]
+
+
+def desired_hooks_json(text: str, policy_path: Path) -> str:
+    document = strict_json_loads(text) if text.strip() else {}
+    if not isinstance(document, dict):
+        raise ValueError("hooks.json must contain an object")
+    hooks = document.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        raise ValueError("hooks.json hooks field must contain an object")
+    managed_policy_paths = known_managed_policy_paths(policy_path)
+    for event in HOOK_EVENTS:
+        entries = hooks.setdefault(event, [])
+        if not isinstance(entries, list):
+            raise ValueError(f"hooks.json event must contain a list: {event}")
+        managed_entry = autonomous_policy_hook_entry(policy_path, event)
+        managed_hook = managed_entry["hooks"][0]
+        replacement_done = False
+        preserved_entries = []
+        for entry in entries:
+            replaced_entry, replaced = hook_entry_with_autonomous_policy_replaced(
+                entry,
+                managed_hook,
+                managed_policy_paths,
+                replace=not replacement_done,
+            )
+            if replaced:
+                replacement_done = True
+            if replaced_entry is not None:
+                preserved_entries.append(replaced_entry)
+        if not replacement_done:
+            preserved_entries.append(managed_entry)
+        hooks[event] = preserved_entries
+    return strict_json_dumps(document) + "\n"
+
+
+def strict_json_loads(text: str) -> object:
+    return json.loads(text, parse_constant=reject_json_constant)
+
+
+def reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON value is unsupported: {value}")
+
+
+def strict_json_dumps(document: object) -> str:
+    return json.dumps(document, ensure_ascii=False, indent=2, allow_nan=False)
+
+
+def autonomous_policy_hook_entry(policy_path: Path, event: str) -> dict[str, object]:
+    timeout = (
+        SESSION_END_HOOK_TIMEOUT_SECONDS
+        if event == "SessionEnd"
+        else SHORT_HOOK_TIMEOUT_SECONDS
+    )
+    return {
+        "hooks": [
+            {
+                "type": "command",
+                "command": autonomous_policy_command(policy_path, event),
+                "timeout": timeout,
+                "statusMessage": "Проверка общей ёмкости Codex",
+            }
+        ]
+    }
+
+
+def autonomous_policy_command(policy_path: Path, event: str) -> str:
+    return " ".join(("/usr/bin/python3", shlex.quote(str(policy_path)), shlex.quote(event)))
+
+
+def hook_entry_with_autonomous_policy_replaced(
+    entry: object,
+    managed_hook: object,
+    managed_policy_paths: set[Path],
+    *,
+    replace: bool,
+) -> tuple[object | None, bool]:
+    if not isinstance(entry, dict):
+        return entry, False
+    nested_hooks = entry.get("hooks")
+    if not isinstance(nested_hooks, list):
+        return entry, False
+    kept_hooks = []
+    replaced = False
+    for hook in nested_hooks:
+        if not isinstance(hook, dict):
+            kept_hooks.append(hook)
+            continue
+        command = hook.get("command")
+        if isinstance(command, str) and hook_command_is_autonomous_policy(command, managed_policy_paths):
+            if replace and not replaced:
+                kept_hooks.append(managed_hook)
+                replaced = True
+            continue
+        kept_hooks.append(hook)
+    if not kept_hooks:
+        return None, replaced
+    stripped = dict(entry)
+    stripped["hooks"] = kept_hooks
+    return stripped, replaced
+
+
+def known_managed_policy_paths(policy_path: Path) -> set[Path]:
+    current = policy_path.expanduser().resolve(strict=False)
+    hooks_root = current.parent
+    return {
+        current,
+        (hooks_root / "old" / "autonomous_policy.py").resolve(strict=False),
+        (hooks_root / "legacy" / "autonomous_policy.py").resolve(strict=False),
+    }
+
+
+def hook_command_is_autonomous_policy(command: str, managed_policy_paths: set[Path]) -> bool:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    for token in tokens:
+        candidate = Path(token).expanduser()
+        if not candidate.is_absolute():
+            continue
+        if candidate.resolve(strict=False) in managed_policy_paths:
+            return True
+    return False
+
+
+def normalize_existing_path(path: Path) -> Path:
+    expanded = path.expanduser()
+    if not expanded.is_absolute():
+        expanded = Path.cwd() / expanded
+    return expanded.resolve(strict=False)
+
+
+def normalize_managed_path(path: Path) -> Path:
+    expanded = path.expanduser()
+    candidate = expanded if expanded.is_absolute() else Path.cwd() / expanded
+    validate_managed_parent(candidate)
+    normalized = candidate.resolve(strict=False)
+    validate_managed_parent(normalized)
+    return normalized
+
+
+def path_group_or_world_writable(mode: int) -> bool:
+    return bool(mode & 0o022)
+
+
+def allowed_system_symlink_parent(path: Path) -> bool:
+    return path in {Path("/tmp"), Path("/var")}
+
+
+def allowed_system_writable_parent(path: Path, mode: int, uid: int) -> bool:
+    return path in {Path("/private/tmp"), Path("/tmp")} and uid == 0 and bool(mode & stat.S_ISVTX)
 
 
 def state_issues(
@@ -224,6 +443,14 @@ def state_issues(
     source_manifest_validator: Path,
     installed_trusted_registry: Path,
     source_trusted_registry: Path,
+    installed_hooks_json: Path,
+    installed_autonomous_policy: Path,
+    source_autonomous_policy: Path,
+    installed_capacity: Path,
+    source_capacity: Path,
+    installed_capacity_observer: Path,
+    source_capacity_observer: Path,
+    profile_paths: dict[str, Path],
 ) -> list[str]:
     issues: list[str] = []
     parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
@@ -259,11 +486,50 @@ def state_issues(
         or installed_trusted_registry.read_bytes() != source_trusted_registry.read_bytes()
     ):
         issues.append("installed_trusted_wide_wave_registry_drifted")
+    if (
+        not installed_autonomous_policy.is_file()
+        or installed_autonomous_policy.read_bytes() != source_autonomous_policy.read_bytes()
+    ):
+        issues.append("installed_autonomous_policy_drifted")
+    if not installed_capacity.is_file() or installed_capacity.read_bytes() != source_capacity.read_bytes():
+        issues.append("installed_capacity_drifted")
+    if (
+        not installed_capacity_observer.is_file()
+        or installed_capacity_observer.read_bytes() != source_capacity_observer.read_bytes()
+    ):
+        issues.append("installed_capacity_observer_drifted")
+    for profile_name, profile_path in profile_paths.items():
+        if not profile_path.is_file():
+            issues.append(f"profile_missing:{profile_name}")
+            continue
+        try:
+            current_profile = profile_path.read_text(encoding="utf-8")
+            desired_profile = desired_profile_config(current_profile, profile_name)
+        except ValueError as exc:
+            issues.append(f"profile_invalid:{profile_name}:{exc}")
+            continue
+        if current_profile != desired_profile:
+            issues.append(f"profile_config_drifted:{profile_name}")
+    if not installed_hooks_json.is_file():
+        issues.append("installed_hooks_json_missing")
+    else:
+        try:
+            desired_hooks = desired_hooks_json(
+                installed_hooks_json.read_text(encoding="utf-8"),
+                installed_autonomous_policy,
+            )
+        except (json.JSONDecodeError, ValueError) as exc:
+            issues.append(f"installed_hooks_json_invalid:{exc}")
+        else:
+            if installed_hooks_json.read_text(encoding="utf-8") != desired_hooks:
+                issues.append("installed_hooks_json_drifted")
     return issues
 
 
 def atomic_write(path: Path, data: bytes, mode: int) -> None:
+    validate_managed_parent(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    validate_managed_parent(path)
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(temporary_name)
     try:
@@ -283,13 +549,69 @@ def file_mode(path: Path, fallback: int) -> int:
 
 
 def checked_existing_file(path: Path) -> tuple[bool, int | None]:
+    validate_managed_parent(path)
     if path.is_symlink():
         raise SystemExit(f"managed target is a symlink: {path}")
     if path.exists() and not path.is_file():
         raise SystemExit(f"managed target has unexpected type: {path}")
     if not path.exists():
         return False, None
-    return True, stat.S_IMODE(path.stat().st_mode)
+    file_stat = path.stat()
+    if file_stat.st_uid != os.getuid():
+        raise SystemExit(f"managed target owner is unsafe: {path}")
+    if file_stat.st_nlink != 1:
+        raise SystemExit(f"managed target hardlink count is unsafe: {path}")
+    return True, stat.S_IMODE(file_stat.st_mode)
+
+
+def validate_managed_parent(path: Path) -> None:
+    current = path.parent
+    ancestors: list[Path] = []
+    while True:
+        if current.exists() or current.is_symlink():
+            ancestors.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for parent in reversed(ancestors):
+        parent_stat = parent.lstat()
+        if stat.S_ISLNK(parent_stat.st_mode):
+            if allowed_system_symlink_parent(parent):
+                continue
+            raise SystemExit(f"managed target parent is a symlink: {parent}")
+        if not stat.S_ISDIR(parent_stat.st_mode):
+            raise SystemExit(f"managed target parent has unexpected type: {parent}")
+        if parent_stat.st_uid not in {os.getuid(), 0}:
+            raise SystemExit(f"managed target parent owner is unsafe: {parent}")
+        if path_group_or_world_writable(parent_stat.st_mode) and not allowed_system_writable_parent(
+            parent,
+            parent_stat.st_mode,
+            parent_stat.st_uid,
+        ):
+            raise SystemExit(f"managed target parent permissions are unsafe: {parent}")
+
+
+def validate_managed_directory(path: Path) -> None:
+    if path.is_symlink():
+        raise SystemExit(f"managed directory is a symlink: {path}")
+    if not path.is_dir():
+        raise SystemExit(f"managed directory has unexpected type: {path}")
+    directory_stat = path.stat()
+    if directory_stat.st_uid != os.getuid():
+        raise SystemExit(f"managed directory owner is unsafe: {path}")
+    if path_group_or_world_writable(directory_stat.st_mode):
+        raise SystemExit(f"managed directory permissions are unsafe: {path}")
+
+
+def create_managed_directory(path: Path, mode: int) -> None:
+    if path.is_symlink():
+        raise SystemExit(f"managed directory is a symlink: {path}")
+    validate_managed_parent(path)
+    path.mkdir(parents=True, mode=mode)
+    validate_managed_parent(path)
+    validate_managed_directory(path)
+    path.chmod(mode)
+    validate_managed_directory(path)
 
 
 def create_fd_guardrails_backup(
@@ -302,8 +624,7 @@ def create_fd_guardrails_backup(
 ) -> None:
     if backup.exists():
         raise SystemExit(f"backup already exists: {backup}")
-    backup.mkdir(parents=True, mode=0o700)
-    backup.chmod(0o700)
+    create_managed_directory(backup, 0o700)
     targets = []
     expected_ids = {target_id for target_id, _ in FD_GUARDRAILS_TARGETS}
     if set(target_paths) != expected_ids or set(desired_artifacts) != expected_ids:
@@ -320,7 +641,7 @@ def create_fd_guardrails_backup(
                 "existed": existed,
                 "mode": f"0o{mode:03o}" if mode is not None else None,
                 "sha256": hashlib.sha256(data).hexdigest() if data is not None else None,
-                "target_path": str(target.absolute()),
+                "target_path": str(target.resolve(strict=False)),
                 "installed_mode": f"0o{installed_mode:03o}",
                 "installed_sha256": hashlib.sha256(installed_data).hexdigest(),
             }
@@ -355,7 +676,7 @@ def rollback_after_failed_apply(
             handle_fd_guardrails_backup(backup, True, target_paths=target_paths)
     except BaseException as rollback_error:
         marker = backup / ".rollback-failed"
-        marker.write_text(str(rollback_error), encoding="utf-8")
+        atomic_write(marker, str(rollback_error).encode("utf-8"), 0o600)
         raise SystemExit(
             f"apply failed after mutation and automatic rollback failed: {rollback_error}; original error: {cause}"
         ) from rollback_error
@@ -368,6 +689,9 @@ def migrate_legacy_partial_backup(codex_home: Path, suffix: str) -> Path:
     backup_root = codex_home / "backups"
     source = backup_root / f"runtime-fd-{suffix}"
     destination = backup_root / f"fd-guardrails-{suffix}"
+    validate_managed_parent(backup_root / ".migration-probe")
+    validate_managed_directory(backup_root)
+    validate_managed_parent(destination)
     if source.is_symlink() or not source.is_dir():
         raise SystemExit(f"legacy partial backup is missing or unsafe: {source}")
     entries = list(source.iterdir())
@@ -424,11 +748,15 @@ def installation_receipt_issues(
     if receipt["version"] != FD_GUARDRAILS_MANIFEST_VERSION:
         return ["installation_receipt_v2_missing"]
     issues: list[str] = []
+    expected_ids = tuple(target_id for target_id, _backup_name in FD_GUARDRAILS_TARGETS)
+    observed_ids = tuple(entry.get("id") for entry in receipt["targets"])
+    if observed_ids != expected_ids:
+        return ["installation_receipt_target_set_drifted"]
     if receipt["source_commit"] != source_commit:
         issues.append("installation_receipt_source_commit_drifted")
     for entry in receipt["targets"]:
         target = target_paths[entry["id"]]
-        if entry["target_path"] != str(target.absolute()):
+        if entry["target_path"] != str(target.resolve(strict=False)):
             issues.append(f"installation_receipt_target_path_drifted:{entry['id']}")
             continue
         if target.is_symlink() or not target.is_file():
@@ -441,42 +769,90 @@ def installation_receipt_issues(
     return issues
 
 
+def issues_require_hook_trust_review(issues: list[str]) -> bool:
+    prefixes = (
+        "installed_hooks_json",
+        "installed_autonomous_policy",
+        "installed_capacity",
+        "installed_capacity_observer",
+        "installation_receipt",
+    )
+    return any(issue.startswith(prefixes) for issue in issues)
+
+
 def main() -> int:
     args = parse_args()
     if args.timestamp is not None and not re.fullmatch(r"[0-9]{8}-[0-9]{6}", args.timestamp):
         raise SystemExit("invalid timestamp: expected YYYYMMDD-HHMMSS")
-    config_path = args.codex_home / "config.toml"
-    agents_path = args.codex_home / "AGENTS.md"
+    codex_home = normalize_managed_path(args.codex_home)
+    installed_doctor = normalize_managed_path(args.installed_doctor)
+    source_doctor = normalize_existing_path(args.source_doctor)
+    source_process_inventory = normalize_existing_path(args.source_process_inventory)
+    source_autonomous_policy = normalize_existing_path(args.source_autonomous_policy)
+    source_capacity = normalize_existing_path(args.source_capacity)
+    source_capacity_observer = normalize_existing_path(args.source_capacity_observer)
+    source_manifest_validator = normalize_existing_path(args.source_manifest_validator)
+    source_trusted_registry = normalize_existing_path(args.source_trusted_registry)
+    config_path = codex_home / "config.toml"
+    agents_path = codex_home / "AGENTS.md"
     installed_trusted_registry = (
-        args.installed_trusted_registry
+        normalize_managed_path(args.installed_trusted_registry)
         if args.installed_trusted_registry is not None
-        else args.codex_home / "config" / "trusted-wide-wave-skills.json"
+        else codex_home / "config" / "trusted-wide-wave-skills.json"
     )
     installed_manifest_validator = (
-        args.installed_manifest_validator
+        normalize_managed_path(args.installed_manifest_validator)
         if args.installed_manifest_validator is not None
-        else args.installed_doctor.parent / "validate_wide_wave_manifest.py"
+        else installed_doctor.parent / "validate_wide_wave_manifest.py"
     )
     installed_process_inventory = (
-        args.installed_process_inventory
+        normalize_managed_path(args.installed_process_inventory)
         if args.installed_process_inventory is not None
-        else args.installed_doctor.parent / "codex_process_inventory.py"
+        else installed_doctor.parent / "codex_process_inventory.py"
+    )
+    installed_hooks_json = (
+        normalize_managed_path(args.installed_hooks_json)
+        if args.installed_hooks_json is not None
+        else codex_home / "hooks.json"
+    )
+    installed_autonomous_policy = (
+        normalize_managed_path(args.installed_autonomous_policy)
+        if args.installed_autonomous_policy is not None
+        else codex_home / "hooks" / "autonomous_policy.py"
+    )
+    installed_capacity = (
+        normalize_managed_path(args.installed_capacity)
+        if args.installed_capacity is not None
+        else codex_home / "hooks" / "codex_capacity.py"
+    )
+    installed_capacity_observer = (
+        normalize_managed_path(args.installed_capacity_observer)
+        if args.installed_capacity_observer is not None
+        else codex_home / "hooks" / "codex_capacity_observer.py"
     )
     target_paths = fd_guardrails_target_paths(
-        codex_home=args.codex_home,
-        installed_doctor=args.installed_doctor,
+        codex_home=codex_home,
+        installed_doctor=installed_doctor,
         installed_process_inventory=installed_process_inventory,
         installed_manifest_validator=installed_manifest_validator,
         installed_trusted_registry=installed_trusted_registry,
+        installed_hooks_json=installed_hooks_json,
+        installed_autonomous_policy=installed_autonomous_policy,
+        installed_capacity=installed_capacity,
+        installed_capacity_observer=installed_capacity_observer,
     )
     source_commit = resolve_source_commit(args.source_commit)
     for path in (
         config_path,
         agents_path,
-        args.source_doctor,
-        args.source_process_inventory,
-        args.source_manifest_validator,
-        args.source_trusted_registry,
+        source_doctor,
+        source_process_inventory,
+        source_autonomous_policy,
+        source_capacity,
+        source_capacity_observer,
+        source_manifest_validator,
+        source_trusted_registry,
+        *(target_paths[f"{name}.config.toml"] for name in PROFILE_CONFIG_NAMES),
     ):
         if not path.is_file():
             raise SystemExit(f"required file is missing: {path}")
@@ -486,25 +862,33 @@ def main() -> int:
         if not args.apply:
             raise SystemExit("--migrate-legacy-backup requires --apply")
         migrated_backup = migrate_legacy_partial_backup(
-            args.codex_home,
+            codex_home,
             args.migrate_legacy_backup,
         )
 
     issues = state_issues(
         config_path=config_path,
         agents_path=agents_path,
-        installed_doctor=args.installed_doctor,
-        source_doctor=args.source_doctor,
+        installed_doctor=installed_doctor,
+        source_doctor=source_doctor,
         installed_process_inventory=installed_process_inventory,
-        source_process_inventory=args.source_process_inventory,
+        source_process_inventory=source_process_inventory,
         installed_manifest_validator=installed_manifest_validator,
-        source_manifest_validator=args.source_manifest_validator,
+        source_manifest_validator=source_manifest_validator,
         installed_trusted_registry=installed_trusted_registry,
-        source_trusted_registry=args.source_trusted_registry,
+        source_trusted_registry=source_trusted_registry,
+        installed_hooks_json=installed_hooks_json,
+        installed_autonomous_policy=installed_autonomous_policy,
+        source_autonomous_policy=source_autonomous_policy,
+        installed_capacity=installed_capacity,
+        source_capacity=source_capacity,
+        installed_capacity_observer=installed_capacity_observer,
+        source_capacity_observer=source_capacity_observer,
+        profile_paths={name: target_paths[f"{name}.config.toml"] for name in PROFILE_CONFIG_NAMES},
     )
     issues.extend(
         installation_receipt_issues(
-            codex_home=args.codex_home,
+            codex_home=codex_home,
             target_paths=target_paths,
             source_commit=source_commit,
         )
@@ -518,24 +902,45 @@ def main() -> int:
     if not args.apply:
         print("status=BLOCK")
         print(f"issues={','.join(issues)}")
+        if issues_require_hook_trust_review(issues):
+            print(HOOK_TRUST_REVIEW_REQUIRED)
         return 2
 
     config_bytes = desired_config(config_path.read_text(encoding="utf-8")).encode()
     agents_bytes = desired_agents(agents_path.read_text(encoding="utf-8")).encode()
-    doctor_bytes = args.source_doctor.read_bytes()
-    process_inventory_bytes = args.source_process_inventory.read_bytes()
-    manifest_validator_bytes = args.source_manifest_validator.read_bytes()
-    trusted_registry_bytes = args.source_trusted_registry.read_bytes()
+    doctor_bytes = source_doctor.read_bytes()
+    process_inventory_bytes = source_process_inventory.read_bytes()
+    autonomous_policy_bytes = source_autonomous_policy.read_bytes()
+    capacity_bytes = source_capacity.read_bytes()
+    capacity_observer_bytes = source_capacity_observer.read_bytes()
+    hooks_text = installed_hooks_json.read_text(encoding="utf-8") if installed_hooks_json.exists() else "{}\n"
+    hooks_bytes = desired_hooks_json(hooks_text, installed_autonomous_policy).encode()
+    manifest_validator_bytes = source_manifest_validator.read_bytes()
+    trusted_registry_bytes = source_trusted_registry.read_bytes()
+    profile_writes = []
+    for profile_name in PROFILE_CONFIG_NAMES:
+        profile_id = f"{profile_name}.config.toml"
+        profile_path = target_paths[profile_id]
+        profile_bytes = desired_profile_config(
+            profile_path.read_text(encoding="utf-8"),
+            profile_name,
+        ).encode()
+        profile_writes.append((profile_id, profile_path, profile_bytes, file_mode(profile_path, 0o600)))
 
     timestamp = args.timestamp or datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup = args.codex_home / "backups" / f"fd-guardrails-{timestamp}"
+    backup = codex_home / "backups" / f"fd-guardrails-{timestamp}"
     writes = [
         ("config.toml", config_path, config_bytes, file_mode(config_path, 0o600)),
         ("AGENTS.md", agents_path, agents_bytes, file_mode(agents_path, 0o644)),
-        ("codex_fd_doctor.sh", args.installed_doctor, doctor_bytes, 0o755),
+        ("codex_fd_doctor.sh", installed_doctor, doctor_bytes, 0o755),
         ("codex_process_inventory.py", installed_process_inventory, process_inventory_bytes, 0o755),
         ("validate_wide_wave_manifest.py", installed_manifest_validator, manifest_validator_bytes, 0o755),
         ("trusted-wide-wave-skills.json", installed_trusted_registry, trusted_registry_bytes, 0o600),
+        ("hooks.json", installed_hooks_json, hooks_bytes, 0o600),
+        ("autonomous_policy.py", installed_autonomous_policy, autonomous_policy_bytes, 0o755),
+        ("codex_capacity.py", installed_capacity, capacity_bytes, 0o755),
+        ("codex_capacity_observer.py", installed_capacity_observer, capacity_observer_bytes, 0o755),
+        *profile_writes,
     ]
     desired_artifacts = {
         target_id: (data, mode)
@@ -558,19 +963,27 @@ def main() -> int:
         remaining = state_issues(
             config_path=config_path,
             agents_path=agents_path,
-            installed_doctor=args.installed_doctor,
-            source_doctor=args.source_doctor,
+            installed_doctor=installed_doctor,
+            source_doctor=source_doctor,
             installed_process_inventory=installed_process_inventory,
-            source_process_inventory=args.source_process_inventory,
+            source_process_inventory=source_process_inventory,
             installed_manifest_validator=installed_manifest_validator,
-            source_manifest_validator=args.source_manifest_validator,
+            source_manifest_validator=source_manifest_validator,
             installed_trusted_registry=installed_trusted_registry,
-            source_trusted_registry=args.source_trusted_registry,
+            source_trusted_registry=source_trusted_registry,
+            installed_hooks_json=installed_hooks_json,
+            installed_autonomous_policy=installed_autonomous_policy,
+            source_autonomous_policy=source_autonomous_policy,
+            installed_capacity=installed_capacity,
+            source_capacity=source_capacity,
+            installed_capacity_observer=installed_capacity_observer,
+            source_capacity_observer=source_capacity_observer,
+            profile_paths={name: target_paths[f"{name}.config.toml"] for name in PROFILE_CONFIG_NAMES},
         )
         if remaining:
             raise RuntimeError(f"post-apply verification failed: {','.join(remaining)}")
         receipt_remaining = installation_receipt_issues(
-            codex_home=args.codex_home,
+            codex_home=codex_home,
             target_paths=target_paths,
             source_commit=source_commit,
         )
@@ -582,6 +995,8 @@ def main() -> int:
         rollback_after_failed_apply(backup=backup, target_paths=target_paths, cause=exc)
     print("status=APPLIED")
     print("issues=none")
+    print(HOOK_TRUST_REVIEW_REQUIRED)
+    print(f"next_action={HOOK_TRUST_REVIEW_ACTION}")
     print(f"backup_dir={backup}")
     if migrated_backup is not None:
         print(f"migrated_backup={migrated_backup}")
