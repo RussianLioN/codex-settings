@@ -27,6 +27,7 @@ from codex_smart_subagents.mcp_runtime_proof_v2 import (  # noqa: E402
 )
 from integration_runtime_v2 import (  # noqa: E402
     IntegrationConfigV2,
+    PinnedResumeBindingV2,
     TurnContextStoreV2,
 )
 
@@ -470,7 +471,12 @@ class MCPEntrypointV2Tests(unittest.TestCase):
                             self.environment,
                             v2_mcp_contract_checker=lambda _plugin_root: None,
                             v2_controller_checker=(
-                                lambda _config, _environ, *, deadline: None
+                                lambda _config, _environ, *, deadline: (
+                                    PinnedResumeBindingV2(
+                                        self.state_home / "controller.sqlite3",
+                                        "e" * 64,
+                                    )
+                                )
                             ),
                         )
                     )
