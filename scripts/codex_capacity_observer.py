@@ -108,6 +108,7 @@ def default_state_dir(home: Path | None = None) -> Path:
 def observe(
     *,
     snapshot: dict[str, Any] | None = None,
+    calibration_snapshot: dict[str, Any] | None = None,
     state_dir: Path | None = None,
     now_epoch: float | None = None,
     workload_class: str = "normal",
@@ -136,6 +137,11 @@ def observe(
         if active_slots is not None:
             raw_snapshot = dict(raw_snapshot)
             raw_snapshot["active_slots"] = active_slots
+        raw_calibration_snapshot = dict(
+            calibration_snapshot if calibration_snapshot is not None else raw_snapshot
+        )
+        if active_slots is not None:
+            raw_calibration_snapshot["active_slots"] = active_slots
         current_snapshot = normalize_snapshot(raw_snapshot)
         evaluated_cost = expected_cost
         if evaluated_cost is None:
@@ -161,7 +167,7 @@ def observe(
         )
         return apply_calibration_to_output(
             result,
-            current_snapshot,
+            raw_calibration_snapshot,
             state_dir=observed_state_dir,
             now_epoch=now,
             workload_class=workload_class,

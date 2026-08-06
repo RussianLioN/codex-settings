@@ -10,12 +10,15 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = ROOT / "scripts" / "autonomous_policy.py"
 CAPACITY = ROOT / "scripts" / "codex_capacity.py"
 PYTHON_39 = "/usr/bin/python3"
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
 
 
 def load_policy_module():
@@ -493,17 +496,12 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
             root_fd_used=100,
             current_root_fd_used=100,
         )
-        completed = subprocess.run(
-            [sys.executable, str(ROOT / "scripts" / "codex_capacity_observer.py"), "--state-dir", str(self.home / ".local" / "state" / "codex-capacity-v1"), "--snapshot-json", str(settled_snapshot)],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=ROOT,
-            env=env,
-        )
+        completed = self.run_policy("PreToolUse", self.spawn_payload("settle-on-next-pretool"), env=env)
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
-        result = json.loads(completed.stdout)
-        self.assertEqual(1, result["accepted_calibrations"])
+        calibration_payload = json.loads(
+            (self.home / ".local" / "state" / "codex-capacity-v1" / "calibration_state.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(1, calibration_payload["classes"]["normal"]["accepted_count"])
 
         calibration_state = (self.home / ".local" / "state" / "codex-capacity-v1" / "calibration_state.json").read_text(encoding="utf-8")
         audit = self.audit_text()
@@ -527,6 +525,62 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
         self.assertEqual(0, stopped.returncode, stopped.stderr)
         self.assertEqual(0, self.capacity_cli("snapshot")["active_count"])
 
+    def test_subagent_stop_releases_when_calibration_snapshot_fails(self) -> None:
+        policy = load_policy_module()
+        releases: list[tuple[str, str]] = []
+        state_dir = self.home / ".local" / "state" / "codex-capacity-v1"
+
+        class FailingSnapshotStore:
+            def __init__(self, *args: object, max_operation_seconds: float | None = None, **kwargs: object) -> None:
+                self.state_dir = state_dir
+
+            def snapshot(self) -> dict[str, object]:
+                raise RuntimeError("injected calibration snapshot failure")
+
+            def release_agent(self, *, session_id: str, agent_id: str) -> dict[str, object]:
+                releases.append((session_id, agent_id))
+                return {"state": "RELEASED", "session_id": session_id, "agent_id": agent_id}
+
+        with mock.patch.object(policy, "CapacityStore", FailingSnapshotStore):
+            decision, _, details = policy.handle_subagent_stop(
+                {"session_id": "session-1", "agent_id": "agent-1"},
+                {},
+                deadline=time.perf_counter() + 0.5,
+            )
+
+        self.assertEqual("allow", decision)
+        self.assertEqual([("session-1", "agent-1")], releases)
+        self.assertEqual("RELEASED", details["capacity"]["state"])
+
+    def test_subagent_stop_releases_after_hook_deadline_is_exhausted(self) -> None:
+        policy = load_policy_module()
+        calls = {"snapshot": 0, "release": 0}
+        state_dir = self.home / ".local" / "state" / "codex-capacity-v1"
+
+        class DeadlineStore:
+            def __init__(self, *args: object, max_operation_seconds: float | None = None, **kwargs: object) -> None:
+                self.state_dir = state_dir
+
+            def snapshot(self) -> dict[str, object]:
+                calls["snapshot"] += 1
+                return {"state": "OK", "active_count": 1}
+
+            def release_agent(self, *, session_id: str, agent_id: str) -> dict[str, object]:
+                calls["release"] += 1
+                return {"state": "RELEASED", "session_id": session_id, "agent_id": agent_id}
+
+        with mock.patch.object(policy, "CapacityStore", DeadlineStore):
+            decision, _, details = policy.handle_subagent_stop(
+                {"session_id": "session-1", "agent_id": "agent-1"},
+                {},
+                deadline=time.perf_counter() - 1.0,
+            )
+
+        self.assertEqual("allow", decision)
+        self.assertEqual(0, calls["snapshot"])
+        self.assertEqual(1, calls["release"])
+        self.assertEqual("RELEASED", details["capacity"]["state"])
+
     def test_lifecycle_snapshot_status_uses_browser_cost(self) -> None:
         policy = load_policy_module()
         snapshot = self.write_observer_snapshot(
@@ -541,12 +595,58 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
         self.assertEqual("GREEN", policy.calibration_snapshot_status(payload, workload_class="normal"))
         self.assertEqual("YELLOW", policy.calibration_snapshot_status(payload, workload_class="browser"))
 
-    def test_enforcement_can_be_disabled(self) -> None:
+    def test_enforcement_environment_cannot_disable_global_capacity(self) -> None:
         env = dict(self.env, CODEX_CAPACITY_ENFORCEMENT="0")
-        for index in range(8):
-            completed = self.run_policy("PreToolUse", self.spawn_payload(f"bypass-{index}"), env=env)
+        for index in range(6):
+            completed = self.run_policy("PreToolUse", self.spawn_payload(f"enforced-{index}"), env=env)
             self.assertEqual(0, completed.returncode, completed.stderr)
-        self.assertEqual(0, self.capacity_cli("snapshot")["active_count"])
+        queued = self.run_policy("PreToolUse", self.spawn_payload("enforced-queued"), env=env)
+
+        self.assertEqual(2, queued.returncode)
+        self.assertEqual("CAPACITY_QUEUED", json.loads(queued.stderr)["code"])
+        self.assertEqual(6, self.capacity_cli("snapshot")["active_count"])
+
+    def test_dynamic_capacity_release_promotes_waiter_above_default_limit(self) -> None:
+        policy = load_policy_module()
+        state_dir = self.home / ".local" / "state" / "codex-capacity-v1"
+        calibration = policy.capacity_observer.default_calibration_state()
+        normal = calibration["classes"]["normal"]
+        normal["samples"] = [dict(policy.capacity_observer.MIN_COSTS["normal"]) for _ in range(30)]
+        normal["accepted_count"] = 30
+        normal["effective_capacity"] = 8
+        normal["proven_capacity"] = 8
+        normal["cost_updated_at"] = 1000.0
+        policy.capacity_observer.CalibrationStore(state_dir).update(
+            lambda _: {"state": calibration, "output": {}},
+        )
+
+        for index in range(8):
+            leased = self.run_policy("PreToolUse", self.spawn_payload(f"dynamic-{index}"))
+            self.assertEqual(0, leased.returncode, leased.stderr)
+            started = self.run_policy(
+                "SubagentStart",
+                {
+                    "session_id": "session-1",
+                    "turn_id": "turn-1",
+                    "agent_id": f"agent-{index}",
+                    "agent_type": "worker",
+                },
+            )
+            self.assertEqual(0, started.returncode, started.stderr)
+
+        queued = self.run_policy("PreToolUse", self.spawn_payload("dynamic-waiter"))
+        self.assertEqual(2, queued.returncode)
+        self.assertEqual("CAPACITY_QUEUED", json.loads(queued.stderr)["code"])
+
+        stopped = self.run_policy(
+            "SubagentStop",
+            {"session_id": "session-1", "agent_id": "agent-0"},
+        )
+
+        self.assertEqual(0, stopped.returncode, stopped.stderr)
+        snapshot = self.capacity_cli("snapshot")
+        self.assertEqual(7, snapshot["active_count"])
+        self.assertEqual(["READY"], [ticket["state"] for ticket in snapshot["tickets"]])
 
     def test_sensitive_task_text_is_not_audited_or_stored(self) -> None:
         secret = "secret task phrase for capacity policy"

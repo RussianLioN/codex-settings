@@ -726,7 +726,13 @@ def check_rollback() -> None:
     backups = sorted((CODEX_HOME / "backups").glob("runtime-fd-*"))
     assert backups, "runtime FD backup set is missing"
     result = subprocess.run(
-        [sys.executable, str(REPO / "scripts/codex_autonomous_rollback.py"), "--backup", str(backups[-1])],
+        [
+            sys.executable,
+            str(REPO / "scripts/codex_autonomous_rollback.py"),
+            "--backup",
+            str(backups[-1]),
+            "--legacy-runtime-cache-rollback",
+        ],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -768,8 +774,18 @@ def check_runtime_rollback_apply(script: Path) -> None:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         module.CODEX_HOME = codex_home
+        try:
+            module.handle_runtime_backup(backup, False)
+        except SystemExit as exc:
+            assert "--legacy-runtime-cache-rollback" in str(exc)
+        else:
+            raise AssertionError("legacy runtime cache rollback lacked explicit confirmation")
         with redirect_stdout(io.StringIO()):
-            assert module.handle_runtime_backup(backup, True) == 0
+            assert module.handle_runtime_backup(
+                backup,
+                True,
+                allow_legacy_cache_restore=True,
+            ) == 0
 
         browser_target = codex_home / "plugins/cache/openai-bundled/browser"
         marketplace_target = codex_home / ".tmp/bundled-marketplaces/openai-bundled"

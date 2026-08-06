@@ -35,7 +35,6 @@ KNOWN_EVENTS = {
     "Stop",
     "SessionEnd",
 }
-CAPACITY_ENFORCEMENT_ENV = "CODEX_CAPACITY_ENFORCEMENT"
 CAPACITY_OBSERVER_SNAPSHOT_ENV = "CODEX_CAPACITY_OBSERVER_SNAPSHOT"
 CAPACITY_OBSERVER_TEST_MODE_ENV = "CODEX_CAPACITY_OBSERVER_TEST_MODE"
 CAPACITY_HOOK_DEADLINE_MS_ENV = "CODEX_CAPACITY_HOOK_DEADLINE_MS"
@@ -46,6 +45,7 @@ CAPACITY_MIN_STAGE_SECONDS = 0.005
 CAPACITY_AFTER_SNAPSHOT_RESERVE_SECONDS = 0.58
 CAPACITY_AFTER_OBSERVER_RESERVE_SECONDS = 0.08
 CAPACITY_AFTER_ACQUIRE_RESERVE_SECONDS = 0.02
+CAPACITY_STOP_RELEASE_RESERVE_SECONDS = 0.30
 SENSITIVE_PAYLOAD_KEYS = {"message", "messages", "task", "task_name", "taskName", "tool_input", "toolInput"}
 KNOWN_AGENTS = {
     "default",
@@ -193,11 +193,6 @@ def handle_spawn_capacity(payload: dict[str, Any], details: dict[str, Any], *, d
     details.update(request.audit_details)
     if request.error:
         return "block", request.error, details
-    if not capacity_enforcement_enabled():
-        details["capacity_state"] = "BYPASS"
-        details["capacity_enforcement"] = "disabled"
-        return "allow", "capacity enforcement bypass", details
-
     snapshot_budget, deadline_reason = capacity_stage_budget(
         deadline,
         reserve_seconds=CAPACITY_AFTER_SNAPSHOT_RESERVE_SECONDS,
@@ -331,6 +326,7 @@ def observed_capacity_limit(
         return 0, 0, deadline_reason, root_identity, None
     observation = observe_capacity_with_budget(
         snapshot=snapshot,
+        calibration_snapshot=calibration_snapshot,
         state_dir=store.state_dir,
         active_slots=managed_slots,
         max_operation_seconds=observer_budget,
@@ -482,6 +478,7 @@ def capacity_store_accepts_operation_budget() -> bool:
 def observe_capacity_with_budget(
     *,
     snapshot: dict[str, Any] | None,
+    calibration_snapshot: dict[str, Any] | None,
     state_dir: Path,
     active_slots: int,
     max_operation_seconds: float,
@@ -490,7 +487,13 @@ def observe_capacity_with_budget(
     original = capacity_observer.OBSERVE_TIMEOUT_SECONDS
     capacity_observer.OBSERVE_TIMEOUT_SECONDS = max(CAPACITY_MIN_STAGE_SECONDS, max_operation_seconds)
     try:
-        return observe_capacity(snapshot=snapshot, state_dir=state_dir, active_slots=active_slots, workload_class=workload_class)
+        return observe_capacity(
+            snapshot=snapshot,
+            calibration_snapshot=calibration_snapshot,
+            state_dir=state_dir,
+            active_slots=active_slots,
+            workload_class=workload_class,
+        )
     finally:
         capacity_observer.OBSERVE_TIMEOUT_SECONDS = original
 
@@ -551,14 +554,35 @@ def calibration_snapshot_status(snapshot: dict[str, Any], *, workload_class: str
         return "RED"
 
 
-def active_calibration_workload_class(state_dir: Path, details: dict[str, Any], *, deadline: float | None = None) -> str:
+def active_calibration_profile(
+    state_dir: Path,
+    details: dict[str, Any],
+    *,
+    deadline: float | None = None,
+) -> tuple[str, int]:
     try:
         status = capacity_observer.calibration_status(state_dir=state_dir, deadline=deadline)
     except Exception:
         details["capacity_calibration_status"] = "unavailable"
-        return "normal"
+        return "normal", DEFAULT_CAPACITY
     workload_class = status.get("workload_class")
-    return str(workload_class) if workload_class in capacity_observer.MIN_COSTS else "normal"
+    selected_class = str(workload_class) if workload_class in capacity_observer.MIN_COSTS else "normal"
+    classes = status.get("classes") if isinstance(status.get("classes"), dict) else {}
+    profile = classes.get(selected_class) if isinstance(classes.get(selected_class), dict) else {}
+    accepted = int(profile.get("accepted_count") or 0)
+    effective = int(profile.get("effective_capacity") or DEFAULT_CAPACITY)
+    if (
+        accepted < capacity_observer.MIN_SUCCESSFUL_OBSERVATIONS
+        or effective not in capacity_observer.VALID_CAPACITIES
+    ):
+        effective = DEFAULT_CAPACITY
+    effective = max(DEFAULT_CAPACITY, min(MAX_CAPACITY, effective))
+    details["capacity_calibration_limit"] = effective
+    return selected_class, effective
+
+
+def active_calibration_workload_class(state_dir: Path, details: dict[str, Any], *, deadline: float | None = None) -> str:
+    return active_calibration_profile(state_dir, details, deadline=deadline)[0]
 
 
 def record_calibration_event(
@@ -635,7 +659,14 @@ def handle_post_tool_use(
     if request.error:
         details["capacity_release_error"] = request.error
         return "allow", "spawn failure could not be mapped to capacity request", details
-    result = CapacityStore(capacity=DEFAULT_CAPACITY).release_request(
+    base_store = CapacityStore(capacity=DEFAULT_CAPACITY)
+    _, lifecycle_capacity = active_calibration_profile(
+        base_store.state_dir,
+        details,
+        deadline=deadline,
+    )
+    store = CapacityStore(capacity=lifecycle_capacity)
+    result = store.release_request(
         request.request_id,
         expected_state="PROVISIONAL",
     )
@@ -643,7 +674,7 @@ def handle_post_tool_use(
     record_calibration_event(
         "spawn_failed",
         details,
-        state_dir=CapacityStore(capacity=DEFAULT_CAPACITY).state_dir,
+        state_dir=store.state_dir,
         session_id=request.session_id,
         turn_id=request.turn_id,
         request_id=request.request_id,
@@ -669,7 +700,13 @@ def handle_subagent_start(
     if not session_id or not turn_id or not agent_id:
         details["capacity_lifecycle_error"] = "missing_session_turn_or_agent_id"
         return "allow", "subagent start lifecycle identity incomplete", details
-    store = CapacityStore(capacity=DEFAULT_CAPACITY)
+    base_store = CapacityStore(capacity=DEFAULT_CAPACITY)
+    workload_class, lifecycle_capacity = active_calibration_profile(
+        base_store.state_dir,
+        details,
+        deadline=deadline,
+    )
+    store = CapacityStore(capacity=lifecycle_capacity)
     result = store.activate_next(
         session_id=session_id,
         turn_id=turn_id,
@@ -678,7 +715,6 @@ def handle_subagent_start(
     details["capacity"] = sanitize_capacity_result(result)
     snapshot_result = store.snapshot()
     active_slots = int(snapshot_result.get("active_count") or 0) if snapshot_result.get("state") != "ERROR" else 0
-    workload_class = active_calibration_workload_class(store.state_dir, details, deadline=deadline)
     snapshot = calibration_snapshot_for_lifecycle(store, details, active_slots=active_slots, deadline=deadline, workload_class=workload_class)
     record_calibration_event(
         "subagent_start",
@@ -700,24 +736,74 @@ def handle_subagent_stop(payload: dict[str, Any], details: dict[str, Any], *, de
     if not session_id or not agent_id:
         details["capacity_lifecycle_error"] = "missing_session_or_agent_id"
         return "allow", "subagent stop lifecycle identity incomplete", details
-    store = CapacityStore(capacity=DEFAULT_CAPACITY)
-    snapshot_result = store.snapshot()
-    active_slots = int(snapshot_result.get("active_count") or 0) if snapshot_result.get("state") != "ERROR" else 0
-    workload_class = active_calibration_workload_class(store.state_dir, details, deadline=deadline)
-    snapshot = calibration_snapshot_for_lifecycle(store, details, active_slots=active_slots, deadline=deadline, workload_class=workload_class)
-    record_calibration_event(
-        "subagent_stop_before_release",
-        details,
-        state_dir=store.state_dir,
-        snapshot=snapshot,
-        session_id=session_id,
-        agent_id=agent_id,
-        workload_class=workload_class,
-        deadline=deadline,
+    lifecycle_capacity = DEFAULT_CAPACITY
+    calibration_budget, deadline_reason = capacity_stage_budget(
+        deadline,
+        reserve_seconds=CAPACITY_STOP_RELEASE_RESERVE_SECONDS,
+        details=details,
+        stage="stop_calibration",
     )
-    result = store.release_agent(session_id=session_id, agent_id=agent_id)
+    if deadline_reason:
+        details["capacity_calibration_snapshot"] = "skipped_deadline"
+    else:
+        calibration_deadline = (
+            None
+            if deadline is None
+            else min(deadline, time.perf_counter() + calibration_budget)
+        )
+        try:
+            calibration_store = capacity_store(
+                capacity=DEFAULT_CAPACITY,
+                max_operation_seconds=calibration_budget,
+            )
+            snapshot_result = calibration_store.snapshot()
+            active_slots = (
+                int(snapshot_result.get("active_count") or 0)
+                if snapshot_result.get("state") != "ERROR"
+                else 0
+            )
+            workload_class, lifecycle_capacity = active_calibration_profile(
+                calibration_store.state_dir,
+                details,
+                deadline=calibration_deadline,
+            )
+            snapshot = calibration_snapshot_for_lifecycle(
+                calibration_store,
+                details,
+                active_slots=active_slots,
+                deadline=calibration_deadline,
+                workload_class=workload_class,
+            )
+            record_calibration_event(
+                "subagent_stop_before_release",
+                details,
+                state_dir=calibration_store.state_dir,
+                snapshot=snapshot,
+                session_id=session_id,
+                agent_id=agent_id,
+                workload_class=workload_class,
+                deadline=calibration_deadline,
+            )
+        except Exception:
+            details["capacity_calibration_snapshot"] = "unavailable"
+
+    release_budget = remaining_capacity_operation_budget(deadline)
+    result = capacity_store(
+        capacity=lifecycle_capacity,
+        max_operation_seconds=release_budget,
+    ).release_agent(session_id=session_id, agent_id=agent_id)
     details["capacity"] = sanitize_capacity_result(result)
     return "allow", "subagent stop capacity release attempted", details
+
+
+def remaining_capacity_operation_budget(deadline: float | None) -> float:
+    if deadline is None:
+        return capacity_core.MAX_OPERATION_SECONDS
+    remaining = max(0.0, deadline - time.perf_counter())
+    return max(
+        CAPACITY_MIN_STAGE_SECONDS,
+        min(capacity_core.MAX_OPERATION_SECONDS, remaining),
+    )
 
 
 def handle_stop(payload: dict[str, Any], details: dict[str, Any], *, deadline: float | None = None) -> tuple[str, str, dict[str, Any]]:
@@ -726,9 +812,16 @@ def handle_stop(payload: dict[str, Any], details: dict[str, Any], *, deadline: f
     if not session_id or not turn_id:
         details["capacity_lifecycle_error"] = "missing_session_or_turn_id"
         return "allow", "stop lifecycle identity incomplete", details
-    result = CapacityStore(capacity=DEFAULT_CAPACITY).cancel_turn(session_id=session_id, turn_id=turn_id)
+    base_store = CapacityStore(capacity=DEFAULT_CAPACITY)
+    _, lifecycle_capacity = active_calibration_profile(
+        base_store.state_dir,
+        details,
+        deadline=deadline,
+    )
+    store = CapacityStore(capacity=lifecycle_capacity)
+    result = store.cancel_turn(session_id=session_id, turn_id=turn_id)
     details["capacity"] = sanitize_capacity_result(result)
-    record_calibration_event("stop", details, state_dir=CapacityStore(capacity=DEFAULT_CAPACITY).state_dir, session_id=session_id, turn_id=turn_id, deadline=deadline)
+    record_calibration_event("stop", details, state_dir=store.state_dir, session_id=session_id, turn_id=turn_id, deadline=deadline)
     return "allow", "turn capacity cancellation attempted", details
 
 
@@ -737,7 +830,13 @@ def handle_session_end(payload: dict[str, Any], details: dict[str, Any], *, dead
     if not session_id:
         details["capacity_lifecycle_error"] = "missing_session_id"
         return "allow", "session end lifecycle identity incomplete", details
-    store = CapacityStore(capacity=DEFAULT_CAPACITY)
+    base_store = CapacityStore(capacity=DEFAULT_CAPACITY)
+    _, lifecycle_capacity = active_calibration_profile(
+        base_store.state_dir,
+        details,
+        deadline=deadline,
+    )
+    store = CapacityStore(capacity=lifecycle_capacity)
     canceled = store.cancel_session(session_id=session_id)
     reconciled = store.reconcile(session_id=session_id)
     details["capacity_cancel_session"] = sanitize_capacity_result(canceled)
@@ -790,10 +889,6 @@ def capacity_request(payload: dict[str, Any]) -> CapacityRequest:
 def hook_string(payload: dict[str, Any], key: str) -> str:
     value = payload.get(key)
     return str(value) if value not in (None, "") else ""
-
-
-def capacity_enforcement_enabled() -> bool:
-    return os.getenv(CAPACITY_ENFORCEMENT_ENV, "1") != "0"
 
 
 def capacity_queue_deny_json(result: dict[str, Any]) -> str:

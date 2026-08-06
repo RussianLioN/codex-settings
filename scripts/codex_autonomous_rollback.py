@@ -76,6 +76,11 @@ def main() -> int:
         help="Runtime backup directory or legacy config backup. Defaults to the latest available backup.",
     )
     parser.add_argument("--apply", action="store_true", help="Apply rollback. Without this flag, only print planned actions.")
+    parser.add_argument(
+        "--legacy-runtime-cache-rollback",
+        action="store_true",
+        help="Explicitly allow legacy rollback to replace plugin cache trees.",
+    )
     parser.add_argument("--codex-home", type=Path, default=CODEX_HOME)
     parser.add_argument(
         "--installed-doctor",
@@ -145,6 +150,7 @@ def main() -> int:
             installed_capacity_observer=installed_capacity_observer,
             fail_after_fd_guardrails_action=args.fail_after_fd_guardrails_action,
             fail_fd_guardrails_compensation=args.fail_fd_guardrails_compensation,
+            allow_legacy_cache_restore=args.legacy_runtime_cache_rollback,
         )
 
     return handle_legacy_backup(backup, args.apply, codex_home=codex_home)
@@ -165,6 +171,7 @@ def handle_runtime_backup(
     installed_capacity_observer: Path | None = None,
     fail_after_fd_guardrails_action: int | None = None,
     fail_fd_guardrails_compensation: bool = False,
+    allow_legacy_cache_restore: bool = False,
 ) -> int:
     codex_home = codex_home or CODEX_HOME
     if (backup / FD_GUARDRAILS_MANIFEST).exists() or backup.name.startswith("fd-guardrails-"):
@@ -191,6 +198,12 @@ def handle_runtime_backup(
             ),
             fail_after_action=fail_after_fd_guardrails_action,
             fail_compensation=fail_fd_guardrails_compensation,
+        )
+
+    if not allow_legacy_cache_restore:
+        raise SystemExit(
+            "legacy runtime cache rollback requires explicit "
+            "--legacy-runtime-cache-rollback confirmation"
         )
 
     required = {

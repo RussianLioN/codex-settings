@@ -488,6 +488,20 @@ max_concurrent_threads_per_session = 1000
         self.assertFalse(self.installed_capacity.exists())
         self.assertFalse(self.installed_observer.exists())
 
+    def test_legacy_runtime_cache_rollback_requires_explicit_confirmation(self) -> None:
+        backup = self.root / "legacy-runtime-backup"
+        backup.mkdir()
+
+        rollback = subprocess.run(
+            [sys.executable, str(ROLLBACK), "--backup", str(backup)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertNotEqual(0, rollback.returncode)
+        self.assertIn("--legacy-runtime-cache-rollback", rollback.stderr)
+
     def test_apply_compensates_failures_on_new_runtime_targets(self) -> None:
         originals = {
             self.config: self.config.read_bytes(),
