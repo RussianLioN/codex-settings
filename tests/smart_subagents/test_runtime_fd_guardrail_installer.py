@@ -19,6 +19,8 @@ SOURCE_INVENTORY = ROOT / "scripts" / "codex_process_inventory.py"
 SOURCE_POLICY = ROOT / "scripts" / "autonomous_policy.py"
 SOURCE_CAPACITY = ROOT / "scripts" / "codex_capacity.py"
 SOURCE_OBSERVER = ROOT / "scripts" / "codex_capacity_observer.py"
+SOURCE_MANIFEST_VALIDATOR = ROOT / "scripts" / "validate_wide_wave_manifest.py"
+SOURCE_TRUSTED_REGISTRY = ROOT / "config" / "trusted-wide-wave-skills.json"
 ROLLBACK = ROOT / "scripts" / "codex_autonomous_rollback.py"
 PROFILE_VALUES = {
     "batch-workers": 1,
@@ -98,6 +100,7 @@ max_concurrent_threads_per_session = 1000
         )
         self.installed_policy.write_text("old policy\n", encoding="utf-8")
         self.write_valid_profiles()
+        self.create_source_repo()
 
     def write_valid_profiles(self) -> None:
         for profile_name, value in PROFILE_VALUES.items():
@@ -110,6 +113,45 @@ max_depth = 1
 """,
                 encoding="utf-8",
             )
+
+    def create_source_repo(self) -> None:
+        self.source_repo = self.root / "source-repo"
+        self.source_repo.mkdir()
+        source_files = {
+            "scripts/codex_fd_doctor.sh": SOURCE_DOCTOR,
+            "scripts/codex_process_inventory.py": SOURCE_INVENTORY,
+            "scripts/autonomous_policy.py": SOURCE_POLICY,
+            "scripts/codex_capacity.py": SOURCE_CAPACITY,
+            "scripts/codex_capacity_observer.py": SOURCE_OBSERVER,
+            "scripts/validate_wide_wave_manifest.py": SOURCE_MANIFEST_VALIDATOR,
+            "config/trusted-wide-wave-skills.json": SOURCE_TRUSTED_REGISTRY,
+        }
+        for relative, source in source_files.items():
+            destination = self.source_repo / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(source.read_bytes())
+        self.git_source("init")
+        self.git_source("config", "user.email", "codex-tests@example.invalid")
+        self.git_source("config", "user.name", "Codex Tests")
+        self.git_source("add", ".")
+        self.git_source("commit", "-m", "source fixture")
+        self.source_commit = self.git_source("rev-parse", "HEAD").stdout.strip()
+        self.source_doctor = self.source_repo / "scripts" / "codex_fd_doctor.sh"
+        self.source_inventory = self.source_repo / "scripts" / "codex_process_inventory.py"
+        self.source_policy = self.source_repo / "scripts" / "autonomous_policy.py"
+        self.source_capacity = self.source_repo / "scripts" / "codex_capacity.py"
+        self.source_observer = self.source_repo / "scripts" / "codex_capacity_observer.py"
+        self.source_manifest_validator = self.source_repo / "scripts" / "validate_wide_wave_manifest.py"
+        self.source_trusted_registry = self.source_repo / "config" / "trusted-wide-wave-skills.json"
+
+    def git_source(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(self.source_repo), *args],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
 
     def expected_paths(self) -> dict[str, Path]:
         return {
@@ -148,11 +190,23 @@ max_depth = 1
                 "--installed-doctor",
                 str(installed_doctor or self.installed_doctor),
                 "--source-doctor",
-                str(SOURCE_DOCTOR),
+                str(self.source_doctor),
                 "--installed-process-inventory",
                 str(self.installed_inventory),
                 "--source-process-inventory",
-                str(SOURCE_INVENTORY),
+                str(self.source_inventory),
+                "--source-autonomous-policy",
+                str(self.source_policy),
+                "--source-capacity",
+                str(self.source_capacity),
+                "--source-capacity-observer",
+                str(self.source_observer),
+                "--source-manifest-validator",
+                str(self.source_manifest_validator),
+                "--source-trusted-registry",
+                str(self.source_trusted_registry),
+                "--source-commit",
+                self.source_commit,
                 "--timestamp",
                 "20260804-212800",
                 *extra,
@@ -179,6 +233,77 @@ max_depth = 1
         self.assertEqual(config_before, self.config.read_bytes())
         self.assertEqual(agents_before, self.agents.read_bytes())
         self.assertEqual(doctor_before, self.installed_doctor.read_bytes())
+
+    def test_check_reports_dirty_tracked_managed_source_without_writing(self) -> None:
+        config_before = self.config.read_bytes()
+        capacity_before = self.source_capacity.read_bytes()
+        self.source_capacity.write_bytes(capacity_before + b"\n# dirty source\n")
+
+        completed = self.run_installer()
+
+        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("status=BLOCK", completed.stdout)
+        self.assertIn("managed_source_status_dirty:codex_capacity.py", completed.stdout)
+        self.assertIn("managed_source_drifted:codex_capacity.py", completed.stdout)
+        self.assertEqual(config_before, self.config.read_bytes())
+
+    def test_apply_rejects_dirty_tracked_managed_source_before_backup(self) -> None:
+        capacity_before = self.source_capacity.read_bytes()
+        self.source_capacity.write_bytes(capacity_before + b"\n# dirty source\n")
+
+        completed = self.run_installer("--apply")
+
+        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("managed_source_drifted:codex_capacity.py", completed.stdout)
+        self.assertFalse((self.codex_home / "backups" / "fd-guardrails-20260804-212800").exists())
+        config = tomllib.loads(self.config.read_text(encoding="utf-8"))
+        self.assertEqual(1000, config["agents"]["max_threads"])
+
+    def test_dirty_managed_source_blocks_legacy_backup_migration_before_move(self) -> None:
+        applied = self.run_installer("--apply")
+        self.assertEqual(0, applied.returncode, applied.stdout + applied.stderr)
+        legacy = self.codex_home / "backups" / "runtime-fd-20260804-2128"
+        legacy.mkdir()
+        (legacy / "config.toml").write_text("sensitive\n", encoding="utf-8")
+        (legacy / "AGENTS.md").write_text("policy\n", encoding="utf-8")
+        self.source_capacity.write_bytes(self.source_capacity.read_bytes() + b"\n# dirty source\n")
+
+        completed = self.run_installer(
+            "--apply",
+            "--migrate-legacy-backup",
+            "20260804-2128",
+        )
+
+        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("managed_source_drifted:codex_capacity.py", completed.stdout)
+        self.assertTrue(legacy.is_dir())
+        self.assertFalse((self.codex_home / "backups" / "fd-guardrails-20260804-2128").exists())
+
+    def test_apply_allows_unrelated_dirty_source_repo_file(self) -> None:
+        unrelated = self.source_repo / "unrelated.txt"
+        unrelated.write_text("tracked\n", encoding="utf-8")
+        self.git_source("add", "unrelated.txt")
+        self.git_source("commit", "-m", "add unrelated")
+        unrelated.write_text("tracked\ndirty\n", encoding="utf-8")
+
+        completed = self.run_installer("--apply")
+
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("status=APPLIED", completed.stdout)
+
+    def test_rejects_untracked_managed_source(self) -> None:
+        untracked_capacity = self.source_repo / "scripts" / "untracked_capacity.py"
+        untracked_capacity.write_text("print('untracked')\n", encoding="utf-8")
+
+        completed = self.run_installer(
+            "--apply",
+            "--source-capacity",
+            str(untracked_capacity),
+        )
+
+        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("managed_source_untracked:codex_capacity.py", completed.stdout)
+        self.assertFalse((self.codex_home / "backups" / "fd-guardrails-20260804-212800").exists())
 
     def test_apply_preserves_commented_table_headers(self) -> None:
         self.config.write_text(
@@ -232,11 +357,11 @@ max_concurrent_threads_per_session = 1000
         self.assertIn("роли широкой волны не запускают вложенное делегирование", agents)
         self.assertIn("20 узлов умного графа маршрутизатора", agents)
         self.assertIn("один интегратор для общих или генерируемых файлов", agents)
-        self.assertEqual(SOURCE_DOCTOR.read_bytes(), self.installed_doctor.read_bytes())
-        self.assertEqual(SOURCE_INVENTORY.read_bytes(), self.installed_inventory.read_bytes())
-        self.assertEqual(SOURCE_POLICY.read_bytes(), self.installed_policy.read_bytes())
-        self.assertEqual(SOURCE_CAPACITY.read_bytes(), self.installed_capacity.read_bytes())
-        self.assertEqual(SOURCE_OBSERVER.read_bytes(), self.installed_observer.read_bytes())
+        self.assertEqual(self.source_doctor.read_bytes(), self.installed_doctor.read_bytes())
+        self.assertEqual(self.source_inventory.read_bytes(), self.installed_inventory.read_bytes())
+        self.assertEqual(self.source_policy.read_bytes(), self.installed_policy.read_bytes())
+        self.assertEqual(self.source_capacity.read_bytes(), self.installed_capacity.read_bytes())
+        self.assertEqual(self.source_observer.read_bytes(), self.installed_observer.read_bytes())
         for profile_name, value in PROFILE_VALUES.items():
             profile_text = (self.codex_home / f"{profile_name}.config.toml").read_text(encoding="utf-8")
             profile = tomllib.loads(profile_text)
@@ -272,7 +397,7 @@ max_concurrent_threads_per_session = 1000
         self.assertEqual("old doctor\n", (backup / "codex_fd_doctor.sh").read_text())
         receipt = json.loads((backup / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(2, receipt["version"])
-        self.assertRegex(receipt["source_commit"], r"^[0-9a-f]{40}$")
+        self.assertEqual(self.source_commit, receipt["source_commit"])
         self.assertRegex(receipt["created_at"], r"^20[0-9]{2}-")
         self.assertEqual(
             {
@@ -298,7 +423,7 @@ max_concurrent_threads_per_session = 1000
         self.assertFalse(installed_entry["existed"])
         self.assertEqual(0o755, int(installed_entry["installed_mode"], 8))
         self.assertEqual(
-            hashlib.sha256(SOURCE_INVENTORY.read_bytes()).hexdigest(),
+            hashlib.sha256(self.source_inventory.read_bytes()).hexdigest(),
             installed_entry["installed_sha256"],
         )
         expected_paths = self.expected_paths()

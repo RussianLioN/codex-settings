@@ -31,6 +31,15 @@ SOURCE_CAPACITY = SOURCE_ROOT / "scripts" / "codex_capacity.py"
 SOURCE_CAPACITY_OBSERVER = SOURCE_ROOT / "scripts" / "codex_capacity_observer.py"
 SOURCE_MANIFEST_VALIDATOR = SOURCE_ROOT / "scripts" / "validate_wide_wave_manifest.py"
 SOURCE_TRUSTED_WIDE_WAVE_REGISTRY = SOURCE_ROOT / "config" / "trusted-wide-wave-skills.json"
+MANAGED_SOURCE_IDS = (
+    "codex_fd_doctor.sh",
+    "codex_process_inventory.py",
+    "validate_wide_wave_manifest.py",
+    "trusted-wide-wave-skills.json",
+    "autonomous_policy.py",
+    "codex_capacity.py",
+    "codex_capacity_observer.py",
+)
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
@@ -710,22 +719,117 @@ def migrate_legacy_partial_backup(codex_home: Path, suffix: str) -> Path:
     return destination
 
 
+def run_git(
+    args: list[str],
+    *,
+    cwd: Path,
+    text: bool = True,
+) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(cwd), *args],
+            text=text,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError as exc:
+        raise SystemExit("cannot verify managed source commit: git is unavailable") from exc
+
+
 def resolve_source_commit(explicit: str | None) -> str:
     if explicit is not None:
         source_commit = explicit.strip()
     else:
-        completed = subprocess.run(
-            ["git", "-C", str(SOURCE_ROOT), "rev-parse", "HEAD"],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        completed = run_git(["rev-parse", "HEAD"], cwd=SOURCE_ROOT)
         if completed.returncode != 0:
             raise SystemExit(f"cannot resolve source commit: {completed.stderr.strip()}")
         source_commit = completed.stdout.strip()
     if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
         raise SystemExit("invalid source commit: expected 40 lowercase hexadecimal characters")
     return source_commit
+
+
+def managed_source_paths(
+    *,
+    source_doctor: Path,
+    source_process_inventory: Path,
+    source_manifest_validator: Path,
+    source_trusted_registry: Path,
+    source_autonomous_policy: Path,
+    source_capacity: Path,
+    source_capacity_observer: Path,
+) -> dict[str, Path]:
+    return {
+        "codex_fd_doctor.sh": source_doctor,
+        "codex_process_inventory.py": source_process_inventory,
+        "validate_wide_wave_manifest.py": source_manifest_validator,
+        "trusted-wide-wave-skills.json": source_trusted_registry,
+        "autonomous_policy.py": source_autonomous_policy,
+        "codex_capacity.py": source_capacity,
+        "codex_capacity_observer.py": source_capacity_observer,
+    }
+
+
+def verify_managed_sources_at_commit(
+    source_paths: dict[str, Path],
+    source_commit: str,
+) -> tuple[list[str], dict[str, bytes]]:
+    issues: list[str] = []
+    source_bytes: dict[str, bytes] = {}
+    if set(source_paths) != set(MANAGED_SOURCE_IDS):
+        raise SystemExit("managed source set is incomplete")
+    roots_by_id: dict[str, Path] = {}
+    relpaths_by_id: dict[str, str] = {}
+    for source_id in MANAGED_SOURCE_IDS:
+        source_path = source_paths[source_id]
+        root_result = run_git(["rev-parse", "--show-toplevel"], cwd=source_path.parent)
+        if root_result.returncode != 0:
+            issues.append(f"managed_source_git_root_missing:{source_id}")
+            continue
+        repo_root = Path(root_result.stdout.strip()).resolve(strict=False)
+        resolved_source = source_path.resolve(strict=False)
+        try:
+            relpath = resolved_source.relative_to(repo_root).as_posix()
+        except ValueError:
+            issues.append(f"managed_source_outside_git:{source_id}")
+            continue
+        roots_by_id[source_id] = repo_root
+        relpaths_by_id[source_id] = relpath
+    for repo_root in sorted(set(roots_by_id.values())):
+        head_result = run_git(["rev-parse", "--verify", "HEAD^{commit}"], cwd=repo_root)
+        if head_result.returncode != 0:
+            issues.append(f"managed_source_head_missing:{repo_root}")
+        commit_result = run_git(["cat-file", "-e", f"{source_commit}^{{commit}}"], cwd=repo_root)
+        if commit_result.returncode != 0:
+            issues.append(f"managed_source_commit_missing:{repo_root}")
+    if issues:
+        return issues, {}
+    for source_id in MANAGED_SOURCE_IDS:
+        source_path = source_paths[source_id]
+        repo_root = roots_by_id[source_id]
+        relpath = relpaths_by_id[source_id]
+        status_result = run_git(["status", "--porcelain=v1", "--", relpath], cwd=repo_root)
+        if status_result.returncode != 0:
+            issues.append(f"managed_source_status_unavailable:{source_id}")
+            continue
+        status_lines = [line for line in status_result.stdout.splitlines() if line]
+        if any(line.startswith(("??", "!!")) for line in status_lines):
+            issues.append(f"managed_source_untracked:{source_id}")
+            continue
+        if status_lines:
+            issues.append(f"managed_source_status_dirty:{source_id}")
+        committed_result = run_git(["show", f"{source_commit}:{relpath}"], cwd=repo_root, text=False)
+        if committed_result.returncode != 0:
+            issues.append(f"managed_source_commit_file_missing:{source_id}")
+            continue
+        current = source_path.read_bytes()
+        if current != committed_result.stdout:
+            issues.append(f"managed_source_drifted:{source_id}")
+            continue
+        source_bytes[source_id] = current
+    if issues:
+        return issues, {}
+    return [], source_bytes
 
 
 def installation_receipt_issues(
@@ -842,20 +946,28 @@ def main() -> int:
         installed_capacity_observer=installed_capacity_observer,
     )
     source_commit = resolve_source_commit(args.source_commit)
+    source_paths = managed_source_paths(
+        source_doctor=source_doctor,
+        source_process_inventory=source_process_inventory,
+        source_manifest_validator=source_manifest_validator,
+        source_trusted_registry=source_trusted_registry,
+        source_autonomous_policy=source_autonomous_policy,
+        source_capacity=source_capacity,
+        source_capacity_observer=source_capacity_observer,
+    )
     for path in (
         config_path,
         agents_path,
-        source_doctor,
-        source_process_inventory,
-        source_autonomous_policy,
-        source_capacity,
-        source_capacity_observer,
-        source_manifest_validator,
-        source_trusted_registry,
+        *source_paths.values(),
         *(target_paths[f"{name}.config.toml"] for name in PROFILE_CONFIG_NAMES),
     ):
         if not path.is_file():
             raise SystemExit(f"required file is missing: {path}")
+    source_issues, source_bytes = verify_managed_sources_at_commit(source_paths, source_commit)
+    if args.apply and source_issues:
+        print("status=BLOCK")
+        print(f"issues={','.join(source_issues)}")
+        return 2
 
     migrated_backup: Path | None = None
     if args.migrate_legacy_backup is not None:
@@ -886,6 +998,7 @@ def main() -> int:
         source_capacity_observer=source_capacity_observer,
         profile_paths={name: target_paths[f"{name}.config.toml"] for name in PROFILE_CONFIG_NAMES},
     )
+    issues.extend(source_issues)
     issues.extend(
         installation_receipt_issues(
             codex_home=codex_home,
@@ -905,18 +1018,17 @@ def main() -> int:
         if issues_require_hook_trust_review(issues):
             print(HOOK_TRUST_REVIEW_REQUIRED)
         return 2
-
     config_bytes = desired_config(config_path.read_text(encoding="utf-8")).encode()
     agents_bytes = desired_agents(agents_path.read_text(encoding="utf-8")).encode()
-    doctor_bytes = source_doctor.read_bytes()
-    process_inventory_bytes = source_process_inventory.read_bytes()
-    autonomous_policy_bytes = source_autonomous_policy.read_bytes()
-    capacity_bytes = source_capacity.read_bytes()
-    capacity_observer_bytes = source_capacity_observer.read_bytes()
+    doctor_bytes = source_bytes["codex_fd_doctor.sh"]
+    process_inventory_bytes = source_bytes["codex_process_inventory.py"]
+    autonomous_policy_bytes = source_bytes["autonomous_policy.py"]
+    capacity_bytes = source_bytes["codex_capacity.py"]
+    capacity_observer_bytes = source_bytes["codex_capacity_observer.py"]
     hooks_text = installed_hooks_json.read_text(encoding="utf-8") if installed_hooks_json.exists() else "{}\n"
     hooks_bytes = desired_hooks_json(hooks_text, installed_autonomous_policy).encode()
-    manifest_validator_bytes = source_manifest_validator.read_bytes()
-    trusted_registry_bytes = source_trusted_registry.read_bytes()
+    manifest_validator_bytes = source_bytes["validate_wide_wave_manifest.py"]
+    trusted_registry_bytes = source_bytes["trusted-wide-wave-skills.json"]
     profile_writes = []
     for profile_name in PROFILE_CONFIG_NAMES:
         profile_id = f"{profile_name}.config.toml"
