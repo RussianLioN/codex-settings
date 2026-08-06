@@ -30,6 +30,7 @@ class FdDoctorProcessInventoryTests(unittest.TestCase):
                 "CODEX_FD_DOCTOR_USER_PROCESS_COUNT": "100",
                 "CODEX_FD_DOCTOR_ORPHAN_NODE_REPL_COUNT": "0",
                 "CODEX_FD_DOCTOR_STALE_NODE_REPL_COUNT": "0",
+                "CODEX_FD_DOCTOR_TEST_MODE": "1",
             }
         )
         return environment
@@ -152,6 +153,65 @@ class FdDoctorProcessInventoryTests(unittest.TestCase):
 
         self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("process_inventory_unavailable", completed.stdout)
+
+    def test_process_count_overrides_are_ignored_outside_test_mode(self) -> None:
+        environment = self.base_environment()
+        environment.pop("CODEX_FD_DOCTOR_TEST_MODE")
+        environment.update(
+            {
+                "CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT": "1",
+                "CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT": "1",
+                "CODEX_FD_DOCTOR_PROCESS_INVENTORY": "/missing/inventory.py",
+            }
+        )
+
+        completed = self.run_doctor(environment)
+
+        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("process_inventory_unavailable", completed.stdout)
+        self.assertNotIn("process_inventory_status=overridden", completed.stdout)
+
+    def test_profile_thread_cap_is_reported_but_not_enforced(self) -> None:
+        environment = self.base_environment()
+        environment.update(
+            {
+                "CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT": "1",
+                "CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT": "1",
+                "CODEX_FD_DOCTOR_AGENT_THREAD_CAP": "6",
+            }
+        )
+
+        completed = self.run_doctor(environment)
+
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("agent_thread_cap=6", completed.stdout)
+        self.assertNotIn("agents_max_concurrent_threads_not_20", completed.stdout)
+
+    def test_orphan_candidate_warns_but_confirmed_orphan_blocks(self) -> None:
+        candidate_environment = self.base_environment()
+        candidate_environment.update(
+            {
+                "CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT": "1",
+                "CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT": "1",
+                "CODEX_FD_DOCTOR_ORPHAN_NODE_REPL_COUNT": "1",
+            }
+        )
+        confirmed_environment = self.base_environment()
+        confirmed_environment.update(
+            {
+                "CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT": "1",
+                "CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT": "1",
+                "CODEX_FD_DOCTOR_CONFIRMED_ORPHAN_NODE_REPL_COUNT": "1",
+            }
+        )
+
+        candidate = self.run_doctor(candidate_environment)
+        confirmed = self.run_doctor(confirmed_environment)
+
+        self.assertEqual(1, candidate.returncode, candidate.stdout + candidate.stderr)
+        self.assertIn("orphan_candidate_node_repl_processes", candidate.stdout)
+        self.assertEqual(2, confirmed.returncode, confirmed.stdout + confirmed.stderr)
+        self.assertIn("confirmed_orphan_node_repl_processes", confirmed.stdout)
 
     def test_proven_fd_and_process_exhaustion_still_block(self) -> None:
         fd_environment = self.base_environment()

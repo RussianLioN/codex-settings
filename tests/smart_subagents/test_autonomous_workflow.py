@@ -76,6 +76,7 @@ class AutonomousWorkflowResourceLimitTests(unittest.TestCase):
                 "CODEX_FD_DOCTOR_USER_PROCESS_SOFT_LIMIT": "4096",
                 "CODEX_FD_DOCTOR_LAUNCHD_MAXPROC_SOFT_LIMIT": "2666",
                 "CODEX_FD_DOCTOR_USER_PROCESS_COUNT": "100",
+                "CODEX_FD_DOCTOR_TEST_MODE": "1",
             }
         )
         environment.update(overrides)
@@ -87,14 +88,15 @@ class AutonomousWorkflowResourceLimitTests(unittest.TestCase):
             env=environment,
         )
 
-    def test_fd_doctor_blocks_unsafe_public_agent_thread_cap(self) -> None:
+    def test_fd_doctor_leaves_profile_thread_cap_to_config_validator(self) -> None:
         completed = self.run_fd_doctor(
             6,
             CODEX_FD_DOCTOR_AGENT_THREAD_CAP="1000",
         )
 
-        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
-        self.assertIn("agents_max_concurrent_threads_not_20", completed.stdout)
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("agent_thread_cap=1000", completed.stdout)
+        self.assertNotIn("agents_max_concurrent_threads_not_20", completed.stdout)
 
     def test_fd_doctor_accepts_sufficient_fd_and_process_headroom(self) -> None:
         completed = self.run_fd_doctor(6)

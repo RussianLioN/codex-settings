@@ -4,13 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import hashlib
+import io
+import json
 import os
 import re
-import shutil
 import stat
+import subprocess
+import sys
 import tempfile
 import tomllib
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -22,6 +27,18 @@ SOURCE_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PROCESS_INVENTORY = SOURCE_ROOT / "scripts" / "codex_process_inventory.py"
 SOURCE_MANIFEST_VALIDATOR = SOURCE_ROOT / "scripts" / "validate_wide_wave_manifest.py"
 SOURCE_TRUSTED_WIDE_WAVE_REGISTRY = SOURCE_ROOT / "config" / "trusted-wide-wave-skills.json"
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+from codex_autonomous_rollback import (  # noqa: E402
+    FD_GUARDRAILS_MANIFEST,
+    FD_GUARDRAILS_MANIFEST_KIND,
+    FD_GUARDRAILS_MANIFEST_VERSION,
+    FD_GUARDRAILS_TARGETS,
+    fd_guardrails_target_paths,
+    handle_fd_guardrails_backup,
+    read_fd_guardrails_manifest,
+)
 POLICY_START = "<!-- codex-runtime-fd-guardrails:start -->"
 POLICY_END = "<!-- codex-runtime-fd-guardrails:end -->"
 LEGACY_PARTIAL_REQUIRED_FILES = {
@@ -56,11 +73,7 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path(__file__).resolve().with_name("codex_fd_doctor.sh"),
     )
-    parser.add_argument(
-        "--installed-process-inventory",
-        type=Path,
-        default=None,
-    )
+    parser.add_argument("--installed-process-inventory", type=Path, default=None)
     parser.add_argument(
         "--source-process-inventory",
         type=Path,
@@ -89,9 +102,19 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--timestamp")
     parser.add_argument(
+        "--source-commit",
+        help="40-character Git commit recorded in the installation receipt",
+    )
+    parser.add_argument(
         "--migrate-legacy-backup",
         metavar="YYYYMMDD-HHMM[SS]",
         help="rename a legacy partial runtime-fd backup outside the rollback namespace",
+    )
+    parser.add_argument(
+        "--fail-after-atomic-write",
+        type=int,
+        choices=range(1, len(FD_GUARDRAILS_TARGETS) + 1),
+        help=argparse.SUPPRESS,
     )
     return parser.parse_args()
 
@@ -259,6 +282,86 @@ def file_mode(path: Path, fallback: int) -> int:
     return stat.S_IMODE(path.stat().st_mode) if path.exists() else fallback
 
 
+def checked_existing_file(path: Path) -> tuple[bool, int | None]:
+    if path.is_symlink():
+        raise SystemExit(f"managed target is a symlink: {path}")
+    if path.exists() and not path.is_file():
+        raise SystemExit(f"managed target has unexpected type: {path}")
+    if not path.exists():
+        return False, None
+    return True, stat.S_IMODE(path.stat().st_mode)
+
+
+def create_fd_guardrails_backup(
+    backup: Path,
+    *,
+    target_paths: dict[str, Path],
+    desired_artifacts: dict[str, tuple[bytes, int]],
+    source_commit: str,
+    created_at: str,
+) -> None:
+    if backup.exists():
+        raise SystemExit(f"backup already exists: {backup}")
+    backup.mkdir(parents=True, mode=0o700)
+    backup.chmod(0o700)
+    targets = []
+    expected_ids = {target_id for target_id, _ in FD_GUARDRAILS_TARGETS}
+    if set(target_paths) != expected_ids or set(desired_artifacts) != expected_ids:
+        raise SystemExit("managed backup targets are incomplete")
+    for target_id, backup_name in FD_GUARDRAILS_TARGETS:
+        target = target_paths[target_id]
+        existed, mode = checked_existing_file(target)
+        data = target.read_bytes() if existed else None
+        installed_data, installed_mode = desired_artifacts[target_id]
+        targets.append(
+            {
+                "id": target_id,
+                "backup": backup_name,
+                "existed": existed,
+                "mode": f"0o{mode:03o}" if mode is not None else None,
+                "sha256": hashlib.sha256(data).hexdigest() if data is not None else None,
+                "target_path": str(target.absolute()),
+                "installed_mode": f"0o{installed_mode:03o}",
+                "installed_sha256": hashlib.sha256(installed_data).hexdigest(),
+            }
+        )
+        if existed:
+            backup_file = backup / backup_name
+            assert data is not None
+            atomic_write(backup_file, data, 0o600)
+    manifest = {
+        "kind": FD_GUARDRAILS_MANIFEST_KIND,
+        "version": FD_GUARDRAILS_MANIFEST_VERSION,
+        "source_commit": source_commit,
+        "created_at": created_at,
+        "targets": targets,
+    }
+    manifest_path = backup / FD_GUARDRAILS_MANIFEST
+    atomic_write(
+        manifest_path,
+        (json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+        0o600,
+    )
+
+
+def rollback_after_failed_apply(
+    *,
+    backup: Path,
+    target_paths: dict[str, Path],
+    cause: BaseException,
+) -> None:
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            handle_fd_guardrails_backup(backup, True, target_paths=target_paths)
+    except BaseException as rollback_error:
+        marker = backup / ".rollback-failed"
+        marker.write_text(str(rollback_error), encoding="utf-8")
+        raise SystemExit(
+            f"apply failed after mutation and automatic rollback failed: {rollback_error}; original error: {cause}"
+        ) from rollback_error
+    raise SystemExit(f"apply failed after mutation; automatic rollback applied: {cause}") from cause
+
+
 def migrate_legacy_partial_backup(codex_home: Path, suffix: str) -> Path:
     if not re.fullmatch(r"[0-9]{8}-[0-9]{4}(?:[0-9]{2})?", suffix):
         raise SystemExit("invalid legacy backup suffix: expected YYYYMMDD-HHMM[SS]")
@@ -283,6 +386,61 @@ def migrate_legacy_partial_backup(codex_home: Path, suffix: str) -> Path:
     return destination
 
 
+def resolve_source_commit(explicit: str | None) -> str:
+    if explicit is not None:
+        source_commit = explicit.strip()
+    else:
+        completed = subprocess.run(
+            ["git", "-C", str(SOURCE_ROOT), "rev-parse", "HEAD"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if completed.returncode != 0:
+            raise SystemExit(f"cannot resolve source commit: {completed.stderr.strip()}")
+        source_commit = completed.stdout.strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
+        raise SystemExit("invalid source commit: expected 40 lowercase hexadecimal characters")
+    return source_commit
+
+
+def installation_receipt_issues(
+    *,
+    codex_home: Path,
+    target_paths: dict[str, Path],
+    source_commit: str,
+) -> list[str]:
+    candidates = sorted(
+        backup
+        for backup in (codex_home / "backups").glob("fd-guardrails-*")
+        if (backup / FD_GUARDRAILS_MANIFEST).exists()
+    )
+    if not candidates:
+        return ["installation_receipt_v2_missing"]
+    try:
+        receipt = read_fd_guardrails_manifest(candidates[-1])
+    except SystemExit:
+        return ["installation_receipt_invalid"]
+    if receipt["version"] != FD_GUARDRAILS_MANIFEST_VERSION:
+        return ["installation_receipt_v2_missing"]
+    issues: list[str] = []
+    if receipt["source_commit"] != source_commit:
+        issues.append("installation_receipt_source_commit_drifted")
+    for entry in receipt["targets"]:
+        target = target_paths[entry["id"]]
+        if entry["target_path"] != str(target.absolute()):
+            issues.append(f"installation_receipt_target_path_drifted:{entry['id']}")
+            continue
+        if target.is_symlink() or not target.is_file():
+            issues.append(f"installation_receipt_target_missing:{entry['id']}")
+            continue
+        if hashlib.sha256(target.read_bytes()).hexdigest() != entry["installed_sha256"]:
+            issues.append(f"installation_receipt_target_hash_drifted:{entry['id']}")
+        if stat.S_IMODE(target.stat().st_mode) != int(entry["installed_mode"], 8):
+            issues.append(f"installation_receipt_target_mode_drifted:{entry['id']}")
+    return issues
+
+
 def main() -> int:
     args = parse_args()
     if args.timestamp is not None and not re.fullmatch(r"[0-9]{8}-[0-9]{6}", args.timestamp):
@@ -304,6 +462,14 @@ def main() -> int:
         if args.installed_process_inventory is not None
         else args.installed_doctor.parent / "codex_process_inventory.py"
     )
+    target_paths = fd_guardrails_target_paths(
+        codex_home=args.codex_home,
+        installed_doctor=args.installed_doctor,
+        installed_process_inventory=installed_process_inventory,
+        installed_manifest_validator=installed_manifest_validator,
+        installed_trusted_registry=installed_trusted_registry,
+    )
+    source_commit = resolve_source_commit(args.source_commit)
     for path in (
         config_path,
         agents_path,
@@ -336,6 +502,13 @@ def main() -> int:
         installed_trusted_registry=installed_trusted_registry,
         source_trusted_registry=args.source_trusted_registry,
     )
+    issues.extend(
+        installation_receipt_issues(
+            codex_home=args.codex_home,
+            target_paths=target_paths,
+            source_commit=source_commit,
+        )
+    )
     if not issues:
         print("status=APPLIED" if migrated_backup is not None else "status=OK")
         print("issues=none")
@@ -347,51 +520,66 @@ def main() -> int:
         print(f"issues={','.join(issues)}")
         return 2
 
-    timestamp = args.timestamp or datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup = args.codex_home / "backups" / f"fd-guardrails-{timestamp}"
-    if backup.exists():
-        raise SystemExit(f"backup already exists: {backup}")
-    backup.mkdir(parents=True, mode=0o700)
-    backup.chmod(0o700)
-    shutil.copy2(config_path, backup / "config.toml")
-    (backup / "config.toml").chmod(0o600)
-    shutil.copy2(agents_path, backup / "AGENTS.md")
-    if args.installed_doctor.exists():
-        shutil.copy2(args.installed_doctor, backup / "codex_fd_doctor.sh")
-    if installed_process_inventory.exists():
-        shutil.copy2(installed_process_inventory, backup / "codex_process_inventory.py")
-    if installed_manifest_validator.exists():
-        shutil.copy2(installed_manifest_validator, backup / "validate_wide_wave_manifest.py")
-    if installed_trusted_registry.exists():
-        shutil.copy2(installed_trusted_registry, backup / "trusted-wide-wave-skills.json")
-
     config_bytes = desired_config(config_path.read_text(encoding="utf-8")).encode()
     agents_bytes = desired_agents(agents_path.read_text(encoding="utf-8")).encode()
     doctor_bytes = args.source_doctor.read_bytes()
     process_inventory_bytes = args.source_process_inventory.read_bytes()
     manifest_validator_bytes = args.source_manifest_validator.read_bytes()
     trusted_registry_bytes = args.source_trusted_registry.read_bytes()
-    atomic_write(config_path, config_bytes, file_mode(config_path, 0o600))
-    atomic_write(agents_path, agents_bytes, file_mode(agents_path, 0o644))
-    atomic_write(args.installed_doctor, doctor_bytes, 0o755)
-    atomic_write(installed_process_inventory, process_inventory_bytes, 0o755)
-    atomic_write(installed_manifest_validator, manifest_validator_bytes, 0o755)
-    atomic_write(installed_trusted_registry, trusted_registry_bytes, 0o600)
 
-    remaining = state_issues(
-        config_path=config_path,
-        agents_path=agents_path,
-        installed_doctor=args.installed_doctor,
-        source_doctor=args.source_doctor,
-        installed_process_inventory=installed_process_inventory,
-        source_process_inventory=args.source_process_inventory,
-        installed_manifest_validator=installed_manifest_validator,
-        source_manifest_validator=args.source_manifest_validator,
-        installed_trusted_registry=installed_trusted_registry,
-        source_trusted_registry=args.source_trusted_registry,
+    timestamp = args.timestamp or datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = args.codex_home / "backups" / f"fd-guardrails-{timestamp}"
+    writes = [
+        ("config.toml", config_path, config_bytes, file_mode(config_path, 0o600)),
+        ("AGENTS.md", agents_path, agents_bytes, file_mode(agents_path, 0o644)),
+        ("codex_fd_doctor.sh", args.installed_doctor, doctor_bytes, 0o755),
+        ("codex_process_inventory.py", installed_process_inventory, process_inventory_bytes, 0o755),
+        ("validate_wide_wave_manifest.py", installed_manifest_validator, manifest_validator_bytes, 0o755),
+        ("trusted-wide-wave-skills.json", installed_trusted_registry, trusted_registry_bytes, 0o600),
+    ]
+    desired_artifacts = {
+        target_id: (data, mode)
+        for target_id, _path, data, mode in writes
+    }
+    create_fd_guardrails_backup(
+        backup,
+        target_paths=target_paths,
+        desired_artifacts=desired_artifacts,
+        source_commit=source_commit,
+        created_at=datetime.now(timezone.utc).isoformat(),
     )
-    if remaining:
-        raise SystemExit(f"post-apply verification failed: {','.join(remaining)}")
+    try:
+        for index, (_target_id, path, data, mode) in enumerate(writes, start=1):
+            checked_existing_file(path)
+            atomic_write(path, data, mode)
+            if args.fail_after_atomic_write == index:
+                raise RuntimeError(f"injected failure after atomic write {index}")
+
+        remaining = state_issues(
+            config_path=config_path,
+            agents_path=agents_path,
+            installed_doctor=args.installed_doctor,
+            source_doctor=args.source_doctor,
+            installed_process_inventory=installed_process_inventory,
+            source_process_inventory=args.source_process_inventory,
+            installed_manifest_validator=installed_manifest_validator,
+            source_manifest_validator=args.source_manifest_validator,
+            installed_trusted_registry=installed_trusted_registry,
+            source_trusted_registry=args.source_trusted_registry,
+        )
+        if remaining:
+            raise RuntimeError(f"post-apply verification failed: {','.join(remaining)}")
+        receipt_remaining = installation_receipt_issues(
+            codex_home=args.codex_home,
+            target_paths=target_paths,
+            source_commit=source_commit,
+        )
+        if receipt_remaining:
+            raise RuntimeError(
+                f"post-apply receipt verification failed: {','.join(receipt_remaining)}"
+            )
+    except BaseException as exc:
+        rollback_after_failed_apply(backup=backup, target_paths=target_paths, cause=exc)
     print("status=APPLIED")
     print("issues=none")
     print(f"backup_dir={backup}")

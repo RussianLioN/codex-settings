@@ -137,8 +137,10 @@ orphan_node_repl_processes=unknown
 stale_node_repl_processes=unknown
 user_process_count=unknown
 max_expected_node_repl_processes=unknown
+test_mode=${CODEX_FD_DOCTOR_TEST_MODE:-0}
 
-if [[ -n ${CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT:-} \
+if [[ "$test_mode" == 1 \
+   && -n ${CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT:-} \
    && -n ${CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT:-} \
    && -n ${CODEX_FD_DOCTOR_ORPHAN_NODE_REPL_COUNT:-} \
    && -n ${CODEX_FD_DOCTOR_STALE_NODE_REPL_COUNT:-} \
@@ -157,13 +159,13 @@ if [[ -n ${CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT:-} \
   user_process_count=$CODEX_FD_DOCTOR_USER_PROCESS_COUNT
 elif [[ -f "$process_inventory" ]]; then
   inventory_args=(--format shell)
-  if [[ -n ${CODEX_FD_DOCTOR_PROCESS_SNAPSHOT:-} ]]; then
+  if [[ "$test_mode" == 1 && -n ${CODEX_FD_DOCTOR_PROCESS_SNAPSHOT:-} ]]; then
     inventory_args+=(--snapshot-json "$CODEX_FD_DOCTOR_PROCESS_SNAPSHOT")
   fi
-  if [[ -n ${CODEX_FD_DOCTOR_CALLER_PID:-} ]]; then
+  if [[ "$test_mode" == 1 && -n ${CODEX_FD_DOCTOR_CALLER_PID:-} ]]; then
     inventory_args+=(--caller-pid "$CODEX_FD_DOCTOR_CALLER_PID")
   fi
-  if [[ -n ${CODEX_FD_DOCTOR_NOW_EPOCH:-} ]]; then
+  if [[ "$test_mode" == 1 && -n ${CODEX_FD_DOCTOR_NOW_EPOCH:-} ]]; then
     inventory_args+=(--now-epoch "$CODEX_FD_DOCTOR_NOW_EPOCH")
   fi
   inventory_output=$(python3 "$process_inventory" "${inventory_args[@]}" 2>/dev/null)
@@ -228,10 +230,6 @@ if [[ -z "$mcp_command" || ! -x "$mcp_command" ]]; then
   block "node_repl_command_unresolvable"
 fi
 
-if [[ ! "$agent_thread_cap" =~ ^[1-9][0-9]*$ ]] || (( agent_thread_cap != MAX_NATIVE_SESSION_THREADS )); then
-  block "agents_max_concurrent_threads_not_${MAX_NATIVE_SESSION_THREADS}"
-fi
-
 if [[ "$soft_limit" =~ ^[0-9]+$ ]]; then
   fd_headroom=$(( soft_limit - codex_fd_count ))
   if (( codex_fd_count > 0 && fd_headroom < MIN_FD_HEADROOM )); then
@@ -257,12 +255,12 @@ else
   block "process_budget_unavailable"
 fi
 
-if [[ "$orphan_node_repl_processes" =~ ^[0-9]+$ ]] && (( orphan_node_repl_processes > 0 )); then
-  warn "orphan_node_repl_processes"
+if [[ "$node_repl_orphan_candidate_processes" =~ ^[0-9]+$ ]] && (( node_repl_orphan_candidate_processes > 0 )); then
+  warn "orphan_candidate_node_repl_processes"
 fi
 
 if [[ "$node_repl_confirmed_orphan_processes" =~ ^[0-9]+$ ]] && (( node_repl_confirmed_orphan_processes > 0 )); then
-  warn "confirmed_orphan_node_repl_processes"
+  block "confirmed_orphan_node_repl_processes"
 fi
 
 if [[ "$stale_node_repl_processes" =~ ^[0-9]+$ ]] && (( stale_node_repl_processes > 0 )); then

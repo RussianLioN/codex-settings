@@ -794,6 +794,7 @@ def run_fd_doctor(
             "CODEX_FD_DOCTOR_LAUNCHD_MAXPROC_SOFT_LIMIT": "2666",
             "CODEX_FD_DOCTOR_KERN_MAXPROCPERUID": "3000",
             "CODEX_FD_DOCTOR_USER_PROCESS_COUNT": "100",
+            "CODEX_FD_DOCTOR_TEST_MODE": "1",
         }
     )
     return subprocess.run(
