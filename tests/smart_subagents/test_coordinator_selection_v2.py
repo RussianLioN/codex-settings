@@ -440,7 +440,7 @@ class CoordinatorSelectionV2Tests(unittest.TestCase):
 
         self.assertEqual([5.0, 30.0, 120.0, 300.0], waits)
         self.assertGreaterEqual(len(publications), 5)
-        self.assertIsNone(publications[-1][0])
+        self.assertIs(unavailable, publications[-1][0])
         self.assertEqual(
             {
                 "status": "UNAVAILABLE",
@@ -525,6 +525,50 @@ class CoordinatorSelectionV2Tests(unittest.TestCase):
             "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
             publications[-1]["reasonCode"],
         )
+
+    def test_temporary_failure_keeps_last_selected_pair_but_marks_refresh_unavailable(
+        self,
+    ) -> None:
+        selected, _ = self.collect(
+            {"gpt-5.6-sol": frozenset({"medium"})}
+        )
+        timeout, _ = self.collect(
+            ModelCatalogError("MODEL_LIST_UNAVAILABLE", "temporary")
+        )
+        publications: list[
+            tuple[CoordinatorSelectionV2 | None, dict[str, object]]
+        ] = []
+        waits: list[float] = []
+
+        def wait(delay: float) -> bool:
+            waits.append(delay)
+            return len(waits) == 2
+
+        loop = CoordinatorSelectionRefreshLoopV2(
+            initial_selection=selected,
+            probe=lambda _timeout: timeout,
+            publish=lambda selection, diagnostics: publications.append(
+                (selection, diagnostics)
+            ),
+            wait=wait,
+        )
+        loop.start()
+        deadline = threading.Event()
+        for _ in range(100):
+            if not loop.thread_alive:
+                break
+            deadline.wait(0.01)
+        loop.close()
+
+        self.assertEqual([300.0, 5.0], waits)
+        self.assertIs(selected, publications[0][0])
+        self.assertIsNone(publications[-1][0])
+        self.assertEqual("UNAVAILABLE", publications[-1][1]["status"])
+        self.assertEqual(
+            "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            publications[-1][1]["reasonCode"],
+        )
+        self.assertIsNotNone(publications[-1][1]["lastSuccessfulCheckAt"])
 
         selected, _inspector = self.collect(
             {

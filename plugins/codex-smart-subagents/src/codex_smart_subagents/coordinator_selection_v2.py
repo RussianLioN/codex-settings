@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Mapping, Protocol, Sequence
 
@@ -21,6 +22,12 @@ _CATALOG_REFRESH_TIMEOUT_SECONDS = 20.0
 _CATALOG_REFRESH_FAILURE_DELAYS_SECONDS = (5.0, 30.0, 120.0, 300.0)
 _CATALOG_REFRESH_HEALTHY_DELAY_SECONDS = 300.0
 _CATALOG_REFRESH_JOIN_SECONDS = 25.0
+_REFRESH_DIAGNOSTIC_KEYS = {
+    "status",
+    "reasonCode",
+    "lastSuccessfulCheckAt",
+    "nextAttemptAt",
+}
 
 
 class CoordinatorCatalogInspectorV2(Protocol):
@@ -107,8 +114,11 @@ class CoordinatorSelectionRefreshLoopV2:
         *,
         initial_selection: CoordinatorSelectionV2,
         probe: Callable[[float], CoordinatorSelectionV2],
-        publish: Callable[[CoordinatorSelectionV2], None],
+        publish: Callable[
+            [CoordinatorSelectionV2 | None, dict[str, object]], None
+        ],
         wait: Callable[[float], bool] | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         if not isinstance(initial_selection, CoordinatorSelectionV2):
             raise TypeError("initial_selection must be CoordinatorSelectionV2")
@@ -116,19 +126,43 @@ class CoordinatorSelectionRefreshLoopV2:
             raise TypeError("probe and publish must be callable")
         if wait is not None and not callable(wait):
             raise TypeError("wait must be callable")
+        if clock is not None and not callable(clock):
+            raise TypeError("clock must be callable")
         self._initial_selection = initial_selection
         self._probe = probe
         self._publish = publish
         self._stop = threading.Event()
         self._wait = self._stop.wait if wait is None else wait
+        self._clock = _utc_now if clock is None else clock
         self._lifecycle_lock = threading.Lock()
+        self._snapshot_lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._closed = False
+        self._last_selected_selection: CoordinatorSelectionV2 | None = (
+            initial_selection if initial_selection.status == _SELECTED else None
+        )
+        initial_now = _aware_utc(self._clock())
+        self._last_successful_check_at: datetime | None = (
+            initial_now
+            if initial_selection.account_catalog_fingerprint is not None
+            else None
+        )
+        self._diagnostics = _refresh_diagnostics(
+            selection=initial_selection,
+            last_successful_check_at=self._last_successful_check_at,
+            next_attempt_at=None,
+        )
 
     @property
     def thread_alive(self) -> bool:
         thread = self._thread
         return bool(thread is not None and thread.is_alive())
+
+    def diagnostic_snapshot(self) -> dict[str, object]:
+        """Возвращает один неизменяемый снаружи снимок состояния цикла."""
+
+        with self._snapshot_lock:
+            return dict(self._diagnostics)
 
     def start(self) -> None:
         with self._lifecycle_lock:
@@ -136,6 +170,22 @@ class CoordinatorSelectionRefreshLoopV2:
                 raise RuntimeError("coordinator refresh loop is closed")
             if self._thread is not None:
                 return
+            now = _aware_utc(self._clock())
+            if self._initial_selection.account_catalog_fingerprint is not None:
+                self._last_successful_check_at = now
+            initial_delay = (
+                _CATALOG_REFRESH_HEALTHY_DELAY_SECONDS
+                if self._initial_selection.status == _SELECTED
+                else 0.0
+            )
+            diagnostics = self._set_diagnostics(
+                selection=self._initial_selection,
+                next_attempt_at=now + timedelta(seconds=initial_delay),
+            )
+            try:
+                self._publish(self._initial_selection, diagnostics)
+            except Exception:
+                pass
             self._thread = threading.Thread(
                 target=self._run,
                 name="codex-smart-coordinator-catalog-refresh-v2",
@@ -154,6 +204,11 @@ class CoordinatorSelectionRefreshLoopV2:
             thread.join(timeout=_CATALOG_REFRESH_JOIN_SECONDS)
         if self.thread_alive:
             raise RuntimeError("coordinator refresh loop did not stop")
+        self._set_diagnostics(
+            selection=None,
+            next_attempt_at=None,
+            preserve_status=True,
+        )
 
     def _run(self) -> None:
         selection = self._initial_selection
@@ -170,21 +225,171 @@ class CoordinatorSelectionRefreshLoopV2:
             except Exception:
                 selection = None
             if selection is not None and selection.status == _SELECTED:
-                try:
-                    self._publish(selection)
-                except Exception:
-                    selection = None
-                else:
-                    failure_index = 0
-            if selection is not None and selection.status == _SELECTED:
                 delay = _CATALOG_REFRESH_HEALTHY_DELAY_SECONDS
+                failure_index = 0
             else:
                 delay = _CATALOG_REFRESH_FAILURE_DELAYS_SECONDS[
                     min(failure_index, len(_CATALOG_REFRESH_FAILURE_DELAYS_SECONDS) - 1)
                 ]
                 failure_index += 1
+            now = _aware_utc(self._clock())
+            if (
+                selection is not None
+                and selection.account_catalog_fingerprint is not None
+            ):
+                self._last_successful_check_at = now
+            if selection is not None and selection.status == _SELECTED:
+                self._last_selected_selection = selection
+            diagnostics = self._set_diagnostics(
+                selection=selection,
+                next_attempt_at=now + timedelta(seconds=delay),
+            )
+            selection_to_publish = (
+                selection
+                if selection is not None
+                and (
+                    selection.status == _SELECTED
+                    or self._last_selected_selection is None
+                )
+                else None
+            )
+            try:
+                self._publish(selection_to_publish, diagnostics)
+            except Exception:
+                pass
             if self._wait(delay):
                 return
+
+    def _set_diagnostics(
+        self,
+        *,
+        selection: CoordinatorSelectionV2 | None,
+        next_attempt_at: datetime | None,
+        preserve_status: bool = False,
+    ) -> dict[str, object]:
+        if preserve_status:
+            current = self.diagnostic_snapshot()
+            diagnostics = {
+                **current,
+                "nextAttemptAt": None,
+            }
+            diagnostics = validate_coordinator_refresh_diagnostics_v2(diagnostics)
+        else:
+            diagnostics = _refresh_diagnostics(
+                selection=selection,
+                last_successful_check_at=self._last_successful_check_at,
+                next_attempt_at=next_attempt_at,
+            )
+        with self._snapshot_lock:
+            self._diagnostics = diagnostics
+            return dict(diagnostics)
+
+
+def validate_coordinator_refresh_diagnostics_v2(
+    value: object,
+) -> dict[str, object]:
+    """Строго проверяет безопасное диагностическое расширение health."""
+
+    if type(value) is not dict or set(value) != _REFRESH_DIAGNOSTIC_KEYS:
+        raise ValueError("coordinator refresh diagnostics fields differ")
+    status = value["status"]
+    if status not in {_SELECTED, _UNAVAILABLE}:
+        raise ValueError("coordinator refresh diagnostics status is invalid")
+    reason_code = value["reasonCode"]
+    if (
+        type(reason_code) is not str
+        or not 1 <= len(reason_code) <= 128
+        or any(
+            character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+            for character in reason_code
+        )
+    ):
+        raise ValueError("coordinator refresh diagnostics reason is invalid")
+    last_success = _validate_refresh_timestamp(
+        value["lastSuccessfulCheckAt"],
+        "lastSuccessfulCheckAt",
+    )
+    next_attempt = _validate_refresh_timestamp(
+        value["nextAttemptAt"],
+        "nextAttemptAt",
+    )
+    if status == _SELECTED and (
+        reason_code != "COORDINATOR_PAIR_SELECTED" or last_success is None
+    ):
+        raise ValueError("selected coordinator refresh diagnostics are invalid")
+    if next_attempt is not None and last_success is not None and next_attempt < last_success:
+        raise ValueError("coordinator refresh diagnostics time order is invalid")
+    return {
+        "status": status,
+        "reasonCode": reason_code,
+        "lastSuccessfulCheckAt": value["lastSuccessfulCheckAt"],
+        "nextAttemptAt": value["nextAttemptAt"],
+    }
+
+
+def _refresh_diagnostics(
+    *,
+    selection: CoordinatorSelectionV2 | None,
+    last_successful_check_at: datetime | None,
+    next_attempt_at: datetime | None,
+) -> dict[str, object]:
+    return validate_coordinator_refresh_diagnostics_v2(
+        {
+            "status": (
+                selection.status if selection is not None else _UNAVAILABLE
+            ),
+            "reasonCode": (
+                selection.reason_code
+                if selection is not None
+                else "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE"
+            ),
+            "lastSuccessfulCheckAt": _format_refresh_timestamp(
+                last_successful_check_at
+            ),
+            "nextAttemptAt": _format_refresh_timestamp(next_attempt_at),
+        }
+    )
+
+
+def _format_refresh_timestamp(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return (
+        _aware_utc(value)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _validate_refresh_timestamp(value: object, name: str) -> datetime | None:
+    if value is None:
+        return None
+    if type(value) is not str or len(value) != 27 or not value.endswith("Z"):
+        raise ValueError(f"coordinator refresh diagnostics {name} is invalid")
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError as exc:
+        raise ValueError(
+            f"coordinator refresh diagnostics {name} is invalid"
+        ) from exc
+    normalized = _aware_utc(parsed)
+    if _format_refresh_timestamp(normalized) != value:
+        raise ValueError(f"coordinator refresh diagnostics {name} is noncanonical")
+    return normalized
+
+
+def _aware_utc(value: datetime) -> datetime:
+    if (
+        not isinstance(value, datetime)
+        or value.tzinfo is None
+        or value.utcoffset() is None
+    ):
+        raise ValueError("coordinator refresh clock must return an aware datetime")
+    return value.astimezone(timezone.utc)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def collect_coordinator_selection_v2(

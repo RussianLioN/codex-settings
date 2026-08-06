@@ -535,7 +535,7 @@ def _start_catalog_refresh_v2(
     refresh = CoordinatorSelectionRefreshLoopV2(
         initial_selection=initial_selection,
         probe=probe,
-        publish=server.publish_coordinator_selection,
+        publish=server.publish_coordinator_refresh,
     )
     refresh.start()
     return refresh

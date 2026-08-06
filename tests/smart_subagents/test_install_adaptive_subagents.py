@@ -2673,6 +2673,46 @@ class InstallerV2DoctorTests(_InstallerBase):
             diagnosis["coordinatorReasonCode"],
         )
         self.assertEqual("DEGRADED", self.installer._public_readiness(diagnosis))
+        public_problems = self.installer._diagnosis_problems(diagnosis)
+        self.assertEqual(
+            "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            public_problems[0]["code"],
+        )
+        self.assertNotEqual("READY", public_problems[0]["code"])
+
+    def test_doctor_keeps_selected_pair_but_reports_latest_refresh_failure(
+        self,
+    ) -> None:
+        refresh = {
+            "status": "UNAVAILABLE",
+            "reasonCode": "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            "lastSuccessfulCheckAt": "2026-08-06T09:00:00.000000Z",
+            "nextAttemptAt": "2026-08-06T09:05:00.000000Z",
+        }
+        decision = self.coordinator_decision(
+            {"gpt-5.6-sol": frozenset({"medium"})},
+            refresh=refresh,
+        )
+        with (
+            mock.patch.object(
+                self.installer,
+                "_resolve_activation",
+                return_value=decision,
+            ),
+            mock.patch.object(
+                self.installer,
+                "_probe_command_socket",
+                return_value=True,
+            ),
+        ):
+            diagnosis = self.installer.doctor(self.layout)
+
+        self.assertEqual("DEGRADED", diagnosis["status"])
+        self.assertEqual("SELECTED", diagnosis["coordinatorStatus"])
+        self.assertEqual(
+            "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            diagnosis["coordinatorReasonCode"],
+        )
 
     def test_doctor_never_trusts_missing_or_malformed_refresh_diagnostics(
         self,

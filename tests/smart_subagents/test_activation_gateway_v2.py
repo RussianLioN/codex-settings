@@ -1985,6 +1985,30 @@ class ActivationResolverTests(unittest.TestCase):
             binding.controller_row["controller_identity"],
         )
 
+    def test_temporary_refresh_failure_keeps_verified_pair_ready(self) -> None:
+        diagnostics = {
+            "status": "UNAVAILABLE",
+            "reasonCode": "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            "lastSuccessfulCheckAt": "2026-08-06T09:00:00.000000Z",
+            "nextAttemptAt": "2026-08-06T09:05:00.000000Z",
+        }
+
+        def temporarily_unavailable(_socket_path, request):
+            response = self.fixture.controller_probe(_socket_path, request)
+            response["extensions"] = {"coordinatorRefresh": diagnostics}
+            return response
+
+        decision = self.fixture.resolver(
+            controller_probe=temporarily_unavailable
+        ).resolve()
+
+        self.assertEqual(GatewayState.READY, decision.state, decision.reason_code)
+        self.assertEqual(
+            {"model": "gpt-5.6-terra", "reasoning_effort": "medium"},
+            decision.coordinator,
+        )
+        self.assertEqual(diagnostics, decision.coordinator_refresh)
+
     def test_ready_activation_is_independent_from_ordinary_fallback_capsule(
         self,
     ) -> None:

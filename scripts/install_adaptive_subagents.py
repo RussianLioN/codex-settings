@@ -68,6 +68,10 @@ from codex_smart_subagents.controller_supervisor_v2 import (  # noqa: E402
     SupervisorStateV2,
     probe_controller_command_socket_v2,
 )
+from codex_smart_subagents.coordinator_selection_v2 import (  # noqa: E402
+    validate_coordinator_refresh_diagnostics_v2,
+    validate_coordinator_selection_document_v2,
+)
 from codex_smart_subagents.installer_command_v2 import (  # noqa: E402
     InstallerInvocationV2,
     InvalidInstallerInvocationV2,
@@ -2006,25 +2010,85 @@ def doctor(
     reason_code = "ACTIVATION_RESOLVER_UNAVAILABLE"
     try:
         decision = _resolve_activation(layout)
-        reason_code = decision.reason_code
+        reason_code = _safe_diagnostic_reason_code(
+            decision.reason_code,
+            fallback="ACTIVATION_RESOLVER_UNAVAILABLE",
+        )
     except Exception as exc:
-        reason_code = str(getattr(exc, "code", type(exc).__name__))
+        reason_code = _safe_diagnostic_reason_code(
+            getattr(exc, "code", None),
+            fallback="ACTIVATION_RESOLVER_UNAVAILABLE",
+        )
+    coordinator_status: str | None = None
+    coordinator_reason = "COORDINATOR_REFRESH_UNPROVEN"
+    last_successful_check_at: str | None = None
+    next_attempt_at: str | None = None
+    coordinator_ready = False
+    if decision is not None and decision.state is GatewayState.READY:
+        if getattr(decision, "catalog_schema_version", 1) == 1:
+            coordinator_status = "SELECTED"
+            coordinator_reason = "COORDINATOR_LEGACY_READY"
+            coordinator_ready = decision.coordinator is not None
+        else:
+            try:
+                selection = validate_coordinator_selection_document_v2(
+                    getattr(decision, "coordinator_selection", None)
+                )
+                coordinator_status = str(selection["status"])
+            except (TypeError, ValueError):
+                selection = None
+            try:
+                refresh = validate_coordinator_refresh_diagnostics_v2(
+                    getattr(decision, "coordinator_refresh", None)
+                )
+            except (TypeError, ValueError):
+                refresh = None
+            if selection is not None and refresh is not None:
+                last_successful_check_at = refresh["lastSuccessfulCheckAt"]
+                next_attempt_at = refresh["nextAttemptAt"]
+                coordinator_reason = str(refresh["reasonCode"])
+                coordinator_ready = (
+                    selection["status"] == "SELECTED"
+                    and refresh["status"] == "SELECTED"
+                )
+            elif selection is not None and selection["status"] == "UNAVAILABLE":
+                coordinator_reason = str(selection["reasonCode"])
+    command_ready = bool(
+        decision is not None
+        and decision.state is GatewayState.READY
+        and _probe_command_socket(layout)
+    )
     if decision is None or decision.state is GatewayState.ORDINARY:
         status = "ORDINARY"
-    elif _probe_command_socket(layout):
+    elif command_ready and coordinator_ready:
         status = "FULL_READY"
     else:
-        status = "HEALTH_ONLY"
+        status = "DEGRADED"
+        if not command_ready:
+            coordinator_reason = "COMMAND_SOCKET_UNAVAILABLE"
     problems = list(dict.fromkeys(problems))
     return {
         "ok": status == "FULL_READY" and not problems,
         "status": status,
         "readiness": status,
         "gatewayReason": reason_code,
+        "coordinatorStatus": coordinator_status,
+        "coordinatorReasonCode": coordinator_reason,
+        "lastSuccessfulCheckAt": last_successful_check_at,
+        "nextAttemptAt": next_attempt_at,
         "problems": problems,
         "sourceDigest": receipt.get("sourceDigest") if receipt else None,
         "activationId": identity.get("activationId") if identity else None,
     }
+
+
+def _safe_diagnostic_reason_code(value: object, *, fallback: str) -> str:
+    if (
+        type(value) is str
+        and re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", value) is not None
+    ):
+        return value
+    return fallback
 
 
 def smoke(
@@ -3990,7 +4054,7 @@ def _public_readiness(diagnosis: Mapping[str, Any]) -> str:
         "AWAITING_HOOK_TRUST",
     }:
         return "AWAITING_HOOK_TRUST"
-    if status == "HEALTH_ONLY":
+    if status in {"HEALTH_ONLY", "DEGRADED"}:
         return "DEGRADED"
     if status == "ORDINARY" and not diagnosis.get("problems"):
         return "DISABLED"
@@ -4012,7 +4076,15 @@ def _diagnosis_problems(diagnosis: Mapping[str, Any]) -> list[dict[str, str]]:
             )
     readiness = _public_readiness(diagnosis)
     if readiness not in {"READY", "DISABLED"} and not result:
-        reason = str(diagnosis.get("gatewayReason") or "INSTALLATION_NOT_READY")
+        reason_source = (
+            diagnosis.get("coordinatorReasonCode")
+            if readiness == "DEGRADED"
+            else diagnosis.get("gatewayReason")
+        )
+        reason = _safe_diagnostic_reason_code(
+            reason_source,
+            fallback="INSTALLATION_NOT_READY",
+        )
         result.append(
             _public_problem(
                 reason,

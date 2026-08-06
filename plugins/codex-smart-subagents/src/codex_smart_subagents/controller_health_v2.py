@@ -29,6 +29,7 @@ from .canonical_json import (
 from .child_guard_v2 import ChildGuardV2Error, system_process_start_marker_v2
 from .coordinator_selection_v2 import (
     CoordinatorSelectionV2,
+    validate_coordinator_refresh_diagnostics_v2,
     validate_coordinator_selection_document_v2,
 )
 from .lifecycle_controller_protocol_v2 import LifecycleControllerProtocolV2Error
@@ -225,6 +226,7 @@ class ControllerHealthServerV2:
         self._lifecycle_lock = threading.RLock()
         self._close_lock = threading.Lock()
         self._coordinator_lock = threading.Lock()
+        self._coordinator_refresh_diagnostics: dict[str, object] | None = None
         self._workers_lock = threading.Lock()
         self._connections: set[socket.socket] = set()
         self._worker_slots = threading.BoundedSemaphore(MAX_WORKERS)
@@ -277,6 +279,63 @@ class ControllerHealthServerV2:
             if self._closed:
                 _fail("SERVER_CLOSED", "controller health server is closed")
             self.coordinator_selection = document
+
+    @property
+    def coordinator_refresh_diagnostics(self) -> dict[str, object] | None:
+        with self._coordinator_lock:
+            return (
+                None
+                if self._coordinator_refresh_diagnostics is None
+                else dict(self._coordinator_refresh_diagnostics)
+            )
+
+    def publish_coordinator_refresh(
+        self,
+        selection: CoordinatorSelectionV2 | None,
+        diagnostics: Mapping[str, object],
+    ) -> None:
+        """Атомарно публикует выбор и безопасную диагностику его проверки."""
+
+        document: dict[str, object] | None = None
+        if selection is not None:
+            if not isinstance(selection, CoordinatorSelectionV2):
+                _fail(
+                    "INVALID_CONFIGURATION",
+                    "coordinator refresh selection has another type",
+                )
+            if (
+                selection.recompute_account_context_fingerprint(
+                    active_context_fingerprint=self.activation_fingerprint,
+                )
+                != selection.account_context_fingerprint
+            ):
+                _fail(
+                    "INVALID_CONFIGURATION",
+                    "coordinator refresh selection context differs from activation",
+                )
+            document = validate_coordinator_selection_document_v2(
+                selection.to_document()
+            )
+        try:
+            refresh = validate_coordinator_refresh_diagnostics_v2(
+                dict(diagnostics)
+            )
+        except (TypeError, ValueError) as exc:
+            raise ControllerHealthV2Error(
+                "INVALID_CONFIGURATION",
+                "coordinator refresh diagnostics are invalid",
+            ) from exc
+        if document is not None and document["status"] != refresh["status"]:
+            _fail(
+                "INVALID_CONFIGURATION",
+                "coordinator refresh status differs from selection",
+            )
+        with self._coordinator_lock:
+            if self._closed:
+                _fail("SERVER_CLOSED", "controller health server is closed")
+            if document is not None:
+                self.coordinator_selection = document
+            self._coordinator_refresh_diagnostics = refresh
 
     def start(self) -> AcceptingControllerV2:
         """Связывает сокет, регистрирует БД и только после проверки открывает готовность."""
@@ -677,7 +736,7 @@ class ControllerHealthServerV2:
                             request,
                             codex_home_hash=self.codex_home_hash,
                         )
-                        payload, control_epoch = self._read_health_payload(
+                        payload, control_epoch, extensions = self._read_health_payload(
                             registration.database_path,
                             controller,
                         )
@@ -685,6 +744,7 @@ class ControllerHealthServerV2:
                             request=request,
                             payload=payload,
                             control_epoch=control_epoch,
+                            extensions=extensions,
                         )
                     else:
                         handler = self._lifecycle_handler
@@ -765,7 +825,7 @@ class ControllerHealthServerV2:
         self,
         database_path: Path,
         controller: AcceptingControllerV2,
-    ) -> tuple[dict[str, object], int]:
+    ) -> tuple[dict[str, object], int, dict[str, object]]:
         database_deadline = time.monotonic() + HEALTH_DATABASE_DEADLINE_SECONDS
         database_info = _private_database(database_path)
         connection = sqlite3.connect(
@@ -827,7 +887,12 @@ class ControllerHealthServerV2:
             _fail("CONTROLLER_BINDING_MISMATCH", "maintenance mode is invalid")
         with self._coordinator_lock:
             coordinator_selection = dict(self.coordinator_selection)
-        return {
+            coordinator_refresh = (
+                None
+                if self._coordinator_refresh_diagnostics is None
+                else dict(self._coordinator_refresh_diagnostics)
+            )
+        payload = {
             "namespace": NAMESPACE,
             "controllerIdentity": row["controller_identity"],
             "instanceId": row["instance_id"],
@@ -848,7 +913,13 @@ class ControllerHealthServerV2:
             "databaseId": row["database_id"],
             "databaseSchemaVersion": 2,
             "workCounts": counts,
-        }, int(row["control_epoch"])
+        }
+        extensions = (
+            {}
+            if coordinator_refresh is None
+            else {"coordinatorRefresh": coordinator_refresh}
+        )
+        return payload, int(row["control_epoch"]), extensions
 
     def _validate_database_binding(
         self,
@@ -948,6 +1019,7 @@ class ControllerHealthServerV2:
         request: dict[str, object],
         payload: dict[str, object],
         control_epoch: int,
+        extensions: dict[str, object],
     ) -> dict[str, object]:
         projection: dict[str, object] = {
             "messageType": "response",
@@ -965,7 +1037,7 @@ class ControllerHealthServerV2:
             "responseFingerprint": domain_fingerprint(
                 "codex-smart/controller-response/v2", projection
             ),
-            "extensions": {},
+            "extensions": dict(extensions),
         }
 
     def _rollback_start(self) -> None:

@@ -30,6 +30,7 @@ from .codex_binary_snapshot import CODE_SIGNATURE_REQUIREMENT
 from .child_guard_v2 import system_process_start_marker_v2
 from .coordinator_selection_v2 import (
     coordinator_selection_from_health_v2,
+    validate_coordinator_refresh_diagnostics_v2,
     validate_coordinator_selection_document_v2,
 )
 from .evidence import EvidenceError, verify_interface_evidence
@@ -252,6 +253,7 @@ class GatewayDecision:
     executable: Path
     coordinator: Mapping[str, str] | None = None
     coordinator_selection: Mapping[str, object] | None = None
+    coordinator_refresh: Mapping[str, object] | None = None
     catalog_schema_version: int = 1
     controller_health_verified: bool = True
     activation_id: str | None = None
@@ -297,6 +299,10 @@ class GatewayDecision:
                     "reasoning_effort": selected_pair["reasoningEffort"],
                 }:
                     raise ValueError("gateway coordinator differs from live selection")
+                if self.coordinator_refresh is not None:
+                    validate_coordinator_refresh_diagnostics_v2(
+                        self.coordinator_refresh
+                    )
             elif self.coordinator is None:
                 raise ValueError("catalog v1 READY decision has no coordinator")
         elif any(
@@ -304,6 +310,7 @@ class GatewayDecision:
             for value in (
                 self.coordinator,
                 self.coordinator_selection,
+                self.coordinator_refresh,
                 self.activation_id,
                 self.gate_fingerprint,
                 self.activation_gate,
@@ -530,6 +537,7 @@ class ActivationResolver:
                     controller_identity,
                     coordinator_selection,
                     coordinator,
+                    coordinator_refresh,
                 ) = self._validate_controller(
                     controller_row,
                     receipt=receipt,
@@ -565,6 +573,7 @@ class ActivationResolver:
                     executable=executable,
                     coordinator=coordinator,
                     coordinator_selection=coordinator_selection,
+                    coordinator_refresh=coordinator_refresh,
                     catalog_schema_version=catalog.schema_version,
                     controller_health_verified=require_live_controller,
                     activation_id=activation_id,
@@ -1277,7 +1286,12 @@ class ActivationResolver:
         absence: dict[str, object],
         require_live_controller: bool,
         catalog: Catalog,
-    ) -> tuple[str, dict[str, object] | None, dict[str, str] | None]:
+    ) -> tuple[
+        str,
+        dict[str, object] | None,
+        dict[str, str] | None,
+        dict[str, object] | None,
+    ]:
         del absence
         codex_home_hash = hashlib.sha256(
             str(self.layout.codex_home.resolve()).encode("utf-8")
@@ -1324,7 +1338,7 @@ class ActivationResolver:
                 "CONTROLLER_BINDING_MISMATCH", "controller database row diverges"
             )
         if not require_live_controller:
-            return expected_identity, None, dict(catalog.coordinator)
+            return expected_identity, None, dict(catalog.coordinator), None
         socket_path = _absolute_path(
             row["socket_path"], "CONTROLLER_BINDING_MISMATCH"
         )
@@ -1427,7 +1441,18 @@ class ActivationResolver:
                 "CONTROLLER_BINDING_MISMATCH",
                 "health coordinator selection diverges",
             ) from exc
-        return expected_identity, coordinator_selection, coordinator
+        raw_refresh = response["extensions"].get("coordinatorRefresh")
+        coordinator_refresh = (
+            None
+            if raw_refresh is None
+            else validate_coordinator_refresh_diagnostics_v2(raw_refresh)
+        )
+        return (
+            expected_identity,
+            coordinator_selection,
+            coordinator,
+            coordinator_refresh,
+        )
 
     def _resolve_fallback(self) -> Path:
         try:
@@ -3220,6 +3245,16 @@ def _validate_health_response(value, *, request: dict[str, object]) -> None:
         raise _ProofError(
             "CONTROLLER_BINDING_MISMATCH", "health extensions are invalid"
         )
+    if "coordinatorRefresh" in value["extensions"]:
+        try:
+            validate_coordinator_refresh_diagnostics_v2(
+                value["extensions"]["coordinatorRefresh"]
+            )
+        except ValueError as exc:
+            raise _ProofError(
+                "CONTROLLER_BINDING_MISMATCH",
+                "health coordinator refresh diagnostics are invalid",
+            ) from exc
     _sha256(value["responseFingerprint"], "CONTROLLER_BINDING_MISMATCH")
     response_projection = {
         key: item
