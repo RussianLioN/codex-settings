@@ -60,6 +60,47 @@ def environment(state_home: Path) -> dict[str, str]:
 
 
 class SessionStartHookTests(unittest.TestCase):
+    def test_session_start_failures_never_stop_the_root_request(self) -> None:
+        module = load_module("session_start_fail_open", "hooks/session_start.py")
+        payload = {
+            "session_id": "codex-session-1",
+            "cwd": str(REPO),
+            "hook_event_name": "SessionStart",
+            "source": "resume",
+        }
+        environ = {
+            "CODEX_SMART_LAUNCH_KIND": "resume",
+            "CODEX_SMART_ROOT_PID": "1234",
+            "CODEX_SMART_ROOT_START_MARKER": "darwin:1:2",
+        }
+
+        with (
+            mock.patch.object(module, "environment_is_active", return_value=True),
+            mock.patch.object(
+                module.IntegrationConfigV2,
+                "from_environ",
+                side_effect=RuntimeError("sqlite or activation unavailable"),
+            ),
+        ):
+            response = module.handle(payload, environ)
+
+        self.assertTrue(response["continue"])
+        self.assertNotIn("stopReason", response)
+
+        unknown = dict(payload, source="unknown")
+        response = module.handle(unknown, environ)
+        self.assertTrue(response["continue"])
+        self.assertNotIn("stopReason", response)
+
+    def test_live_owner_resume_is_fail_open_without_replacing_owner(self) -> None:
+        module = load_module("session_start_live_owner", "hooks/session_start.py")
+
+        response = module._resume_output("RESUME_OWNER_ACTIVE", None)
+
+        self.assertTrue(response["continue"])
+        self.assertNotIn("stopReason", response)
+        self.assertIn("новый умный ход", response["systemMessage"])
+
     def test_session_start_reserves_a_cold_start_budget(self) -> None:
         module = load_module("session_start_cold_budget", "hooks/session_start.py")
         with tempfile.TemporaryDirectory() as tmp:

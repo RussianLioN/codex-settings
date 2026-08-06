@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sqlite3
 import sys
 import tempfile
@@ -17,6 +18,7 @@ from codex_smart_subagents import finite_file_lock_v2  # noqa: E402
 from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
     ProjectIdentityV2,
     ResumeCandidateV2,
+    ResumeClaimV2,
     ResumeSessionV2Error,
     RootIdentityV2,
     RootSessionLeaseStoreV2,
@@ -441,6 +443,201 @@ class RootSessionLeaseStoreV2Tests(unittest.TestCase):
         self.assertIsNotNone(candidate)
         self.assertEqual("route2_" + "2" * 32, candidate.route_id)
         self.assertEqual("node2_" + "2" * 32, candidate.node_id)
+
+    def test_v3_separates_stable_identity_from_mutable_snapshot(self) -> None:
+        root = self._root(101, "start-original")
+        self.store.register_startup(
+            session_id="codex-session",
+            shell_session_id="cas2_original",
+            root=root,
+            project=self.project,
+        )
+
+        lease_path = self.store._path("codex-session")
+        value = json.loads(lease_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(3, value["schemaVersion"])
+        self.assertEqual(
+            {
+                "repoRoot": self.project.repo_root,
+                "compatibilityFingerprint": self.project.compatibility_fingerprint,
+            },
+            value["stableProjectIdentity"],
+        )
+        self.assertEqual(
+            {
+                "baseSha": self.project.base_sha,
+                "worktreeFingerprint": self.project.worktree_fingerprint,
+            },
+            value["turnSnapshot"],
+        )
+        self.assertNotIn("project", value)
+
+    def test_snapshot_change_detaches_without_losing_route_evidence(self) -> None:
+        original = self._root(101, "start-original")
+        self.store.register_startup(
+            session_id="codex-session",
+            shell_session_id="cas2_original",
+            root=original,
+            project=self.project,
+        )
+        self.observed[101] = None
+        resumed = self._root(202, "start-resumed")
+        candidate = self._candidate()
+        changed = ProjectIdentityV2(
+            repo_root=self.project.repo_root,
+            base_sha="d" * 40,
+            worktree_fingerprint="e" * 64,
+            compatibility_fingerprint=self.project.compatibility_fingerprint,
+        )
+
+        result = self.store.prepare_resume(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            root=resumed,
+            project=changed,
+            candidate=candidate,
+        )
+
+        self.assertEqual("RESUME_SNAPSHOT_MISMATCH", result.status)
+        lease = self.store.load("codex-session")
+        self.assertEqual("DETACHED", lease.attachment.state)
+        self.assertEqual(candidate.route_id, lease.attachment.candidate.route_id)
+        self.assertFalse(
+            self.store.authorize_route(
+                route_id=candidate.route_id,
+                session_id="codex-session",
+                shell_session_id="cas2_resumed",
+                turn_id="turn-new",
+                root=resumed,
+                project=changed,
+            )
+        )
+
+    def test_claim_is_two_phase_and_rebinds_bound_route_without_stop(self) -> None:
+        original = self._root(101, "start-original")
+        self.store.register_startup(
+            session_id="codex-session",
+            shell_session_id="cas2_original",
+            root=original,
+            project=self.project,
+        )
+        self.observed[101] = None
+        resumed = self._root(202, "start-resumed")
+        candidate = self._candidate()
+        self.store.prepare_resume(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            root=resumed,
+            project=self.project,
+            candidate=candidate,
+        )
+
+        first = self.store.begin_resume_claim(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            turn_id="turn-one",
+            root=resumed,
+            project=self.project,
+        )
+        self.assertIsInstance(first, ResumeClaimV2)
+        self.assertEqual("CLAIMING", first.status)
+        self.assertRegex(first.claim_nonce or "", r"^claim3_[0-9a-f]{32}$")
+        self.assertEqual("CLAIMING", self.store.load("codex-session").attachment.state)
+        self.assertFalse(
+            self.store.authorize_route(
+                route_id=candidate.route_id,
+                session_id="codex-session",
+                shell_session_id="cas2_resumed",
+                turn_id="turn-one",
+                root=resumed,
+                project=self.project,
+            )
+        )
+
+        bound = self.store.finalize_resume_claim(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            turn_id="turn-one",
+            root=resumed,
+            project=self.project,
+            claim_nonce=first.claim_nonce,
+            context_claim_nonce=first.claim_nonce,
+        )
+        self.assertEqual("BOUND", bound.attachment.state)
+        self.assertTrue(
+            self.store.authorize_route(
+                route_id=candidate.route_id,
+                session_id="codex-session",
+                shell_session_id="cas2_resumed",
+                turn_id="turn-one",
+                root=resumed,
+                project=self.project,
+            )
+        )
+
+        second = self.store.begin_resume_claim(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            turn_id="turn-two",
+            root=resumed,
+            project=self.project,
+        )
+        self.assertEqual("CLAIMING", second.status)
+        self.assertNotEqual(first.claim_nonce, second.claim_nonce)
+        self.assertFalse(
+            self.store.authorize_route(
+                route_id=candidate.route_id,
+                session_id="codex-session",
+                shell_session_id="cas2_resumed",
+                turn_id="turn-one",
+                root=resumed,
+                project=self.project,
+            )
+        )
+
+    def test_incomplete_claim_is_idempotent_for_same_turn_and_detached_for_next(self) -> None:
+        original = self._root(101, "start-original")
+        self.store.register_startup(
+            session_id="codex-session",
+            shell_session_id="cas2_original",
+            root=original,
+            project=self.project,
+        )
+        self.observed[101] = None
+        resumed = self._root(202, "start-resumed")
+        self.store.prepare_resume(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            root=resumed,
+            project=self.project,
+            candidate=self._candidate(),
+        )
+        first = self.store.begin_resume_claim(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            turn_id="turn-one",
+            root=resumed,
+            project=self.project,
+        )
+        retry = self.store.begin_resume_claim(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            turn_id="turn-one",
+            root=resumed,
+            project=self.project,
+        )
+        self.assertEqual(first, retry)
+
+        next_turn = self.store.begin_resume_claim(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            turn_id="turn-two",
+            root=resumed,
+            project=self.project,
+        )
+        self.assertEqual("DETACHED", next_turn.status)
+        self.assertEqual("DETACHED", self.store.load("codex-session").attachment.state)
 
 
 if __name__ == "__main__":

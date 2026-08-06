@@ -1539,12 +1539,45 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             v2_controller_checker=lambda _config, _environ, *, deadline: None,
         )
 
-        self.assertFalse(response["continue"])
-        self.assertTrue(
-            response["stopReason"].startswith("MANAGED_SMART_RUNTIME_UNAVAILABLE:")
+        self.assertTrue(response["continue"])
+        self.assertNotIn("stopReason", response)
+        self.assertNotIn("/tmp/private/path", json.dumps(response))
+        self.assertNotIn("IntegrationV2Error", json.dumps(response))
+
+    def test_second_resumed_prompt_without_attachment_is_a_fresh_smart_turn(self) -> None:
+        path = PLUGIN / "hooks" / "user_prompt_submit.py"
+        spec = importlib.util.spec_from_file_location(
+            "smart_prompt_resume_without_attachment_test",
+            path,
         )
-        self.assertNotIn("/tmp/private/path", response["stopReason"])
-        self.assertNotIn("IntegrationV2Error", response["stopReason"])
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        environment["CODEX_SMART_LAUNCH_KIND"] = "resume"
+
+        response = module.handle(
+            {
+                "session_id": "session-from-hook",
+                "turn_id": "turn-second",
+                "cwd": str(ROOT),
+                "hook_event_name": "UserPromptSubmit",
+            },
+            environment,
+            v2_mcp_contract_checker=lambda _plugin_root: None,
+            v2_controller_checker=lambda _config, _environ, *, deadline: None,
+        )
+
+        self.assertTrue(response["continue"])
+        self.assertNotIn("stopReason", response)
+        self.assertIn("hookSpecificOutput", response)
+        self.assertIn(
+            "Умный режим версии 2 активен",
+            response["hookSpecificOutput"]["additionalContext"],
+        )
+        self.assertEqual("turn-second", TurnContextStoreV2(self.config).load().turn_id)
 
     def test_user_prompt_requires_current_policy_before_mcp_attestation(
         self,
