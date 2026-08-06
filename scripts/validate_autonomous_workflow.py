@@ -34,7 +34,7 @@ DEFAULT_WAVE_SIZE = 6
 MAX_BASE_THREADS = 20
 HIGH_FD_LIMIT = 4096
 EXPECTED_BASE_AGENT_LIMITS = {
-    "max_threads": MAX_BASE_THREADS,
+    "max_concurrent_threads_per_session": MAX_BASE_THREADS,
     "max_depth": 1,
     "job_max_runtime_seconds": 1800,
 }
@@ -222,17 +222,20 @@ def base_agent_limit_failures(config: dict[str, Any]) -> list[str]:
         for setting, expected in EXPECTED_BASE_AGENT_LIMITS.items()
         if type(agents.get(setting)) is not int or agents.get(setting) != expected
     ]
+    if "max_threads" in agents:
+        failures.append(
+            "agents.max_threads is a legacy alias; use "
+            "agents.max_concurrent_threads_per_session"
+        )
     multi_agent_v2 = config.get("features", {}).get("multi_agent_v2", {})
-    native_session_thread_cap = multi_agent_v2.get(
-        "max_concurrent_threads_per_session"
-    )
-    if (
-        type(native_session_thread_cap) is not int
-        or native_session_thread_cap != MAX_BASE_THREADS
-    ):
+    if multi_agent_v2.get("enabled") is not True:
+        failures.append(
+            "features.multi_agent_v2.enabled must be true"
+        )
+    if "max_concurrent_threads_per_session" in multi_agent_v2:
         failures.append(
             "features.multi_agent_v2.max_concurrent_threads_per_session "
-            f"must be {MAX_BASE_THREADS}, got {native_session_thread_cap!r}"
+            "is an internal legacy limit; use agents.max_concurrent_threads_per_session"
         )
     return failures
 
@@ -779,13 +782,17 @@ def run_fd_doctor(
         {
             "CODEX_FD_DOCTOR_SOFT_LIMIT": str(soft_limit),
             "CODEX_FD_DOCTOR_HARD_LIMIT": "unlimited",
-            "CODEX_FD_DOCTOR_LAUNCHD_SOFT_LIMIT": "256",
+            "CODEX_FD_DOCTOR_LAUNCHD_FD_SOFT_LIMIT": str(soft_limit),
             "CODEX_FD_DOCTOR_CODEX_FD_COUNT": str(fd_count),
             "CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT": "2",
             "CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT": "2",
             "CODEX_FD_DOCTOR_ORPHAN_NODE_REPL_COUNT": str(orphan_count),
             "CODEX_FD_DOCTOR_STALE_NODE_REPL_COUNT": str(stale_count),
             "CODEX_FD_DOCTOR_MCP_COMMAND": str(CHATGPT_RESOURCES / "cua_node/bin/node_repl"),
+            "CODEX_FD_DOCTOR_AGENT_THREAD_CAP": str(MAX_BASE_THREADS),
+            "CODEX_FD_DOCTOR_USER_PROCESS_SOFT_LIMIT": "4096",
+            "CODEX_FD_DOCTOR_LAUNCHD_MAXPROC_SOFT_LIMIT": "2666",
+            "CODEX_FD_DOCTOR_USER_PROCESS_COUNT": "100",
         }
     )
     return subprocess.run(

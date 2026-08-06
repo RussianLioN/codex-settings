@@ -33,6 +33,7 @@ class RuntimeFdGuardrailInstallerTests(unittest.TestCase):
             """approval_policy = "on-request"
 
 [agents]
+max_threads = 1000
 max_depth = 1
 job_max_runtime_seconds = 1800
 
@@ -80,8 +81,9 @@ max_concurrent_threads_per_session = 1000
 
         self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("status=BLOCK", completed.stdout)
-        self.assertIn("agents_max_threads_not_20", completed.stdout)
-        self.assertIn("native_session_thread_cap_not_20", completed.stdout)
+        self.assertIn("agents_max_concurrent_threads_not_20", completed.stdout)
+        self.assertIn("agents_max_threads_legacy_present", completed.stdout)
+        self.assertIn("native_session_thread_cap_legacy_present", completed.stdout)
         self.assertEqual(config_before, self.config.read_bytes())
         self.assertEqual(agents_before, self.agents.read_bytes())
         self.assertEqual(doctor_before, self.installed_doctor.read_bytes())
@@ -91,6 +93,7 @@ max_concurrent_threads_per_session = 1000
             """approval_policy = "on-request"
 
 [agents] # общие пределы
+max_threads = 1000
 max_depth = 1
 
 [features.multi_agent_v2] # нативное дерево
@@ -105,12 +108,12 @@ max_concurrent_threads_per_session = 1000
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
         repaired_text = self.config.read_text(encoding="utf-8")
         repaired = tomllib.loads(repaired_text)
-        self.assertEqual(20, repaired["agents"]["max_threads"])
-        self.assertEqual(
-            20,
-            repaired["features"]["multi_agent_v2"][
-                "max_concurrent_threads_per_session"
-            ],
+        self.assertEqual(20, repaired["agents"]["max_concurrent_threads_per_session"])
+        self.assertNotIn("max_threads", repaired["agents"])
+        self.assertTrue(repaired["features"]["multi_agent_v2"]["enabled"])
+        self.assertNotIn(
+            "max_concurrent_threads_per_session",
+            repaired["features"]["multi_agent_v2"],
         )
         self.assertEqual(1, repaired_text.count("[agents]"))
         self.assertEqual(1, repaired_text.count("[features.multi_agent_v2]"))
@@ -121,28 +124,56 @@ max_concurrent_threads_per_session = 1000
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("status=APPLIED", completed.stdout)
         config = tomllib.loads(self.config.read_text(encoding="utf-8"))
-        self.assertEqual(20, config["agents"]["max_threads"])
-        self.assertEqual(
-            20,
-            config["features"]["multi_agent_v2"][
-                "max_concurrent_threads_per_session"
-            ],
+        self.assertEqual(20, config["agents"]["max_concurrent_threads_per_session"])
+        self.assertNotIn("max_threads", config["agents"])
+        self.assertTrue(config["features"]["multi_agent_v2"]["enabled"])
+        self.assertNotIn(
+            "max_concurrent_threads_per_session",
+            config["features"]["multi_agent_v2"],
         )
         agents = self.agents.read_text(encoding="utf-8")
         self.assertIn("не более 6 живых субагентов", agents)
         self.assertIn("`BLOCK` запрещает новые запуски", agents)
+        self.assertIn("доверенной широкой волны 7-20", agents)
+        self.assertIn("--skill-id ID --skill-file PATH --manifest PATH", agents)
+        self.assertIn("роли широкой волны не запускают вложенное делегирование", agents)
+        self.assertIn("20 узлов умного графа маршрутизатора", agents)
+        self.assertIn("один интегратор для общих или генерируемых файлов", agents)
         self.assertEqual(SOURCE_DOCTOR.read_bytes(), self.installed_doctor.read_bytes())
+        self.assertTrue((self.installed_doctor.parent / "validate_wide_wave_manifest.py").is_file())
+        self.assertTrue((self.codex_home / "config" / "trusted-wide-wave-skills.json").is_file())
 
         backup = self.codex_home / "backups" / "fd-guardrails-20260804-212800"
         self.assertFalse(list((self.codex_home / "backups").glob("runtime-fd-*")))
         self.assertEqual(0o700, stat.S_IMODE(backup.stat().st_mode))
         self.assertEqual(0o600, stat.S_IMODE((backup / "config.toml").stat().st_mode))
-        self.assertEqual(1000, tomllib.loads((backup / "config.toml").read_text())["features"]["multi_agent_v2"]["max_concurrent_threads_per_session"])
+        backup_config = tomllib.loads((backup / "config.toml").read_text())
+        self.assertEqual(1000, backup_config["agents"]["max_threads"])
+        self.assertEqual(1000, backup_config["features"]["multi_agent_v2"]["max_concurrent_threads_per_session"])
         self.assertEqual("old doctor\n", (backup / "codex_fd_doctor.sh").read_text())
 
         checked = self.run_installer()
         self.assertEqual(0, checked.returncode, checked.stdout + checked.stderr)
         self.assertIn("status=OK", checked.stdout)
+
+    def test_rejects_duplicate_keys_before_writing(self) -> None:
+        self.config.write_text(
+            """[agents]
+max_concurrent_threads_per_session = 20
+max_concurrent_threads_per_session = 21
+
+[features.multi_agent_v2]
+enabled = true
+""",
+            encoding="utf-8",
+        )
+        before = self.config.read_bytes()
+
+        completed = self.run_installer("--apply")
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("Cannot overwrite a value", completed.stderr)
+        self.assertEqual(before, self.config.read_bytes())
 
     def test_rejects_unsafe_timestamp_before_creating_backup(self) -> None:
         completed = subprocess.run(
