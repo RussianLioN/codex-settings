@@ -365,6 +365,60 @@ class ControllerHealthServerV2Tests(unittest.TestCase):
             response["extensions"],
         )
 
+    def test_legacy_selection_publish_invalidates_stale_refresh_proof(self) -> None:
+        self._start_server()
+        first = collect_coordinator_selection_v2(
+            selection="first-verified-available",
+            candidates=(
+                {"model": "gpt-5.6-sol", "reasoningEffort": "medium"},
+            ),
+            inspector=type(
+                "_FirstInspector",
+                (),
+                {
+                    "inspect": lambda _self: {
+                        "gpt-5.6-sol": frozenset({"medium"})
+                    }
+                },
+            )(),
+            active_context_fingerprint=self.database_identity.activation_fingerprint,
+        )
+        diagnostics = {
+            "status": "SELECTED",
+            "reasonCode": "COORDINATOR_PAIR_SELECTED",
+            "lastSuccessfulCheckAt": "2026-08-06T09:00:00.000000Z",
+            "nextAttemptAt": "2026-08-06T09:05:00.000000Z",
+        }
+        second = collect_coordinator_selection_v2(
+            selection="first-verified-available",
+            candidates=(
+                {"model": "gpt-5.6-terra", "reasoningEffort": "medium"},
+            ),
+            inspector=type(
+                "_SecondInspector",
+                (),
+                {
+                    "inspect": lambda _self: {
+                        "gpt-5.6-terra": frozenset({"medium"})
+                    }
+                },
+            )(),
+            active_context_fingerprint=self.database_identity.activation_fingerprint,
+        )
+
+        assert self.server is not None
+        self.server.publish_coordinator_refresh(first, diagnostics)
+        self.server.publish_coordinator_selection(second)
+        request = self._health_request()
+        response = _unix_controller_probe(self.socket_path, request)
+        _validate_health_response(response, request=request)
+
+        self.assertEqual(
+            second.to_document(),
+            response["payload"]["coordinatorSelection"],
+        )
+        self.assertEqual({}, response["extensions"])
+
     def test_gateway_rejects_unproven_catalog_refresh_extension(self) -> None:
         self._start_server()
         request = self._health_request()
