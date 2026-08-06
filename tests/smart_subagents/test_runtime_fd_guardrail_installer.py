@@ -15,6 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "apply_runtime_fd_guardrails.py"
 SOURCE_DOCTOR = ROOT / "scripts" / "codex_fd_doctor.sh"
+SOURCE_HIGHFD = ROOT / "scripts" / "codex-highfd"
 SOURCE_INVENTORY = ROOT / "scripts" / "codex_process_inventory.py"
 SOURCE_POLICY = ROOT / "scripts" / "autonomous_policy.py"
 SOURCE_CAPACITY = ROOT / "scripts" / "codex_capacity.py"
@@ -46,12 +47,14 @@ class RuntimeFdGuardrailInstallerTests(unittest.TestCase):
         self.config = self.codex_home / "config.toml"
         self.agents = self.codex_home / "AGENTS.md"
         self.installed_doctor = self.root / "libexec" / "codex_fd_doctor.sh"
+        self.installed_highfd = self.root / "bin" / "codex-highfd"
         self.installed_inventory = self.root / "libexec" / "codex_process_inventory.py"
         self.hooks_json = self.codex_home / "hooks.json"
         self.installed_policy = self.codex_home / "hooks" / "autonomous_policy.py"
         self.installed_capacity = self.codex_home / "hooks" / "codex_capacity.py"
         self.installed_observer = self.codex_home / "hooks" / "codex_capacity_observer.py"
         self.installed_doctor.parent.mkdir()
+        self.installed_highfd.parent.mkdir()
         self.installed_policy.parent.mkdir()
         self.config.write_text(
             """approval_policy = "on-request"
@@ -72,6 +75,8 @@ max_concurrent_threads_per_session = 1000
             encoding="utf-8",
         )
         self.installed_doctor.write_text("old doctor\n", encoding="utf-8")
+        self.installed_highfd.write_text("old highfd\n", encoding="utf-8")
+        self.installed_highfd.chmod(0o755)
         self.hooks_json.write_text(
             json.dumps(
                 {
@@ -119,6 +124,7 @@ max_depth = 1
         self.source_repo.mkdir()
         source_files = {
             "scripts/codex_fd_doctor.sh": SOURCE_DOCTOR,
+            "scripts/codex-highfd": SOURCE_HIGHFD,
             "scripts/codex_process_inventory.py": SOURCE_INVENTORY,
             "scripts/autonomous_policy.py": SOURCE_POLICY,
             "scripts/codex_capacity.py": SOURCE_CAPACITY,
@@ -137,6 +143,7 @@ max_depth = 1
         self.git_source("commit", "-m", "source fixture")
         self.source_commit = self.git_source("rev-parse", "HEAD").stdout.strip()
         self.source_doctor = self.source_repo / "scripts" / "codex_fd_doctor.sh"
+        self.source_highfd = self.source_repo / "scripts" / "codex-highfd"
         self.source_inventory = self.source_repo / "scripts" / "codex_process_inventory.py"
         self.source_policy = self.source_repo / "scripts" / "autonomous_policy.py"
         self.source_capacity = self.source_repo / "scripts" / "codex_capacity.py"
@@ -158,6 +165,7 @@ max_depth = 1
             "config.toml": self.config,
             "AGENTS.md": self.agents,
             "codex_fd_doctor.sh": self.installed_doctor,
+            "codex-highfd": self.installed_highfd,
             "codex_process_inventory.py": self.installed_inventory,
             "validate_wide_wave_manifest.py": self.installed_doctor.parent / "validate_wide_wave_manifest.py",
             "trusted-wide-wave-skills.json": self.codex_home / "config" / "trusted-wide-wave-skills.json",
@@ -191,6 +199,10 @@ max_depth = 1
                 str(installed_doctor or self.installed_doctor),
                 "--source-doctor",
                 str(self.source_doctor),
+                "--installed-highfd",
+                str(self.installed_highfd),
+                "--source-highfd",
+                str(self.source_highfd),
                 "--installed-process-inventory",
                 str(self.installed_inventory),
                 "--source-process-inventory",
@@ -229,6 +241,7 @@ max_depth = 1
         self.assertIn("agents_max_concurrent_threads_not_20", completed.stdout)
         self.assertIn("agents_max_threads_legacy_present", completed.stdout)
         self.assertIn("native_session_thread_cap_legacy_present", completed.stdout)
+        self.assertIn("installed_highfd_drifted", completed.stdout)
         self.assertIn("installation_receipt_v2_missing", completed.stdout)
         self.assertEqual(config_before, self.config.read_bytes())
         self.assertEqual(agents_before, self.agents.read_bytes())
@@ -358,6 +371,8 @@ max_concurrent_threads_per_session = 1000
         self.assertIn("20 узлов умного графа маршрутизатора", agents)
         self.assertIn("один интегратор для общих или генерируемых файлов", agents)
         self.assertEqual(self.source_doctor.read_bytes(), self.installed_doctor.read_bytes())
+        self.assertEqual(self.source_highfd.read_bytes(), self.installed_highfd.read_bytes())
+        self.assertEqual(0o755, stat.S_IMODE(self.installed_highfd.stat().st_mode))
         self.assertEqual(self.source_inventory.read_bytes(), self.installed_inventory.read_bytes())
         self.assertEqual(self.source_policy.read_bytes(), self.installed_policy.read_bytes())
         self.assertEqual(self.source_capacity.read_bytes(), self.installed_capacity.read_bytes())
@@ -395,6 +410,7 @@ max_concurrent_threads_per_session = 1000
         self.assertEqual(1000, backup_config["agents"]["max_threads"])
         self.assertEqual(1000, backup_config["features"]["multi_agent_v2"]["max_concurrent_threads_per_session"])
         self.assertEqual("old doctor\n", (backup / "codex_fd_doctor.sh").read_text())
+        self.assertEqual("old highfd\n", (backup / "codex-highfd").read_text())
         receipt = json.loads((backup / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(2, receipt["version"])
         self.assertEqual(self.source_commit, receipt["source_commit"])
@@ -404,6 +420,7 @@ max_concurrent_threads_per_session = 1000
                 "config.toml",
                 "AGENTS.md",
                 "codex_fd_doctor.sh",
+                "codex-highfd",
                 "codex_process_inventory.py",
                 "validate_wide_wave_manifest.py",
                 "trusted-wide-wave-skills.json",
@@ -418,12 +435,13 @@ max_concurrent_threads_per_session = 1000
         installed_entry = next(
             target
             for target in receipt["targets"]
-            if target["id"] == "codex_process_inventory.py"
+            if target["id"] == "codex-highfd"
         )
-        self.assertFalse(installed_entry["existed"])
+        self.assertTrue(installed_entry["existed"])
+        self.assertEqual("0o755", installed_entry["mode"])
         self.assertEqual(0o755, int(installed_entry["installed_mode"], 8))
         self.assertEqual(
-            hashlib.sha256(self.source_inventory.read_bytes()).hexdigest(),
+            hashlib.sha256(self.source_highfd.read_bytes()).hexdigest(),
             installed_entry["installed_sha256"],
         )
         expected_paths = self.expected_paths()
@@ -473,6 +491,8 @@ max_concurrent_threads_per_session = 1000
                 str(self.codex_home),
                 "--installed-doctor",
                 str(self.installed_doctor),
+                "--installed-highfd",
+                str(self.installed_highfd),
                 "--installed-process-inventory",
                 str(self.installed_inventory),
             ],
@@ -484,6 +504,8 @@ max_concurrent_threads_per_session = 1000
         self.assertEqual(0, rollback.returncode, rollback.stdout + rollback.stderr)
         self.assertEqual(original_hooks, self.hooks_json.read_bytes())
         self.assertEqual("old policy\n", self.installed_policy.read_text(encoding="utf-8"))
+        self.assertEqual("old highfd\n", self.installed_highfd.read_text(encoding="utf-8"))
+        self.assertEqual(0o755, stat.S_IMODE(self.installed_highfd.stat().st_mode))
         self.assertFalse(self.installed_inventory.exists())
         self.assertFalse(self.installed_capacity.exists())
         self.assertFalse(self.installed_observer.exists())
@@ -507,6 +529,7 @@ max_concurrent_threads_per_session = 1000
             self.config: self.config.read_bytes(),
             self.agents: self.agents.read_bytes(),
             self.installed_doctor: self.installed_doctor.read_bytes(),
+            self.installed_highfd: self.installed_highfd.read_bytes(),
             self.hooks_json: self.hooks_json.read_bytes(),
             self.installed_policy: self.installed_policy.read_bytes(),
             **{
@@ -537,6 +560,19 @@ max_concurrent_threads_per_session = 1000
                     self.assertEqual(data, path.read_bytes(), path)
                 for path in absent:
                     self.assertFalse(path.exists(), path)
+
+    def test_apply_compensation_removes_highfd_absent_before_install(self) -> None:
+        self.installed_highfd.unlink()
+
+        completed = self.run_installer(
+            "--apply",
+            "--fail-after-atomic-write",
+            "4",
+        )
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("automatic rollback applied", completed.stderr)
+        self.assertFalse(self.installed_highfd.exists())
 
     def test_rejects_symlink_and_hardlink_managed_targets(self) -> None:
         self.hooks_json.unlink()
@@ -887,6 +923,8 @@ max_depth = 1
                 str(backup),
                 "--installed-doctor",
                 str(self.installed_doctor),
+                "--installed-highfd",
+                str(self.installed_highfd),
                 "--installed-process-inventory",
                 str(self.installed_inventory),
             ],
@@ -993,6 +1031,8 @@ enabled = true
                 str(ROLLBACK),
                 "--installed-doctor",
                 str(self.installed_doctor),
+                "--installed-highfd",
+                str(self.installed_highfd),
                 "--installed-process-inventory",
                 str(self.installed_inventory),
             ],
@@ -1046,6 +1086,7 @@ enabled = true
             backup / "autonomous_policy.py",
             backup / "codex_capacity.py",
             backup / "codex_capacity_observer.py",
+            backup / "codex-highfd",
             *(backup / f"{name}.config.toml" for name in PROFILE_VALUES),
         ):
             if backup_file.exists():
@@ -1062,6 +1103,8 @@ enabled = true
                 str(self.codex_home),
                 "--installed-doctor",
                 str(self.installed_doctor),
+                "--installed-highfd",
+                str(self.installed_highfd),
                 "--installed-process-inventory",
                 str(self.installed_inventory),
             ],
@@ -1097,6 +1140,7 @@ enabled = true
             backup / "autonomous_policy.py",
             backup / "codex_capacity.py",
             backup / "codex_capacity_observer.py",
+            backup / "codex-highfd",
             *(backup / f"{name}.config.toml" for name in PROFILE_VALUES),
         ):
             if backup_file.exists():
@@ -1118,6 +1162,8 @@ enabled = true
                 str(self.codex_home),
                 "--installed-doctor",
                 str(self.installed_doctor),
+                "--installed-highfd",
+                str(self.installed_highfd),
                 "--installed-process-inventory",
                 str(self.installed_inventory),
             ],
@@ -1130,6 +1176,49 @@ enabled = true
         restored = tomllib.loads(self.config.read_text(encoding="utf-8"))
         self.assertEqual(1000, restored["agents"]["max_threads"])
         self.assertEqual("keep capacity\n", self.installed_capacity.read_text(encoding="utf-8"))
+
+    def test_rollback_accepts_old_full_version_two_receipt_without_highfd(self) -> None:
+        applied = self.run_installer("--apply")
+        self.assertEqual(0, applied.returncode, applied.stdout + applied.stderr)
+        backup = self.codex_home / "backups" / "fd-guardrails-20260804-212800"
+        receipt = json.loads((backup / "manifest.json").read_text(encoding="utf-8"))
+        receipt["targets"] = [
+            target
+            for target in receipt["targets"]
+            if target["id"] != "codex-highfd"
+        ]
+        (backup / "codex-highfd").unlink()
+        (backup / "manifest.json").write_text(
+            json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        self.installed_highfd.write_text("new highfd remains\n", encoding="utf-8")
+
+        rollback = subprocess.run(
+            [
+                sys.executable,
+                str(ROLLBACK),
+                "--backup",
+                str(backup),
+                "--apply",
+                "--codex-home",
+                str(self.codex_home),
+                "--installed-doctor",
+                str(self.installed_doctor),
+                "--installed-highfd",
+                str(self.installed_highfd),
+                "--installed-process-inventory",
+                str(self.installed_inventory),
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+
+        self.assertEqual(0, rollback.returncode, rollback.stdout + rollback.stderr)
+        restored = tomllib.loads(self.config.read_text(encoding="utf-8"))
+        self.assertEqual(1000, restored["agents"]["max_threads"])
+        self.assertEqual("new highfd remains\n", self.installed_highfd.read_text(encoding="utf-8"))
 
     def test_migrates_legacy_partial_backup_without_doctor_copy(self) -> None:
         applied = self.run_installer("--apply")

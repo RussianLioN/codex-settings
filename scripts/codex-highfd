@@ -4,9 +4,24 @@ set -eu
 target_limit=${CODEX_NOFILE_LIMIT:-4096}
 real_codex=${CODEX_REAL_BIN:-/opt/homebrew/bin/codex}
 fd_doctor=${CODEX_FD_DOCTOR:-$HOME/.local/libexec/codex_fd_doctor.sh}
+smart_launcher=${CODEX_SMART_LAUNCHER:-$HOME/.local/bin/codex-smart}
+smart_enabled=${CODEX_SMART_ENABLED:-0}
+smart_required=${CODEX_SMART_REQUIRED:-0}
 
 if [[ ! "$target_limit" =~ ^[1-9][0-9]*$ ]]; then
   print -u2 -- "codex-highfd: CODEX_NOFILE_LIMIT must be a positive integer"
+  exit 2
+fi
+if [[ "$smart_enabled" != 0 && "$smart_enabled" != 1 ]]; then
+  print -u2 -- "codex-highfd: CODEX_SMART_ENABLED must be 0 or 1"
+  exit 2
+fi
+if [[ "$smart_required" != 0 && "$smart_required" != 1 ]]; then
+  print -u2 -- "codex-highfd: CODEX_SMART_REQUIRED must be 0 or 1"
+  exit 2
+fi
+if [[ "$smart_required" == 1 && "$smart_enabled" != 1 ]]; then
+  print -u2 -- "codex-highfd: CODEX_SMART_REQUIRED=1 requires CODEX_SMART_ENABLED=1"
   exit 2
 fi
 
@@ -29,9 +44,20 @@ case "${1:-}" in
     print -- "hard_limit=$(ulimit -Hn)"
     print -- "real_codex=$real_codex"
     print -- "fd_doctor=$fd_doctor"
+    print -- "smart_launcher=$smart_launcher"
+    print -- "smart_enabled=$smart_enabled"
+    print -- "smart_required=$smart_required"
     exit 0
     ;;
 esac
 
 [[ -x "$real_codex" ]] || { print -u2 -- "codex-highfd: Codex binary is missing: $real_codex"; exit 1; }
+if [[ "$smart_enabled" == 1 ]]; then
+  [[ -x "$smart_launcher" ]] || { print -u2 -- "codex-highfd: smart launcher is missing: $smart_launcher"; exit 1; }
+  export CODEX_REAL_BIN=$real_codex
+  export CODEX_SMART_ENABLED=1
+  export CODEX_SMART_REQUIRED=$smart_required
+  exec "$smart_launcher" "$@"
+fi
+unset CODEX_SMART_ENABLED CODEX_SMART_REQUIRED
 exec "$real_codex" "$@"
