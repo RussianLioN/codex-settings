@@ -3196,10 +3196,62 @@ def _require_absent_at(directory_fd: int, name: str) -> None:
     raise _ProofError("ABSENCE_PROOF_MISMATCH", "main journal exists")
 
 
+def _validate_health_extensions(value: object) -> None:
+    """Сохраняет открытую точку расширения в общих структурных пределах."""
+
+    if type(value) is not dict or len(value) > 128:
+        raise _ProofError(
+            "CONTROLLER_BINDING_MISMATCH", "health extensions are invalid"
+        )
+    nodes = 0
+
+    def visit(current: object, depth: int) -> None:
+        nonlocal nodes
+        nodes += 1
+        if nodes > 128 or depth > 4:
+            raise _ProofError(
+                "CONTROLLER_BINDING_MISMATCH",
+                "health extensions exceed structural limits",
+            )
+        if type(current) is dict:
+            for key, child in current.items():
+                if type(key) is not str or key == "extensions":
+                    raise _ProofError(
+                        "CONTROLLER_BINDING_MISMATCH",
+                        "nested health extensions are forbidden",
+                    )
+                visit(child, depth + 1)
+        elif type(current) is list:
+            for child in current:
+                visit(child, depth + 1)
+        else:
+            try:
+                canonical_json_bytes(current)
+            except (CanonicalJsonError, RecursionError) as exc:
+                raise _ProofError(
+                    "CONTROLLER_BINDING_MISMATCH",
+                    "health extensions are outside canonical JSON",
+                ) from exc
+
+    visit(value, 0)
+    try:
+        encoded = canonical_json_bytes(value)
+    except (CanonicalJsonError, RecursionError) as exc:
+        raise _ProofError(
+            "CONTROLLER_BINDING_MISMATCH",
+            "health extensions are outside canonical JSON",
+        ) from exc
+    if len(encoded) > 16 * 1024:
+        raise _ProofError(
+            "CONTROLLER_BINDING_MISMATCH",
+            "health extensions exceed the byte limit",
+        )
+
+
 def _validate_health_response(value, *, request: dict[str, object]) -> None:
     try:
         canonical_json_bytes(value)
-    except CanonicalJsonError as exc:
+    except (CanonicalJsonError, RecursionError) as exc:
         raise _ProofError(
             "CONTROLLER_BINDING_MISMATCH",
             f"health response is outside canonical JSON: {exc}",
@@ -3241,10 +3293,9 @@ def _validate_health_response(value, *, request: dict[str, object]) -> None:
         raise _ProofError(
             "CONTROLLER_BINDING_MISMATCH", "health control epoch is invalid"
         )
-    if type(value["extensions"]) is not dict or len(value["extensions"]) > 128:
-        raise _ProofError(
-            "CONTROLLER_BINDING_MISMATCH", "health extensions are invalid"
-        )
+    # Неизвестные корневые расширения намеренно разрешены договором и не входят
+    # в готовность или отпечаток; шлюз сохраняет только известное доказательство.
+    _validate_health_extensions(value["extensions"])
     if "coordinatorRefresh" in value["extensions"]:
         try:
             validate_coordinator_refresh_diagnostics_v2(

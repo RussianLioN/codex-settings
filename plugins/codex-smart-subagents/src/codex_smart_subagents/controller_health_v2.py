@@ -255,7 +255,7 @@ class ControllerHealthServerV2:
         self,
         selection: CoordinatorSelectionV2,
     ) -> None:
-        """Атомарно публикует повторно доказанный выбор в живом health."""
+        """Публикует выбор и отзывает не связанное с ним доказательство проверки."""
 
         if not isinstance(selection, CoordinatorSelectionV2):
             _fail(
@@ -279,6 +279,7 @@ class ControllerHealthServerV2:
             if self._closed:
                 _fail("SERVER_CLOSED", "controller health server is closed")
             self.coordinator_selection = document
+            self._coordinator_refresh_diagnostics = None
 
     @property
     def coordinator_refresh_diagnostics(self) -> dict[str, object] | None:
