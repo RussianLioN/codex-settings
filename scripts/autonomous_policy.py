@@ -3,21 +3,50 @@
 
 from __future__ import annotations
 
+import hashlib
+import inspect
 import json
 import os
 import re
 import shlex
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
+
+import codex_capacity as capacity_core
+import codex_capacity_observer as capacity_observer
+from codex_capacity import DEFAULT_CAPACITY, MAX_CAPACITY, CapacityStore, request_hash
+from codex_capacity_observer import observe as observe_capacity
 
 
 HOME = Path.home().resolve()
 CODEX_HOME = Path(os.environ.get("CODEX_HOME", HOME / ".codex")).expanduser().resolve()
 AUDIT_LOG = CODEX_HOME / "audit" / "hooks.jsonl"
-FAIL_CLOSED_EVENTS = {"PreToolUse", "PermissionRequest", "SubagentStart"}
+FAIL_CLOSED_EVENTS = {"PreToolUse", "PermissionRequest"}
+KNOWN_EVENTS = {
+    "PreToolUse",
+    "PermissionRequest",
+    "PostToolUse",
+    "SubagentStart",
+    "SubagentStop",
+    "Stop",
+    "SessionEnd",
+}
+CAPACITY_OBSERVER_SNAPSHOT_ENV = "CODEX_CAPACITY_OBSERVER_SNAPSHOT"
+CAPACITY_OBSERVER_TEST_MODE_ENV = "CODEX_CAPACITY_OBSERVER_TEST_MODE"
+CAPACITY_HOOK_DEADLINE_MS_ENV = "CODEX_CAPACITY_HOOK_DEADLINE_MS"
+CAPACITY_QUEUED = "CAPACITY_QUEUED"
+CAPACITY_DEADLINE_EXHAUSTED = "CAPACITY_DEADLINE_EXHAUSTED"
+CAPACITY_HOOK_DEADLINE_SECONDS = 0.95
+CAPACITY_MIN_STAGE_SECONDS = 0.005
+CAPACITY_AFTER_SNAPSHOT_RESERVE_SECONDS = 0.58
+CAPACITY_AFTER_OBSERVER_RESERVE_SECONDS = 0.08
+CAPACITY_AFTER_ACQUIRE_RESERVE_SECONDS = 0.02
+CAPACITY_STOP_RELEASE_RESERVE_SECONDS = 0.30
+SENSITIVE_PAYLOAD_KEYS = {"message", "messages", "task", "task_name", "taskName", "tool_input", "toolInput"}
 KNOWN_AGENTS = {
     "default",
     "worker",
@@ -70,6 +99,8 @@ GH_GLOBAL_VALUE_FLAGS = {"-R", "--repo", "--hostname"}
 
 
 def main() -> int:
+    started = time.perf_counter()
+    deadline = started + capacity_hook_deadline_seconds()
     event = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("CODEX_HOOK_EVENT", "")
     raw = sys.stdin.read()
     try:
@@ -78,7 +109,8 @@ def main() -> int:
         return deny(event, {}, f"invalid hook JSON: {exc}")
 
     try:
-        decision, reason, details = evaluate(event, payload)
+        decision, reason, details = evaluate(event, payload, deadline=deadline)
+        details["hook_elapsed_ms"] = round((time.perf_counter() - started) * 1000, 3)
         write_audit(event, decision, reason, payload, details)
     except Exception as exc:  # pragma: no cover - fail closed by design
         fallback_payload = payload if isinstance(payload, dict) else {}
@@ -91,7 +123,7 @@ def main() -> int:
             print(reason, file=sys.stderr)
             return 2
         print(reason, file=sys.stderr)
-        return 1
+        return 0
 
     if decision == "block":
         print(reason, file=sys.stderr)
@@ -99,8 +131,8 @@ def main() -> int:
     return 0
 
 
-def evaluate(event: str, payload: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
-    if event not in {"PreToolUse", "PermissionRequest", "PostToolUse", "SubagentStart", "SubagentStop", "Stop"}:
+def evaluate(event: str, payload: dict[str, Any], *, deadline: float | None = None) -> tuple[str, str, dict[str, Any]]:
+    if event not in KNOWN_EVENTS:
         return "block", "unknown hook event", {}
 
     tool_name = find_first(payload, ("tool_name", "toolName", "tool", "name", "subagent_type", "agent", "agent_name"))
@@ -108,26 +140,26 @@ def evaluate(event: str, payload: dict[str, Any]) -> tuple[str, str, dict[str, A
     command = extract_command(payload)
     details = {
         "tool": tool_name,
-        "command_excerpt": redact(command)[:500] if command else "",
+        "command_sha256": stable_hash(command) if command else "",
     }
     autonomous_agent = bool(find_first(payload, ("agent_id", "agentId", "agent_type", "agentType")))
     if autonomous_agent:
         details["agent_type"] = str(find_first(payload, ("agent_type", "agentType")) or "unknown")
 
-    if event in {"PostToolUse", "SubagentStop", "Stop"}:
-        return "allow", "audit-only event", details
+    if event == "PostToolUse":
+        return handle_post_tool_use(payload, tool_name, details, deadline=deadline)
+
+    if event == "SubagentStop":
+        return handle_subagent_stop(payload, details, deadline=deadline)
+
+    if event == "Stop":
+        return handle_stop(payload, details, deadline=deadline)
+
+    if event == "SessionEnd":
+        return handle_session_end(payload, details, deadline=deadline)
 
     if event == "SubagentStart":
-        raw_agent_type = find_first(payload, ("agent_type", "agentType"))
-        agent_type = normalize_agent(
-            str(raw_agent_type or tool_name or find_first(payload, ("type", "kind")) or "")
-        )
-        details["agent_type"] = agent_type
-        if not agent_type:
-            return "block", "subagent start payload did not identify agent type", details
-        if agent_type not in KNOWN_AGENTS:
-            return "block", f"subagent type is not in the approved role set: {agent_type}", details
-        return "allow", "approved subagent role", details
+        return handle_subagent_start(payload, tool_name, details, deadline=deadline)
 
     if is_side_effect_mcp_or_app(tool_name):
         return "block", f"side-effect capable MCP/app tool is blocked: {tool_name}", details
@@ -146,7 +178,833 @@ def evaluate(event: str, payload: dict[str, Any]) -> tuple[str, str, dict[str, A
     if event in FAIL_CLOSED_EVENTS and not tool_name and not command:
         return "block", "fail-closed event lacked tool or command identity", details
 
+    if event == "PreToolUse" and is_spawn_agent_tool(tool_name):
+        role_decision = evaluate_spawn_role(payload, tool_name)
+        details.update(role_decision[2])
+        if role_decision[0] == "block":
+            return role_decision[0], role_decision[1], details
+        return handle_spawn_capacity(payload, details, deadline=deadline)
+
     return "allow", "policy allowed", details
+
+
+def handle_spawn_capacity(payload: dict[str, Any], details: dict[str, Any], *, deadline: float | None = None) -> tuple[str, str, dict[str, Any]]:
+    request = capacity_request(payload)
+    details.update(request.audit_details)
+    if request.error:
+        return "block", request.error, details
+    snapshot_budget, deadline_reason = capacity_stage_budget(
+        deadline,
+        reserve_seconds=CAPACITY_AFTER_SNAPSHOT_RESERVE_SECONDS,
+        details=details,
+        stage="snapshot",
+    )
+    if deadline_reason:
+        return "block", deadline_reason, details
+
+    base_store = capacity_store(capacity=DEFAULT_CAPACITY, max_operation_seconds=snapshot_budget)
+    workload_class = calibration_workload_class(payload)
+    capacity_limit, wave_limit, observer_reason, root_identity, calibration_snapshot = observed_capacity_limit(
+        base_store,
+        details,
+        deadline=deadline,
+        workload_class=workload_class,
+    )
+    if observer_reason:
+        return "block", observer_reason, details
+
+    acquire_budget, deadline_reason = capacity_stage_budget(
+        deadline,
+        reserve_seconds=CAPACITY_AFTER_ACQUIRE_RESERVE_SECONDS,
+        details=details,
+        stage="acquire",
+    )
+    if deadline_reason:
+        return "block", deadline_reason, details
+
+    result = capacity_store(capacity=capacity_limit, max_operation_seconds=acquire_budget).acquire_or_queue(
+        session_id=request.session_id,
+        turn_id=request.turn_id,
+        task_name=request.task_name,
+        wave_limit=wave_limit,
+        root_pid=root_identity[0] if root_identity else None,
+        root_start_marker=root_identity[1] if root_identity else None,
+    )
+    details["capacity"] = sanitize_capacity_result(result)
+    state = str(result.get("state") or "")
+    if state == "LEASED":
+        record_calibration_event(
+            "pretool_lease",
+            details,
+            state_dir=base_store.state_dir,
+            snapshot=calibration_snapshot,
+            session_id=request.session_id,
+            turn_id=request.turn_id,
+            request_id=request.request_id,
+            workload_class=workload_class,
+            deadline=deadline,
+        )
+        return "allow", "capacity leased", details
+    if state == CAPACITY_QUEUED:
+        return "block", capacity_queue_deny_json(result), details
+    if state == "ERROR":
+        reason = str(result.get("reason") or "unknown_capacity_error")
+        return "block", f"capacity error: {reason}", details
+    return "block", f"unexpected capacity state: {state or 'missing'}", details
+
+
+def observed_capacity_limit(
+    store: CapacityStore,
+    details: dict[str, Any],
+    *,
+    deadline: float | None = None,
+    workload_class: str = "normal",
+) -> tuple[int, Optional[int], str, tuple[int, str] | None, dict[str, Any] | None]:
+    snapshot_result = store.snapshot()
+    if snapshot_result.get("state") == "ERROR":
+        details["capacity_snapshot"] = sanitize_capacity_result(snapshot_result)
+        return 0, 0, f"capacity error: {snapshot_result.get('reason') or 'snapshot_failed'}", None, None
+
+    _, deadline_reason = capacity_stage_budget(
+        deadline,
+        reserve_seconds=CAPACITY_AFTER_OBSERVER_RESERVE_SECONDS,
+        details=details,
+        stage="observer",
+    )
+    if deadline_reason:
+        return 0, 0, deadline_reason, None, None
+
+    managed_active = int(snapshot_result.get("active_count") or 0)
+    managed_reserved = int(snapshot_result.get("reserved_count") or managed_active)
+    managed_slots = max(managed_active, managed_reserved)
+    details["capacity_snapshot"] = {"active_count": managed_active, "reserved_count": managed_reserved}
+    snapshot = observer_snapshot_from_env(details)
+    root_identity = root_identity_from_snapshot(snapshot) if snapshot is not None else None
+    calibration_snapshot = dict(snapshot) if snapshot is not None else None
+    if snapshot is None:
+        try:
+            managed_identities = store.managed_root_identities()
+            snapshot = capacity_observer.collect_snapshot(
+                state_dir=store.state_dir,
+                deadline=deadline,
+                managed_root_identities=managed_identities,
+            )
+            raw_identity = snapshot.get("current_codex_root_identity")
+            if isinstance(raw_identity, (list, tuple)) and len(raw_identity) == 2:
+                root_identity = normalize_root_identity(raw_identity[0], raw_identity[1])
+            if root_identity is None:
+                observation = capacity_observer.fail_closed_output("current_codex_root_identity_missing")
+                details["capacity_observer"] = sanitize_observer_result(observation)
+                return 0, 0, capacity_observer_deny_json(observation), None, None
+            reconciled = store.reconcile_managed_roots(
+                live_root_identities=snapshot.get("managed_codex_root_identities") or [],
+                proof_started_at=float(snapshot.get("codex_process_snapshot_started_at") or 0.0),
+            )
+            details["capacity_root_reconcile"] = sanitize_capacity_result(reconciled)
+            if reconciled.get("state") == "ERROR":
+                return 0, 0, f"capacity error: {reconciled.get('reason') or 'managed_root_reconcile_failed'}", root_identity, None
+            if "active_count" in reconciled and "reserved_count" in reconciled:
+                managed_active = max(0, int(reconciled.get("active_count") or 0))
+                managed_reserved = max(0, int(reconciled.get("reserved_count") or managed_active))
+                managed_slots = max(managed_active, managed_reserved)
+                details["capacity_snapshot"] = {"active_count": managed_active, "reserved_count": managed_reserved}
+        except Exception as exc:
+            observation = capacity_observer.fail_closed_output(str(exc))
+            details["capacity_observer"] = sanitize_observer_result(observation)
+            return 0, 0, capacity_observer_deny_json(observation), None, None
+    if snapshot is not None:
+        snapshot["active_slots"] = managed_slots
+        calibration_snapshot = dict(snapshot)
+        snapshot = observer_public_snapshot(snapshot)
+    observer_budget, deadline_reason = capacity_stage_budget(
+        deadline,
+        reserve_seconds=CAPACITY_AFTER_OBSERVER_RESERVE_SECONDS,
+        details=details,
+        stage="observer_run",
+    )
+    if deadline_reason:
+        return 0, 0, deadline_reason, root_identity, None
+    observation = observe_capacity_with_budget(
+        snapshot=snapshot,
+        calibration_snapshot=calibration_snapshot,
+        state_dir=store.state_dir,
+        active_slots=managed_slots,
+        max_operation_seconds=observer_budget,
+        workload_class=workload_class,
+    )
+    details["capacity_observer"] = sanitize_observer_result(observation)
+    status = str(observation.get("status") or "RED")
+    if calibration_snapshot is not None:
+        calibration_snapshot["_calibration_status"] = status
+    if status == "RED":
+        return 0, 0, capacity_observer_deny_json(observation), root_identity, None
+    measurements = observation.get("measurements") if isinstance(observation.get("measurements"), dict) else {}
+    external_roots = max(0, int(float(measurements.get("external_codex_roots") or 0)))
+    admission = max(0, min(MAX_CAPACITY, int(observation.get("admission_capacity") or 0)))
+    max_wave = max(0, min(MAX_CAPACITY, int(observation.get("max_wave_size") or 0)))
+    if status == "YELLOW":
+        capacity_limit = max(0, min(DEFAULT_CAPACITY, admission) - external_roots)
+        wave_limit: Optional[int] = max(0, min(2, max_wave, capacity_limit))
+    else:
+        capacity_limit = max(0, admission - external_roots)
+        wave_limit = None
+    details["capacity_external_codex_roots"] = external_roots
+    details["capacity_limit"] = capacity_limit
+    if wave_limit is not None:
+        details["capacity_wave_limit"] = wave_limit
+    return capacity_limit, wave_limit, "", root_identity, calibration_snapshot
+
+
+def root_identity_from_snapshot(snapshot: dict[str, Any] | None) -> tuple[int, str] | None:
+    if not isinstance(snapshot, dict):
+        return None
+    return normalize_root_identity(
+        snapshot.get("current_codex_root_pid"),
+        snapshot.get("current_codex_root_start_marker"),
+    )
+
+
+def normalize_root_identity(pid: Any, marker: Any) -> tuple[int, str] | None:
+    if pid in (None, "") or marker in (None, ""):
+        return None
+    try:
+        root_pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    start_marker = str(marker).strip()
+    if root_pid <= 0 or not start_marker:
+        return None
+    return root_pid, start_marker
+
+
+def observer_public_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    cleaned = dict(snapshot)
+    cleaned.pop("current_codex_root_identity", None)
+    cleaned.pop("current_codex_root_pid", None)
+    cleaned.pop("current_codex_root_start_marker", None)
+    cleaned.pop("managed_codex_root_identities", None)
+    cleaned.pop("codex_process_snapshot_started_at", None)
+    return cleaned
+
+
+def capacity_observer_deny_json(observation: dict[str, Any]) -> str:
+    payload = {
+        "decision": "deny",
+        "permissionDecision": "deny",
+        "reason": "CAPACITY_OBSERVER_RED",
+        "code": "CAPACITY_OBSERVER_RED",
+        "status": observation.get("status") or "RED",
+        "reasons": observation.get("reasons") or [],
+        "admission_capacity": observation.get("admission_capacity") or 0,
+        "max_wave_size": observation.get("max_wave_size") or 0,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def observer_snapshot_from_env(details: dict[str, Any]) -> Optional[dict[str, Any]]:
+    path = os.getenv(CAPACITY_OBSERVER_SNAPSHOT_ENV)
+    if not path:
+        details["capacity_observer_snapshot_env"] = "unset"
+        return None
+    if os.getenv(CAPACITY_OBSERVER_TEST_MODE_ENV) != "1":
+        details["capacity_observer_snapshot_env"] = "ignored_without_test_mode"
+        return None
+    details["capacity_observer_snapshot_env"] = "test_mode"
+    with Path(path).open("r", encoding="utf-8") as handle:
+        snapshot = json.load(handle)
+    if not isinstance(snapshot, dict):
+        raise ValueError("capacity observer snapshot must be a JSON object")
+    return snapshot
+
+
+def capacity_hook_deadline_seconds() -> float:
+    raw = os.getenv(CAPACITY_HOOK_DEADLINE_MS_ENV)
+    if raw in (None, ""):
+        return CAPACITY_HOOK_DEADLINE_SECONDS
+    try:
+        milliseconds = float(raw)
+    except ValueError:
+        return CAPACITY_HOOK_DEADLINE_SECONDS
+    return max(0.001, min(1.0, milliseconds / 1000.0))
+
+
+def capacity_stage_budget(
+    deadline: float | None,
+    *,
+    reserve_seconds: float,
+    details: dict[str, Any],
+    stage: str,
+) -> tuple[float, str]:
+    if deadline is None:
+        return CAPACITY_HOOK_DEADLINE_SECONDS, ""
+    remaining = deadline - time.perf_counter()
+    details[f"capacity_{stage}_remaining_ms"] = round(max(0.0, remaining) * 1000, 3)
+    budget = remaining - max(0.0, reserve_seconds)
+    if budget < CAPACITY_MIN_STAGE_SECONDS:
+        return 0.0, capacity_deadline_deny_json(stage, remaining)
+    return max(CAPACITY_MIN_STAGE_SECONDS, budget), ""
+
+
+def capacity_deadline_deny_json(stage: str, remaining_seconds: float) -> str:
+    payload = {
+        "decision": "deny",
+        "permissionDecision": "deny",
+        "reason": CAPACITY_DEADLINE_EXHAUSTED,
+        "code": CAPACITY_DEADLINE_EXHAUSTED,
+        "stage": stage,
+        "remaining_ms": round(max(0.0, remaining_seconds) * 1000, 3),
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def capacity_store(*, capacity: int, max_operation_seconds: float | None = None) -> CapacityStore:
+    if capacity_store_accepts_operation_budget():
+        return CapacityStore(capacity=capacity, max_operation_seconds=max_operation_seconds)
+    if max_operation_seconds is None:
+        return CapacityStore(capacity=capacity)
+    original = getattr(capacity_core, "MAX_OPERATION_SECONDS", None)
+    if original is not None:
+        capacity_core.MAX_OPERATION_SECONDS = max_operation_seconds
+    return CapacityStore(capacity=capacity)
+
+
+def capacity_store_accepts_operation_budget() -> bool:
+    try:
+        return "max_operation_seconds" in inspect.signature(CapacityStore).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def observe_capacity_with_budget(
+    *,
+    snapshot: dict[str, Any] | None,
+    calibration_snapshot: dict[str, Any] | None,
+    state_dir: Path,
+    active_slots: int,
+    max_operation_seconds: float,
+    workload_class: str = "normal",
+) -> dict[str, Any]:
+    original = capacity_observer.OBSERVE_TIMEOUT_SECONDS
+    capacity_observer.OBSERVE_TIMEOUT_SECONDS = max(CAPACITY_MIN_STAGE_SECONDS, max_operation_seconds)
+    try:
+        return observe_capacity(
+            snapshot=snapshot,
+            calibration_snapshot=calibration_snapshot,
+            state_dir=state_dir,
+            active_slots=active_slots,
+            workload_class=workload_class,
+        )
+    finally:
+        capacity_observer.OBSERVE_TIMEOUT_SECONDS = original
+
+
+def calibration_workload_class(payload: dict[str, Any]) -> str:
+    tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    raw = str(tool_input.get("workload_class") or tool_input.get("workloadClass") or "normal") if isinstance(tool_input, dict) else "normal"
+    if raw == "browser":
+        return "browser"
+    if raw == "light" and os.getenv("CODEX_CAPACITY_CALIBRATION_TEST_MODE") == "1":
+        return "light"
+    return "normal"
+
+
+def calibration_snapshot_for_lifecycle(
+    store: CapacityStore,
+    details: dict[str, Any],
+    *,
+    active_slots: int,
+    deadline: float | None = None,
+    workload_class: str = "normal",
+) -> dict[str, Any] | None:
+    snapshot = observer_snapshot_from_env(details)
+    if snapshot is not None:
+        snapshot = dict(snapshot)
+        snapshot["active_slots"] = active_slots
+        snapshot["_calibration_status"] = calibration_snapshot_status(snapshot, workload_class=workload_class)
+        return snapshot
+    try:
+        managed = store.managed_root_identities()
+        snapshot = capacity_observer.collect_snapshot(
+            state_dir=store.state_dir,
+            managed_root_identities=managed,
+            deadline=deadline,
+        )
+        snapshot["active_slots"] = active_slots
+        snapshot["_calibration_status"] = calibration_snapshot_status(snapshot, workload_class=workload_class)
+        return snapshot
+    except Exception:
+        details["capacity_calibration_snapshot"] = "unavailable"
+        return None
+
+
+def calibration_snapshot_status(snapshot: dict[str, Any], *, workload_class: str = "normal") -> str:
+    try:
+        normalized = capacity_observer.normalize_snapshot(observer_public_snapshot(dict(snapshot)))
+        selected_class = workload_class if workload_class in capacity_observer.MIN_COSTS else "normal"
+        red_reasons: list[str] = []
+        yellow_reasons: list[str] = []
+        return capacity_observer.classify_raw_status(
+            normalized,
+            capacity_observer.normalize_cost(capacity_observer.MIN_COSTS[selected_class], selected_class),
+            {"swapout_bytes_per_minute": None, "previous_swapout_bytes_per_minute": None},
+            red_reasons,
+            yellow_reasons,
+        )
+    except Exception:
+        return "RED"
+
+
+def active_calibration_profile(
+    state_dir: Path,
+    details: dict[str, Any],
+    *,
+    deadline: float | None = None,
+) -> tuple[str, int]:
+    try:
+        status = capacity_observer.calibration_status(state_dir=state_dir, deadline=deadline)
+    except Exception:
+        details["capacity_calibration_status"] = "unavailable"
+        return "normal", DEFAULT_CAPACITY
+    workload_class = status.get("workload_class")
+    selected_class = str(workload_class) if workload_class in capacity_observer.MIN_COSTS else "normal"
+    classes = status.get("classes") if isinstance(status.get("classes"), dict) else {}
+    profile = classes.get(selected_class) if isinstance(classes.get(selected_class), dict) else {}
+    accepted = int(profile.get("accepted_count") or 0)
+    effective = int(profile.get("effective_capacity") or DEFAULT_CAPACITY)
+    if (
+        accepted < capacity_observer.MIN_SUCCESSFUL_OBSERVATIONS
+        or effective not in capacity_observer.VALID_CAPACITIES
+    ):
+        effective = DEFAULT_CAPACITY
+    effective = max(DEFAULT_CAPACITY, min(MAX_CAPACITY, effective))
+    details["capacity_calibration_limit"] = effective
+    return selected_class, effective
+
+
+def active_calibration_workload_class(state_dir: Path, details: dict[str, Any], *, deadline: float | None = None) -> str:
+    return active_calibration_profile(state_dir, details, deadline=deadline)[0]
+
+
+def record_calibration_event(
+    event: str,
+    details: dict[str, Any],
+    *,
+    state_dir: Path | None = None,
+    snapshot: dict[str, Any] | None = None,
+    session_id: str = "",
+    turn_id: str = "",
+    request_id: str = "",
+    agent_id: str = "",
+    workload_class: str = "normal",
+    deadline: float | None = None,
+) -> None:
+    try:
+        result = capacity_observer.calibration_hook_event(
+            event,
+            state_dir=state_dir,
+            snapshot=snapshot,
+            session_id=session_id,
+            turn_id=turn_id,
+            request_id=request_id,
+            agent_id=agent_id,
+            workload_class=workload_class,
+            deadline=deadline,
+        )
+        details["capacity_calibration"] = {
+            "event": event,
+            "phase": result.get("phase"),
+            "workload_class": result.get("workload_class"),
+        }
+    except Exception:
+        details["capacity_calibration"] = {"event": event, "state": "ignored", "reason": "calibration_state_unavailable"}
+
+
+def sanitize_observer_result(result: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "status",
+        "reasons",
+        "effective_capacity",
+        "admission_capacity",
+        "max_wave_size",
+        "capacity_mode",
+        "successful_observations",
+        "clean_cycles",
+    }
+    sanitized = {key: result[key] for key in sorted(allowed) if key in result}
+    measurements = result.get("measurements")
+    if isinstance(measurements, dict):
+        sanitized["measurements"] = {
+            key: measurements[key]
+            for key in ("active_slots", "codex_root_count", "external_codex_roots", "root_fd_state", "memory_pressure", "memory_free_percent")
+            if key in measurements
+        }
+    return sanitized
+
+
+def handle_post_tool_use(
+    payload: dict[str, Any],
+    tool_name: str,
+    details: dict[str, Any],
+    *,
+    deadline: float | None = None,
+) -> tuple[str, str, dict[str, Any]]:
+    if not is_spawn_agent_tool(tool_name):
+        return "allow", "audit-only event", details
+    if not tool_response_failed(payload.get("tool_response")):
+        details["capacity_release"] = "not_failed"
+        return "allow", "spawn succeeded or failure was not proven", details
+
+    request = capacity_request(payload)
+    details.update(request.audit_details)
+    if request.error:
+        details["capacity_release_error"] = request.error
+        return "allow", "spawn failure could not be mapped to capacity request", details
+    base_store = CapacityStore(capacity=DEFAULT_CAPACITY)
+    _, lifecycle_capacity = active_calibration_profile(
+        base_store.state_dir,
+        details,
+        deadline=deadline,
+    )
+    store = CapacityStore(capacity=lifecycle_capacity)
+    result = store.release_request(
+        request.request_id,
+        expected_state="PROVISIONAL",
+    )
+    details["capacity"] = sanitize_capacity_result(result)
+    record_calibration_event(
+        "spawn_failed",
+        details,
+        state_dir=store.state_dir,
+        session_id=request.session_id,
+        turn_id=request.turn_id,
+        request_id=request.request_id,
+        deadline=deadline,
+    )
+    if result.get("state") == "ERROR":
+        details["capacity_release_error"] = str(result.get("reason") or "unknown_capacity_error")
+    return "allow", "failed spawn provisional release attempted", details
+
+
+def handle_subagent_start(
+    payload: dict[str, Any],
+    tool_name: str,
+    details: dict[str, Any],
+    *,
+    deadline: float | None = None,
+) -> tuple[str, str, dict[str, Any]]:
+    role_decision = evaluate_spawn_role(payload, tool_name)
+    details.update(role_decision[2])
+    session_id = hook_string(payload, "session_id")
+    turn_id = hook_string(payload, "turn_id")
+    agent_id = hook_string(payload, "agent_id")
+    if not session_id or not turn_id or not agent_id:
+        details["capacity_lifecycle_error"] = "missing_session_turn_or_agent_id"
+        return "allow", "subagent start lifecycle identity incomplete", details
+    base_store = CapacityStore(capacity=DEFAULT_CAPACITY)
+    workload_class, lifecycle_capacity = active_calibration_profile(
+        base_store.state_dir,
+        details,
+        deadline=deadline,
+    )
+    store = CapacityStore(capacity=lifecycle_capacity)
+    result = store.activate_next(
+        session_id=session_id,
+        turn_id=turn_id,
+        agent_id=agent_id,
+    )
+    details["capacity"] = sanitize_capacity_result(result)
+    snapshot_result = store.snapshot()
+    active_slots = int(snapshot_result.get("active_count") or 0) if snapshot_result.get("state") != "ERROR" else 0
+    snapshot = calibration_snapshot_for_lifecycle(store, details, active_slots=active_slots, deadline=deadline, workload_class=workload_class)
+    record_calibration_event(
+        "subagent_start",
+        details,
+        state_dir=store.state_dir,
+        snapshot=snapshot,
+        session_id=session_id,
+        turn_id=turn_id,
+        agent_id=agent_id,
+        workload_class=workload_class,
+        deadline=deadline,
+    )
+    return "allow", "subagent start capacity activation attempted", details
+
+
+def handle_subagent_stop(payload: dict[str, Any], details: dict[str, Any], *, deadline: float | None = None) -> tuple[str, str, dict[str, Any]]:
+    session_id = hook_string(payload, "session_id")
+    agent_id = hook_string(payload, "agent_id")
+    if not session_id or not agent_id:
+        details["capacity_lifecycle_error"] = "missing_session_or_agent_id"
+        return "allow", "subagent stop lifecycle identity incomplete", details
+    lifecycle_capacity = DEFAULT_CAPACITY
+    calibration_budget, deadline_reason = capacity_stage_budget(
+        deadline,
+        reserve_seconds=CAPACITY_STOP_RELEASE_RESERVE_SECONDS,
+        details=details,
+        stage="stop_calibration",
+    )
+    if deadline_reason:
+        details["capacity_calibration_snapshot"] = "skipped_deadline"
+    else:
+        calibration_deadline = (
+            None
+            if deadline is None
+            else min(deadline, time.perf_counter() + calibration_budget)
+        )
+        try:
+            calibration_store = capacity_store(
+                capacity=DEFAULT_CAPACITY,
+                max_operation_seconds=calibration_budget,
+            )
+            snapshot_result = calibration_store.snapshot()
+            active_slots = (
+                int(snapshot_result.get("active_count") or 0)
+                if snapshot_result.get("state") != "ERROR"
+                else 0
+            )
+            workload_class, lifecycle_capacity = active_calibration_profile(
+                calibration_store.state_dir,
+                details,
+                deadline=calibration_deadline,
+            )
+            snapshot = calibration_snapshot_for_lifecycle(
+                calibration_store,
+                details,
+                active_slots=active_slots,
+                deadline=calibration_deadline,
+                workload_class=workload_class,
+            )
+            record_calibration_event(
+                "subagent_stop_before_release",
+                details,
+                state_dir=calibration_store.state_dir,
+                snapshot=snapshot,
+                session_id=session_id,
+                agent_id=agent_id,
+                workload_class=workload_class,
+                deadline=calibration_deadline,
+            )
+        except Exception:
+            details["capacity_calibration_snapshot"] = "unavailable"
+
+    release_budget = remaining_capacity_operation_budget(deadline)
+    result = capacity_store(
+        capacity=lifecycle_capacity,
+        max_operation_seconds=release_budget,
+    ).release_agent(session_id=session_id, agent_id=agent_id)
+    details["capacity"] = sanitize_capacity_result(result)
+    return "allow", "subagent stop capacity release attempted", details
+
+
+def remaining_capacity_operation_budget(deadline: float | None) -> float:
+    if deadline is None:
+        return capacity_core.MAX_OPERATION_SECONDS
+    remaining = max(0.0, deadline - time.perf_counter())
+    return max(
+        CAPACITY_MIN_STAGE_SECONDS,
+        min(capacity_core.MAX_OPERATION_SECONDS, remaining),
+    )
+
+
+def handle_stop(payload: dict[str, Any], details: dict[str, Any], *, deadline: float | None = None) -> tuple[str, str, dict[str, Any]]:
+    session_id = hook_string(payload, "session_id")
+    turn_id = hook_string(payload, "turn_id")
+    if not session_id or not turn_id:
+        details["capacity_lifecycle_error"] = "missing_session_or_turn_id"
+        return "allow", "stop lifecycle identity incomplete", details
+    base_store = CapacityStore(capacity=DEFAULT_CAPACITY)
+    _, lifecycle_capacity = active_calibration_profile(
+        base_store.state_dir,
+        details,
+        deadline=deadline,
+    )
+    store = CapacityStore(capacity=lifecycle_capacity)
+    result = store.cancel_turn(session_id=session_id, turn_id=turn_id)
+    details["capacity"] = sanitize_capacity_result(result)
+    record_calibration_event("stop", details, state_dir=store.state_dir, session_id=session_id, turn_id=turn_id, deadline=deadline)
+    return "allow", "turn capacity cancellation attempted", details
+
+
+def handle_session_end(payload: dict[str, Any], details: dict[str, Any], *, deadline: float | None = None) -> tuple[str, str, dict[str, Any]]:
+    session_id = hook_string(payload, "session_id")
+    if not session_id:
+        details["capacity_lifecycle_error"] = "missing_session_id"
+        return "allow", "session end lifecycle identity incomplete", details
+    base_store = CapacityStore(capacity=DEFAULT_CAPACITY)
+    _, lifecycle_capacity = active_calibration_profile(
+        base_store.state_dir,
+        details,
+        deadline=deadline,
+    )
+    store = CapacityStore(capacity=lifecycle_capacity)
+    canceled = store.cancel_session(session_id=session_id)
+    reconciled = store.reconcile(session_id=session_id)
+    details["capacity_cancel_session"] = sanitize_capacity_result(canceled)
+    details["capacity_reconcile"] = sanitize_capacity_result(reconciled)
+    record_calibration_event("session_end", details, state_dir=store.state_dir, session_id=session_id, deadline=deadline)
+    return "allow", "session capacity cleanup attempted", details
+
+
+class CapacityRequest:
+    def __init__(
+        self,
+        *,
+        session_id: str = "",
+        turn_id: str = "",
+        task_name: str = "",
+        request_id: str = "",
+        error: str = "",
+    ) -> None:
+        self.session_id = session_id
+        self.turn_id = turn_id
+        self.task_name = task_name
+        self.request_id = request_id
+        self.error = error
+
+    @property
+    def audit_details(self) -> dict[str, Any]:
+        return {
+            "session_id": self.session_id,
+            "turn_id": self.turn_id,
+            "request_id": self.request_id,
+            "task_name_present": bool(self.task_name),
+        }
+
+
+def capacity_request(payload: dict[str, Any]) -> CapacityRequest:
+    session_id = hook_string(payload, "session_id")
+    turn_id = hook_string(payload, "turn_id")
+    tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    task_name = ""
+    if isinstance(tool_input, dict):
+        task_name = str(tool_input.get("task_name") or tool_input.get("taskName") or "")
+    if not session_id or not turn_id:
+        return CapacityRequest(session_id=session_id, turn_id=turn_id, task_name=task_name, error="capacity request lacked session_id or turn_id")
+    if not task_name:
+        return CapacityRequest(session_id=session_id, turn_id=turn_id, task_name=task_name, error="capacity request lacked task_name")
+    request_id = request_hash(session_id, turn_id, task_name)
+    return CapacityRequest(session_id=session_id, turn_id=turn_id, task_name=task_name, request_id=request_id)
+
+
+def hook_string(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    return str(value) if value not in (None, "") else ""
+
+
+def capacity_queue_deny_json(result: dict[str, Any]) -> str:
+    payload = {
+        "decision": "deny",
+        "permissionDecision": "deny",
+        "reason": CAPACITY_QUEUED,
+        "code": CAPACITY_QUEUED,
+        "request_id": result.get("request_id"),
+        "ticket_id": result.get("ticket_id"),
+        "ticket_position": result.get("ticket_position"),
+        "retry_delay_ms": result.get("retry_delay_ms"),
+        "wait_command": result.get("wait_command"),
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def sanitize_capacity_result(result: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "state",
+        "reason",
+        "request_id",
+        "lease_id",
+        "fencing_epoch",
+        "lease_state",
+        "ticket_id",
+        "ticket_state",
+        "ticket_position",
+        "retry_delay_ms",
+        "wait_command",
+        "session_id",
+        "turn_id",
+        "agent_id",
+        "canceled",
+        "canceled_tickets",
+        "leases_marked",
+        "tickets_canceled",
+        "ttl_released",
+        "roots_checked",
+        "present_roots",
+        "missing_roots",
+        "restored_leases",
+        "suspect_leases",
+        "recovering_leases",
+        "released_leases",
+        "active_count",
+        "reserved_count",
+    }
+    return {key: value for key, value in result.items() if key in allowed}
+
+
+def tool_response_failed(value: Any) -> bool:
+    if isinstance(value, dict):
+        for key in ("error", "exception", "failure"):
+            if value.get(key):
+                return True
+        for key in ("is_error", "isError", "failed"):
+            if value.get(key) is True:
+                return True
+        for key in ("ok", "success"):
+            if value.get(key) is False:
+                return True
+        for key in ("status", "state", "result"):
+            status = str(value.get(key) or "").strip().lower()
+            if status in {"error", "failed", "failure", "denied", "blocked"}:
+                return True
+        for key in ("exit_code", "exitCode", "returncode", "return_code"):
+            code = value.get(key)
+            if isinstance(code, int) and code != 0:
+                return True
+        return False
+    if isinstance(value, str):
+        text_value = value.strip()
+        if not text_value:
+            return False
+        try:
+            decoded = json.loads(text_value)
+        except json.JSONDecodeError:
+            return text_value.lower().startswith(("error:", "failed:", "failure:"))
+        return tool_response_failed(decoded)
+    return False
+
+
+def evaluate_spawn_role(
+    payload: dict[str, Any],
+    tool_name: str,
+) -> tuple[str, str, dict[str, Any]]:
+    raw_agent_type = find_first(payload, ("agent_type", "agentType", "agent_type_override", "agentTypeOverride"))
+    if raw_agent_type in (None, ""):
+        tool_input = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+        if isinstance(tool_input, dict):
+            raw_agent_type = tool_input.get("agent_type") or tool_input.get("agentType")
+    agent_type = normalize_agent(str(raw_agent_type or tool_name or ""))
+    details = {"agent_type": agent_type}
+    if not agent_type:
+        return "block", "subagent start payload did not identify agent type", details
+    if agent_type not in KNOWN_AGENTS and not is_spawn_agent_tool(tool_name):
+        return "block", f"subagent type is not in the approved role set: {agent_type}", details
+    if is_spawn_agent_tool(tool_name) and raw_agent_type not in (None, "") and agent_type not in KNOWN_AGENTS:
+        return "block", f"subagent type is not in the approved role set: {agent_type}", details
+    return "allow", "approved subagent role", details
+
+
+def is_spawn_agent_tool(tool_name: str) -> bool:
+    lower = tool_name.strip().lower()
+    if not lower:
+        return False
+    parts = [part for part in re.split(r"[^a-z0-9]+", lower) if part]
+    collapsed = "".join(parts)
+    if collapsed in {"agent", "spawnagent", "collaborationspawnagent"}:
+        return True
+    if len(parts) >= 2 and parts[-2:] == ["spawn", "agent"]:
+        return True
+    if len(parts) >= 2 and parts[-1] == "agent" and parts[-2].startswith("collaboration") and parts[-2].endswith("spawn"):
+        return True
+    return False
 
 
 def is_apply_patch_tool(tool_name: str) -> bool:
@@ -478,6 +1336,10 @@ def redact(value: str) -> str:
     return value
 
 
+def stable_hash(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", errors="replace")).hexdigest()
+
+
 def write_audit(event: str, decision: str, reason: str, payload: dict[str, Any], details: dict[str, Any]) -> None:
     AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
     record = {
@@ -487,7 +1349,7 @@ def write_audit(event: str, decision: str, reason: str, payload: dict[str, Any],
         "reason": reason,
         "cwd": str(Path.cwd()),
         "details": details,
-        "payload_keys": sorted(payload.keys()),
+        "payload_keys": [key for key in sorted(payload.keys()) if key not in SENSITIVE_PAYLOAD_KEYS],
     }
     with AUDIT_LOG.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
