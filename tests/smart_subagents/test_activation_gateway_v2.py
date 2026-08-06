@@ -1985,6 +1985,28 @@ class ActivationResolverTests(unittest.TestCase):
             binding.controller_row["controller_identity"],
         )
 
+    def test_bounded_unknown_health_extension_is_ignored_by_readiness(self) -> None:
+        baseline = self.fixture.resolver().resolve()
+
+        def with_future_extension(_socket_path, request):
+            response = self.fixture.controller_probe(_socket_path, request)
+            response["extensions"] = {
+                "futureTelemetry": {
+                    "counter": 1,
+                    "diagnosticPath": "/private/tmp/not-for-readiness",
+                }
+            }
+            return response
+
+        extended = self.fixture.resolver(
+            controller_probe=with_future_extension
+        ).resolve()
+
+        self.assertEqual(GatewayState.READY, extended.state)
+        self.assertEqual(baseline.gate_fingerprint, extended.gate_fingerprint)
+        self.assertEqual(baseline.coordinator, extended.coordinator)
+        self.assertIsNone(extended.coordinator_refresh)
+
     def test_temporary_refresh_failure_keeps_verified_pair_ready(self) -> None:
         diagnostics = {
             "status": "UNAVAILABLE",
@@ -2851,6 +2873,30 @@ class ActivationResolverRuntimeTests(unittest.TestCase):
         ).resolve()
         self.assertEqual(GatewayState.ORDINARY, noncanonical.state)
         self.assertEqual("CONTROLLER_BINDING_MISMATCH", noncanonical.reason_code)
+
+    def test_unknown_health_extensions_respect_global_structural_budget(self) -> None:
+        cases = {
+            "nested-extension": {"future": {"extensions": {}}},
+            "too-many-nodes": {"future": list(range(128))},
+            "too-large": {"future": "x" * (16 * 1024)},
+        }
+        for name, extensions in cases.items():
+            with self.subTest(name=name):
+
+                def unsafe_extension(_socket_path, request):
+                    response = self.fixture.controller_probe(_socket_path, request)
+                    response["extensions"] = extensions
+                    return response
+
+                decision = self.fixture.resolver(
+                    controller_probe=unsafe_extension
+                ).resolve()
+
+                self.assertEqual(GatewayState.ORDINARY, decision.state)
+                self.assertEqual(
+                    "CONTROLLER_BINDING_MISMATCH",
+                    decision.reason_code,
+                )
 
     def test_busy_installation_lock_and_unavailable_controller_fail_closed(self) -> None:
         descriptor = os.open(self.fixture.layout.lock_path, os.O_RDONLY)
