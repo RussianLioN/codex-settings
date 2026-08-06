@@ -2506,6 +2506,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             module,
             "FreshActivationProviderV2",
             side_effect=AssertionError("Stop не должен запускать полный resolve"),
+            create=True,
         ):
             response = module.handle(
                 {
@@ -2555,6 +2556,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
                 module,
                 "FreshActivationProviderV2",
                 side_effect=AssertionError("Stop не должен запускать полный resolve"),
+                create=True,
             ),
             mock.patch.object(
                 module,

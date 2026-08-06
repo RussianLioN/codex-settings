@@ -25,12 +25,12 @@ from integration_runtime import (  # noqa: E402
     write_hook_output,
 )
 from integration_runtime_v2 import (  # noqa: E402
-    FreshActivationProviderV2,
     HOOK_TOTAL_BUDGET_SECONDS as HOOK_TOTAL_BUDGET_SECONDS_V2,
     HookTurnContextV2,
     IntegrationConfigV2,
     TurnContextStoreV2,
     durable_stop_smart_turn_state_v2,
+    pinned_resume_binding_v2,
     require_current_user_mcp_policy_v2,
 )
 from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
@@ -112,7 +112,7 @@ def handle(
                     continuation_count=current.continuation_count + 1,
                 )
 
-            store_v2.update(
+            updated_record = store_v2.update(
                 inspect_and_increment,
                 deadline=deadline,
             )
@@ -120,16 +120,18 @@ def handle(
                 if outcome == "complete":
                     _acknowledge_resume_result_v2(
                         config_v2,
-                        store_v2.load(),
+                        updated_record,
                         environ,
+                        deadline=deadline,
                     )
                 return None
             if outcome in {"bounded-plan", "bounded-route"}:
                 if outcome == "bounded-route":
                     _defer_resume_to_next_turn_v2(
                         config_v2,
-                        store_v2.load(),
+                        updated_record,
                         environ,
+                        deadline=deadline,
                     )
                 message = (
                     "После двух попыток завершение разрешено, хотя "
@@ -236,6 +238,8 @@ def _acknowledge_resume_result_v2(
     config: IntegrationConfigV2,
     record: HookTurnContextV2,
     environ: Mapping[str, str],
+    *,
+    deadline: float,
 ) -> None:
     if not environ.get("CODEX_SMART_ROOT_PID") or not environ.get(
         "CODEX_SMART_ROOT_START_MARKER"
@@ -245,7 +249,6 @@ def _acknowledge_resume_result_v2(
         pid=int(environ.get("CODEX_SMART_ROOT_PID", "")),
         process_start_marker=environ.get("CODEX_SMART_ROOT_START_MARKER", ""),
     )
-    binding = FreshActivationProviderV2(config).runtime_binding()
     store = RootSessionLeaseStoreV2(
         config.state_home,
         process_marker_reader=system_process_marker_reader_v2,
@@ -253,8 +256,17 @@ def _acknowledge_resume_result_v2(
     lease = store.load(record.session_id)
     if lease is None or lease.attachment is None:
         return
+    if time.monotonic() >= deadline:
+        return
+    binding = pinned_resume_binding_v2(
+        config,
+        environ,
+        deadline=deadline,
+    )
     route_id = lease.attachment.candidate.route_id
     if not route_is_terminal_v2(binding.database_path, route_id):
+        return
+    if time.monotonic() >= deadline:
         return
     project = ProjectIdentityV2(
         repo_root=record.repo_root,
@@ -284,6 +296,8 @@ def _defer_resume_to_next_turn_v2(
     config: IntegrationConfigV2,
     record: HookTurnContextV2,
     environ: Mapping[str, str],
+    *,
+    deadline: float,
 ) -> None:
     if not environ.get("CODEX_SMART_ROOT_PID") or not environ.get(
         "CODEX_SMART_ROOT_START_MARKER"
@@ -299,6 +313,8 @@ def _defer_resume_to_next_turn_v2(
     )
     lease = store.load(record.session_id)
     if lease is None or lease.attachment is None:
+        return
+    if time.monotonic() >= deadline:
         return
     project = lease.project
     if (
