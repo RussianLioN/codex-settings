@@ -76,6 +76,14 @@ class _FakeProcess:
         self.returncode = -signal.SIGTERM
 
 
+class _TrackedStream:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def _matching_identity_reader(
     module: ModuleType, *, marker: str = "fake-system-start-marker"
 ) -> Any:
@@ -857,6 +865,35 @@ class OperationProcessGroupSupervisorV2Tests(unittest.TestCase):
         self.assertEqual((), supervisor.owned_lease_ids())
         self.assertEqual((), supervisor.unverified_launch_ids())
         supervisor.assert_continuation_allowed()
+
+    def test_finished_unverified_process_closes_all_owned_streams(self) -> None:
+        module = _load_module()
+        process = _FakeProcess(pid=0)
+        process.stdin = _TrackedStream()
+        process.stdout = _TrackedStream()
+        process.stderr = _TrackedStream()
+        supervisor = module.OperationProcessGroupSupervisorV2(
+            popen_factory=lambda _argv, **_kwargs: process,
+            killpg=lambda _pgid, _signum: self.fail(
+                "invalid pid must never reach group signaling"
+            ),
+            identity_reader=lambda _pid: self.fail(
+                "invalid pid must not reach identity lookup"
+            ),
+        )
+
+        with self.assertRaises(module.TransientProcessIdentityErrorV2):
+            supervisor.spawn_transient(
+                label="invalid-with-pipes",
+                argv=("/usr/bin/false",),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+
+        self.assertTrue(process.stdin.closed)
+        self.assertTrue(process.stdout.closed)
+        self.assertTrue(process.stderr.closed)
 
     def test_unverified_live_invalid_popen_pid_is_registered_and_blocks(self) -> None:
         module = _load_module()
