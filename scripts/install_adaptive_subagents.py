@@ -2221,7 +2221,7 @@ def _loaded_hook_cache_source_v2(layout: InstallLayout) -> Path:
                 home=layout.codex_home,
                 tmpdir=tmpdir,
                 cwd=layout.codex_home,
-                timeout_seconds=8.0,
+                timeout_seconds=_FULL_READY_TIMEOUT_SECONDS,
                 accepted_stderr=lambda _payload: True,
             ).call("hooks/list", {"cwds": [str(layout.codex_home)]})
     except (AppServerError, OSError, RuntimeError, ValueError) as exc:

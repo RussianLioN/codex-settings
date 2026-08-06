@@ -2708,22 +2708,22 @@ class InstallerV2RepeatTests(_InstallerBase):
             self.installer._source_implementation_digest_v2(self.layout),
         )
 
-    def test_merged_release_advances_from_the_protected_generation_one(self) -> None:
+    def test_merged_release_advances_from_the_protected_generation_two(self) -> None:
         lineage = self.installer._source_lineage_v2(self.layout)
         previous = {
             "extensions": {
                 "sourceLineage": {
                     "schemaVersion": 1,
-                    "generation": 1,
+                    "generation": 2,
                     "implementationDigest": (
-                        "b0c25ba4d73897afc7cca5b046c5ce88"
-                        "919796db693f4d1d67cee6fef8d0fad3"
+                        "e1f021557c3707e70fcf13be39981a5"
+                        "f63be1a1968499111a2939506976e571c"
                     ),
                 }
             }
         }
 
-        self.assertEqual(2, lineage["generation"])
+        self.assertEqual(3, lineage["generation"])
         self.installer._require_monotonic_source_lineage_v2(
             previous,
             lineage,
@@ -3059,6 +3059,45 @@ class InstallerV2DoctorTests(_InstallerBase):
             / "hooks"
             / "hooks.json",
             observed,
+        )
+
+    def test_hook_probe_uses_the_full_readiness_budget(self) -> None:
+        expected = (
+            self.layout.codex_home
+            / "plugins"
+            / "cache"
+            / self.installer.MARKETPLACE_NAME
+            / self.installer.PLUGIN_NAME
+            / "0.2.0"
+            / "hooks"
+            / "hooks.json"
+        )
+        response = {
+            "data": [
+                {
+                    "errors": [],
+                    "warnings": [],
+                    "hooks": [
+                        {
+                            "pluginId": self.installer.PLUGIN_ID,
+                            "sourcePath": str(expected),
+                        }
+                    ],
+                }
+            ]
+        }
+
+        with mock.patch.object(
+            self.installer,
+            "StrictAppServerClient",
+        ) as client:
+            client.return_value.call.return_value = response
+            observed = self.installer._loaded_hook_cache_source_v2(self.layout)
+
+        self.assertEqual(expected, observed)
+        self.assertEqual(
+            self.installer._FULL_READY_TIMEOUT_SECONDS,
+            client.call_args.kwargs["timeout_seconds"],
         )
 
     def test_hook_probe_rejects_reported_loading_errors(self) -> None:
