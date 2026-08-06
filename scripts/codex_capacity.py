@@ -30,6 +30,7 @@ SQLITE_BUSY_TIMEOUT_MS = 1
 DEFAULT_RETRY_DELAY_MS = 250
 CLEANUP_TTL_SECONDS = 30
 PROVISIONAL_TTL_SECONDS = 30
+ROOT_RECOVERY_STAGE_SECONDS = 10
 MAX_PENDING_PER_SESSION = 20
 MAX_PENDING_PER_USER = 512
 ACTIVE_LEASE_STATES = {"PROVISIONAL", "ACTIVE", "SUSPECT", "RECOVERING", "CLEANUP_REQUIRED"}
@@ -570,8 +571,101 @@ class CapacityStore:
 
         result = self._read(work)
         if result.get("state") == "ERROR":
-            return []
+            raise CapacityError(str(result.get("reason") or "managed_root_registry_error"))
         return list(result.get("identities") or [])
+
+    def reconcile_managed_roots(
+        self,
+        *,
+        live_root_identities: Iterable[tuple[int, str]],
+        proof_started_at: float,
+        stage_seconds: float = ROOT_RECOVERY_STAGE_SECONDS,
+    ) -> dict[str, Any]:
+        now = current_time()
+        try:
+            proof = normalize_proof_started_at(proof_started_at)
+            live = normalize_root_identity_set_strict(live_root_identities)
+            stage = max(0.0, float(stage_seconds))
+        except CapacityError as exc:
+            return {"state": "ERROR", "reason": exc.reason}
+
+        def work(conn: sqlite3.Connection) -> dict[str, Any]:
+            roots = [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    select session_id, root_pid, root_start_marker, updated_at
+                    from managed_roots
+                    order by session_id
+                    """
+                )
+            ]
+            root_by_session = {
+                str(root["session_id"]): (int(root["root_pid"]), str(root["root_start_marker"]))
+                for root in roots
+                if float(root["updated_at"]) <= proof
+            }
+            present_sessions = {
+                session_id
+                for session_id, identity in root_by_session.items()
+                if identity in live
+            }
+            missing_sessions = set(root_by_session) - present_sessions
+
+            restored = self._restore_present_managed_roots(conn, now, proof, present_sessions)
+            suspected = self._advance_missing_managed_roots(
+                conn,
+                now,
+                proof,
+                missing_sessions,
+                from_state="ACTIVE",
+                to_state="SUSPECT",
+                stage_seconds=stage,
+            )
+            recovering = self._advance_missing_managed_roots(
+                conn,
+                now,
+                proof,
+                missing_sessions,
+                from_state="SUSPECT",
+                to_state="RECOVERING",
+                stage_seconds=stage,
+                require_due=True,
+                updated_before=now,
+            )
+            released = self._release_recovering_missing_roots(conn, now, proof, missing_sessions, updated_before=now)
+            if released:
+                self._promote_pending(conn, now, limit=released)
+            for session_id in sorted(missing_sessions):
+                self._unregister_managed_root_if_terminal(conn, session_id=session_id)
+            active_count = self._active_lease_count(conn)
+            reserved_count = self._reserved_count(conn)
+            self._log(
+                conn,
+                now,
+                "managed-root-reconcile",
+                roots_checked=len(root_by_session),
+                present=len(present_sessions),
+                missing=len(missing_sessions),
+                restored=restored,
+                suspected=suspected,
+                recovering=recovering,
+                released=released,
+            )
+            return {
+                "state": "OK",
+                "roots_checked": len(root_by_session),
+                "present_roots": len(present_sessions),
+                "missing_roots": len(missing_sessions),
+                "restored_leases": restored,
+                "suspect_leases": suspected,
+                "recovering_leases": recovering,
+                "released_leases": released,
+                "active_count": active_count,
+                "reserved_count": reserved_count,
+            }
+
+        return self._write(work)
 
     def is_managed_root(self, *, root_pid: int, root_start_marker: str) -> bool:
         identity = normalize_root_identity(root_pid, root_start_marker)
@@ -855,6 +949,141 @@ class CapacityStore:
 
     def _unregister_managed_root(self, conn: sqlite3.Connection, *, session_id: str) -> int:
         return conn.execute("delete from managed_roots where session_id = ?", (session_id,)).rowcount
+
+    def _unregister_managed_root_if_terminal(self, conn: sqlite3.Connection, *, session_id: str) -> int:
+        active_leases = self._count(
+            conn,
+            f"""
+            select count(*) from leases
+            where session_id = ? and state in ({placeholders(ACTIVE_LEASE_STATES)})
+            """,
+            (session_id, *sorted(ACTIVE_LEASE_STATES)),
+        )
+        live_tickets = self._count(
+            conn,
+            """
+            select count(*) from tickets
+            where session_id = ? and state in ('PENDING', 'READY')
+            """,
+            (session_id,),
+        )
+        if active_leases or live_tickets:
+            return 0
+        return self._unregister_managed_root(conn, session_id=session_id)
+
+    def _restore_present_managed_roots(
+        self,
+        conn: sqlite3.Connection,
+        now: float,
+        proof: float,
+        present_sessions: set[str],
+    ) -> int:
+        if not present_sessions:
+            return 0
+        return conn.execute(
+            f"""
+            update leases
+            set state = 'ACTIVE', cleanup_after = null, updated_at = ?
+            where session_id in ({placeholders(present_sessions)})
+              and state in ('SUSPECT', 'RECOVERING')
+              and updated_at <= ?
+            """,
+            (now, *sorted(present_sessions), proof),
+        ).rowcount
+
+    def _advance_missing_managed_roots(
+        self,
+        conn: sqlite3.Connection,
+        now: float,
+        proof: float,
+        missing_sessions: set[str],
+        *,
+        from_state: str,
+        to_state: str,
+        stage_seconds: float,
+        require_due: bool = False,
+        updated_before: Optional[float] = None,
+    ) -> int:
+        if not missing_sessions:
+            return 0
+        due_clause = "and cleanup_after is not null and cleanup_after <= ?" if require_due else ""
+        params: tuple[Any, ...] = (to_state, now + stage_seconds, now, *sorted(missing_sessions), from_state, proof)
+        if require_due:
+            params = (*params, now)
+        before_clause = ""
+        if updated_before is not None:
+            before_clause = "and updated_at < ?"
+            params = (*params, updated_before)
+        return conn.execute(
+            f"""
+            update leases
+            set state = ?, cleanup_after = ?, updated_at = ?
+            where session_id in ({placeholders(missing_sessions)})
+              and state = ?
+              and updated_at <= ?
+              {due_clause}
+              {before_clause}
+            """,
+            params,
+        ).rowcount
+
+    def _release_recovering_missing_roots(
+        self,
+        conn: sqlite3.Connection,
+        now: float,
+        proof: float,
+        missing_sessions: set[str],
+        *,
+        updated_before: Optional[float] = None,
+    ) -> int:
+        if not missing_sessions:
+            return 0
+        before_clause = ""
+        params: tuple[Any, ...] = (*sorted(missing_sessions), now, proof)
+        if updated_before is not None:
+            before_clause = "and updated_at < ?"
+            params = (*params, updated_before)
+        released_rows = [
+            dict(row)
+            for row in conn.execute(
+                f"""
+                select lease_id, session_id
+                from leases
+                where session_id in ({placeholders(missing_sessions)})
+                  and state = 'RECOVERING'
+                  and cleanup_after is not null
+                  and cleanup_after <= ?
+                  and updated_at <= ?
+                  {before_clause}
+                order by lease_id
+                """,
+                params,
+            )
+        ]
+        if not released_rows:
+            return 0
+        lease_ids = [str(row["lease_id"]) for row in released_rows]
+        sessions = {str(row["session_id"]) for row in released_rows}
+        conn.execute(
+            f"""
+            update leases
+            set state = 'RELEASED', released_at = ?, updated_at = ?
+            where lease_id in ({placeholders(lease_ids)})
+              and state = 'RECOVERING'
+            """,
+            (now, now, *lease_ids),
+        )
+        conn.execute(
+            f"""
+            update tickets
+            set state = 'CANCELED', updated_at = ?
+            where session_id in ({placeholders(sessions)})
+              and state in ('PENDING', 'READY')
+              and updated_at <= ?
+            """,
+            (now, *sorted(sessions), proof),
+        )
+        return len(lease_ids)
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
         columns = {row["name"] for row in conn.execute(f"pragma table_info({table})")}
@@ -1239,6 +1468,28 @@ def normalize_root_identity(root_pid: Optional[int], root_start_marker: Optional
     if pid <= 0 or not marker:
         return None
     return pid, marker
+
+
+def normalize_root_identity_set_strict(values: Iterable[tuple[int, str]]) -> set[tuple[int, str]]:
+    identities: set[tuple[int, str]] = set()
+    for value in values:
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            raise CapacityError("invalid_root_identity_proof")
+        identity = normalize_root_identity(value[0], value[1])
+        if identity is None:
+            raise CapacityError("invalid_root_identity_proof")
+        identities.add(identity)
+    return identities
+
+
+def normalize_proof_started_at(value: float) -> float:
+    try:
+        proof = float(value)
+    except (TypeError, ValueError) as exc:
+        raise CapacityError("invalid_root_identity_proof") from exc
+    if not math.isfinite(proof) or proof < 0:
+        raise CapacityError("invalid_root_identity_proof")
+    return proof
 
 
 def current_time() -> float:

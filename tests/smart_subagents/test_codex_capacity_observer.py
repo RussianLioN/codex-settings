@@ -485,6 +485,62 @@ class CapacityObserverTests(unittest.TestCase):
         self.assertEqual(2.0, snapshot["codex_root_count"])
         self.assertEqual(0.0, snapshot["external_codex_roots"])
         self.assertEqual((100, parsed[0]["start_marker"]), snapshot["current_codex_root_identity"])
+        self.assertEqual([(100, parsed[0]["start_marker"]), (200, parsed[2]["start_marker"])], snapshot["managed_codex_root_identities"])
+        self.assertIsInstance(snapshot["codex_process_snapshot_started_at"], float)
+
+    def test_registered_identity_is_live_even_when_command_is_not_codex(self):
+        calls = []
+        original = observer.run_command
+        ps_text = "\n".join(
+            [
+                "100 1 501 user Mon Aug  3 10:00:00 2026 2.5 /opt/homebrew/bin/codex run",
+                "101 100 501 user Mon Aug  3 10:00:01 2026 1.0 /usr/bin/python hook.py",
+                "200 1 501 user Mon Aug  3 10:00:02 2026 2.5 /usr/bin/python after-exec.py",
+            ]
+        )
+        parsed = observer.parse_ps_snapshot(ps_text)
+
+        def fake_run(command, *, deadline=None):
+            calls.append(command)
+            if command[0] == "ps":
+                return ps_text
+            if command[0] == "lsof":
+                return "COMMAND PID USER FD\na 100 user txt\n"
+            raise AssertionError(command)
+
+        try:
+            observer.run_command = fake_run
+            snapshot = observer.collect_process_snapshot(
+                managed_root_identities=[(200, parsed[2]["start_marker"])],
+                caller_pid=101,
+                deadline=time.monotonic() + 0.5,
+            )
+        finally:
+            observer.run_command = original
+
+        ps_calls = [call for call in calls if call[0] == "ps"]
+        self.assertEqual(ps_calls, [["ps", "-axo", "pid=,ppid=,uid=,user=,lstart=,%cpu=,command="]])
+        self.assertEqual(1.0, snapshot["codex_root_count"])
+        self.assertEqual(0.0, snapshot["external_codex_roots"])
+        self.assertEqual((100, parsed[0]["start_marker"]), snapshot["current_codex_root_identity"])
+        self.assertEqual([(100, parsed[0]["start_marker"]), (200, parsed[2]["start_marker"])], snapshot["managed_codex_root_identities"])
+
+    def test_observe_does_not_persist_private_root_identity_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snapshot = clean_snapshot(
+                current_codex_root_identity=(700, "root-secret"),
+                managed_codex_root_identities=[(700, "root-secret")],
+                codex_process_snapshot_started_at=1000.0,
+            )
+
+            result = observer.observe(snapshot=snapshot, state_dir=Path(tmp), now_epoch=1000.0)
+
+            serialized = json.dumps(result, sort_keys=True)
+            self.assertNotIn("root-secret", serialized)
+            persisted = (Path(tmp) / "observer_state.json").read_text(encoding="utf-8")
+            self.assertNotIn("root-secret", persisted)
+            self.assertNotIn("managed_codex_root_identities", persisted)
+            self.assertNotIn("codex_process_snapshot_started_at", persisted)
 
     def test_observe_passes_state_dir_to_disk_measurement(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import importlib.util
 import json
 import os
 import subprocess
@@ -15,6 +16,17 @@ ROOT = Path(__file__).resolve().parents[2]
 POLICY = ROOT / "scripts" / "autonomous_policy.py"
 CAPACITY = ROOT / "scripts" / "codex_capacity.py"
 PYTHON_39 = "/usr/bin/python3"
+
+
+def load_policy_module():
+    name = "autonomous_policy_under_test"
+    spec = importlib.util.spec_from_file_location(name, POLICY)
+    if spec is None or spec.loader is None:
+        raise AssertionError(f"cannot load policy module: {POLICY}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 class AutonomousCapacityPolicyTests(unittest.TestCase):
@@ -247,6 +259,102 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
         audit = self.audit_text()
         self.assertNotIn("700", audit)
         self.assertNotIn("root-start-marker", audit)
+
+    def test_test_snapshot_does_not_reconcile_live_root_registry(self) -> None:
+        registered = self.spawn_payload("registered-root")
+        snapshot = self.write_observer_snapshot(
+            codex_root_count=1,
+            external_codex_roots=0,
+            current_codex_root_pid=700,
+            current_codex_root_start_marker="root-secret",
+        )
+        env = dict(self.env, CODEX_CAPACITY_OBSERVER_SNAPSHOT=str(snapshot))
+        allowed = self.run_policy("PreToolUse", registered, env=env)
+        self.assertEqual(0, allowed.returncode, allowed.stderr)
+
+        missing_snapshot = self.write_observer_snapshot(codex_root_count=0, external_codex_roots=0)
+        env = dict(self.env, CODEX_CAPACITY_OBSERVER_SNAPSHOT=str(missing_snapshot))
+        second = self.spawn_payload("after-test-snapshot")
+        second["turn_id"] = "turn-2"
+        completed = self.run_policy("PreToolUse", second, env=env)
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        states = {lease["session_id"]: lease["state"] for lease in self.capacity_cli("snapshot")["leases"]}
+        self.assertEqual("PROVISIONAL", states["session-1"])
+        audit = self.audit_text()
+        self.assertNotIn("root-secret", audit)
+
+    def test_red_observer_keeps_existing_lease_reserved_and_blocks_new_spawn(self) -> None:
+        first = self.run_policy("PreToolUse", self.spawn_payload("before-red"))
+        self.assertEqual(0, first.returncode, first.stderr)
+        snapshot = self.write_observer_snapshot(memory_pressure="critical")
+        env = dict(self.env, CODEX_CAPACITY_OBSERVER_SNAPSHOT=str(snapshot))
+
+        blocked = self.run_policy("PreToolUse", self.spawn_payload("during-red"), env=env)
+
+        self.assertEqual(2, blocked.returncode)
+        self.assertEqual("CAPACITY_OBSERVER_RED", json.loads(blocked.stderr)["code"])
+        self.assertEqual(1, self.capacity_cli("snapshot")["active_count"])
+
+    def test_live_observer_without_current_root_identity_fails_closed(self) -> None:
+        policy = load_policy_module()
+
+        class FakeStore:
+            state_dir = self.root / "state"
+
+            def snapshot(self):
+                return {"state": "OK", "active_count": 0, "reserved_count": 0}
+
+            def managed_root_identities(self):
+                return []
+
+            def reconcile_managed_roots(self, **kwargs):
+                raise AssertionError("reconcile must not run without current root")
+
+        snapshot = self.write_observer_snapshot(codex_root_count=0, external_codex_roots=0)
+        payload = json.loads(snapshot.read_text(encoding="utf-8"))
+        payload["codex_process_snapshot_started_at"] = 1000.0
+        original_collect = policy.capacity_observer.collect_snapshot
+        try:
+            policy.capacity_observer.collect_snapshot = lambda **kwargs: payload
+            _limit, _wave, reason, root_identity = policy.observed_capacity_limit(FakeStore(), {}, deadline=time.perf_counter() + 1.0)
+        finally:
+            policy.capacity_observer.collect_snapshot = original_collect
+
+        self.assertIsNone(root_identity)
+        denial = json.loads(reason)
+        self.assertEqual("CAPACITY_OBSERVER_RED", denial["code"])
+        self.assertIn("current_codex_root_identity_missing", denial["reasons"])
+
+    def test_managed_root_recovery_error_blocks_pretool_admission(self) -> None:
+        policy = load_policy_module()
+
+        class FakeStore:
+            state_dir = self.root / "state"
+
+            def snapshot(self):
+                return {"state": "OK", "active_count": 1, "reserved_count": 1}
+
+            def managed_root_identities(self):
+                return [(700, "old-root")]
+
+            def reconcile_managed_roots(self, **kwargs):
+                return {"state": "ERROR", "reason": "proof_failed"}
+
+        snapshot = self.write_observer_snapshot(codex_root_count=1, external_codex_roots=0)
+        payload = json.loads(snapshot.read_text(encoding="utf-8"))
+        payload["current_codex_root_identity"] = (800, "current-root")
+        payload["managed_codex_root_identities"] = []
+        payload["codex_process_snapshot_started_at"] = 1000.0
+        original_collect = policy.capacity_observer.collect_snapshot
+        try:
+            policy.capacity_observer.collect_snapshot = lambda **kwargs: payload
+            _limit, _wave, reason, root_identity = policy.observed_capacity_limit(FakeStore(), {}, deadline=time.perf_counter() + 1.0)
+        finally:
+            policy.capacity_observer.collect_snapshot = original_collect
+
+        self.assertEqual((800, "current-root"), root_identity)
+        self.assertEqual("capacity error: proof_failed", reason)
 
     def test_two_codex_homes_share_one_global_capacity_database(self) -> None:
         codex_home_a = self.root / "codex-home-a"

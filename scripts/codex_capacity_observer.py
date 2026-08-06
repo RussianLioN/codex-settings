@@ -1109,6 +1109,7 @@ def collect_process_snapshot(
     managed_root_identities: list[tuple[int, str]] | None = None,
     caller_pid: int | None = None,
 ) -> dict[str, Any]:
+    proof_started_at = time.time()
     rows = parse_ps_snapshot(run_command(["ps", "-axo", "pid=,ppid=,uid=,user=,lstart=,%cpu=,command="], deadline=deadline))
     uid = os.getuid()
     user_process_count = sum(1 for row in rows if row["uid"] == uid)
@@ -1130,6 +1131,8 @@ def collect_process_snapshot(
         "codex_root_count": occupancy["codex_root_count"],
         "external_codex_roots": occupancy["external_codex_roots"],
         "current_codex_root_identity": occupancy.get("current_codex_root_identity"),
+        "managed_codex_root_identities": occupancy.get("managed_codex_root_identities", []),
+        "codex_process_snapshot_started_at": proof_started_at,
     }
 
 
@@ -1376,7 +1379,23 @@ def codex_root_occupancy(
         "codex_root_count": float(len(roots)),
         "external_codex_roots": float(external),
         "current_codex_root_identity": current,
+        "managed_codex_root_identities": live_managed_root_identities(rows, uid, managed),
     }
+
+
+def live_managed_root_identities(
+    rows: list[dict[str, Any]],
+    uid: int,
+    managed: set[tuple[int, str]],
+) -> list[tuple[int, str]]:
+    live: set[tuple[int, str]] = set()
+    for row in rows:
+        if int(row.get("uid", -1)) != uid:
+            continue
+        identity = root_identity(row)
+        if identity is not None and identity in managed:
+            live.add(identity)
+    return sorted(live)
 
 
 def current_codex_root_identity(

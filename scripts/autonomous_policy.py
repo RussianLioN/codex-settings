@@ -264,14 +264,31 @@ def observed_capacity_limit(store: CapacityStore, details: dict[str, Any], *, de
     root_identity = root_identity_from_snapshot(snapshot) if snapshot is not None else None
     if snapshot is None:
         try:
+            managed_identities = store.managed_root_identities()
             snapshot = capacity_observer.collect_snapshot(
                 state_dir=store.state_dir,
                 deadline=deadline,
-                managed_root_identities=store.managed_root_identities(),
+                managed_root_identities=managed_identities,
             )
             raw_identity = snapshot.get("current_codex_root_identity")
             if isinstance(raw_identity, (list, tuple)) and len(raw_identity) == 2:
                 root_identity = normalize_root_identity(raw_identity[0], raw_identity[1])
+            if root_identity is None:
+                observation = capacity_observer.fail_closed_output("current_codex_root_identity_missing")
+                details["capacity_observer"] = sanitize_observer_result(observation)
+                return 0, 0, capacity_observer_deny_json(observation), None
+            reconciled = store.reconcile_managed_roots(
+                live_root_identities=snapshot.get("managed_codex_root_identities") or [],
+                proof_started_at=float(snapshot.get("codex_process_snapshot_started_at") or 0.0),
+            )
+            details["capacity_root_reconcile"] = sanitize_capacity_result(reconciled)
+            if reconciled.get("state") == "ERROR":
+                return 0, 0, f"capacity error: {reconciled.get('reason') or 'managed_root_reconcile_failed'}", root_identity
+            if "active_count" in reconciled and "reserved_count" in reconciled:
+                managed_active = max(0, int(reconciled.get("active_count") or 0))
+                managed_reserved = max(0, int(reconciled.get("reserved_count") or managed_active))
+                managed_slots = max(managed_active, managed_reserved)
+                details["capacity_snapshot"] = {"active_count": managed_active, "reserved_count": managed_reserved}
         except Exception as exc:
             observation = capacity_observer.fail_closed_output(str(exc))
             details["capacity_observer"] = sanitize_observer_result(observation)
@@ -341,6 +358,8 @@ def observer_public_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
     cleaned.pop("current_codex_root_identity", None)
     cleaned.pop("current_codex_root_pid", None)
     cleaned.pop("current_codex_root_start_marker", None)
+    cleaned.pop("managed_codex_root_identities", None)
+    cleaned.pop("codex_process_snapshot_started_at", None)
     return cleaned
 
 
@@ -638,6 +657,15 @@ def sanitize_capacity_result(result: dict[str, Any]) -> dict[str, Any]:
         "leases_marked",
         "tickets_canceled",
         "ttl_released",
+        "roots_checked",
+        "present_roots",
+        "missing_roots",
+        "restored_leases",
+        "suspect_leases",
+        "recovering_leases",
+        "released_leases",
+        "active_count",
+        "reserved_count",
     }
     return {key: value for key, value in result.items() if key in allowed}
 

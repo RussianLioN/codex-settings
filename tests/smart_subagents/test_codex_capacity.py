@@ -75,6 +75,9 @@ class CodexCapacityTests(unittest.TestCase):
     def manager(self, *, limit: int = 6) -> object:
         return self.capacity.CapacityStore(home=self.home, capacity=limit)
 
+    def lease_states_by_session(self, store: object) -> dict[str, str]:
+        return {str(lease["session_id"]): str(lease["state"]) for lease in store.snapshot()["leases"]}
+
     def cli(self, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(CAPACITY), *args],
@@ -278,6 +281,235 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertFalse(store.is_managed_root(root_pid=700, root_start_marker="start-a"))
         self.assertTrue(store.is_managed_root(root_pid=800, root_start_marker="start-b"))
         self.assertEqual([(800, "start-b")], store.managed_root_identities())
+
+    def test_missing_managed_root_recovery_advances_one_stage_per_proof(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, capacity=1, provisional_ttl_seconds=999)
+        original_time = self.capacity.current_time
+        clock = {"now": 0.0}
+        self.capacity.current_time = lambda: clock["now"]  # type: ignore[assignment]
+        try:
+            lease = store.acquire_or_queue(
+                **self.request(1, session="dead-tab", turn="t1"),
+                root_pid=700,
+                root_start_marker="root-old",
+            )
+            store.activate_next(session_id="dead-tab", turn_id="t1", agent_id="agent-a")
+            queued = store.acquire_or_queue(**self.request(2, session="next-tab", turn="t1"))
+
+            clock["now"] = 100.0
+            first = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=99.0)
+            self.assertEqual(1, first["suspect_leases"])
+            self.assertEqual("SUSPECT", self.lease_states_by_session(store)["dead-tab"])
+            self.assertEqual("PENDING", store.wait(str(queued["ticket_id"]))["ticket_state"])
+
+            clock["now"] = 105.0
+            early = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=104.0)
+            self.assertEqual(0, early["recovering_leases"])
+            self.assertEqual("SUSPECT", self.lease_states_by_session(store)["dead-tab"])
+
+            clock["now"] = 111.0
+            second = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=110.0)
+            self.assertEqual(1, second["recovering_leases"])
+            self.assertEqual("RECOVERING", self.lease_states_by_session(store)["dead-tab"])
+
+            clock["now"] = 130.0
+            final = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=129.0)
+            self.assertEqual(1, final["released_leases"])
+            self.assertEqual("RELEASED", self.lease_states_by_session(store)["dead-tab"])
+            self.assertEqual("READY", store.wait(str(queued["ticket_id"]))["ticket_state"])
+            self.assertEqual(0, store.snapshot()["managed_root_count"])
+            repeated_release = store.release(lease_id=str(lease["lease_id"]), fencing_epoch=int(lease["fencing_epoch"]))
+            self.assertEqual("LEASED", repeated_release["state"])
+            self.assertEqual("RELEASED", repeated_release["lease_state"])
+        finally:
+            self.capacity.current_time = original_time  # type: ignore[assignment]
+
+    def test_recovery_never_advances_more_than_one_stage_per_call(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, capacity=1, provisional_ttl_seconds=999)
+        original_time = self.capacity.current_time
+        clock = {"now": 100.0}
+        self.capacity.current_time = lambda: clock["now"]  # type: ignore[assignment]
+        try:
+            store.acquire_or_queue(
+                **self.request(1, session="tab-a", turn="t1"),
+                root_pid=700,
+                root_start_marker="root-a",
+            )
+            store.activate_next(session_id="tab-a", turn_id="t1", agent_id="agent-a")
+
+            result = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=999.0, stage_seconds=0)
+
+            self.assertEqual(1, result["suspect_leases"])
+            self.assertEqual(0, result["recovering_leases"])
+            self.assertEqual(0, result["released_leases"])
+            self.assertEqual("SUSPECT", self.lease_states_by_session(store)["tab-a"])
+        finally:
+            self.capacity.current_time = original_time  # type: ignore[assignment]
+
+    def test_present_managed_root_restores_suspect_and_recovering_to_active(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, capacity=2, provisional_ttl_seconds=999)
+        original_time = self.capacity.current_time
+        clock = {"now": 0.0}
+        self.capacity.current_time = lambda: clock["now"]  # type: ignore[assignment]
+        try:
+            store.acquire_or_queue(
+                **self.request(1, session="tab-a", turn="t1"),
+                root_pid=700,
+                root_start_marker="root-a",
+            )
+            store.activate_next(session_id="tab-a", turn_id="t1", agent_id="agent-a")
+            clock["now"] = 1.0
+            store.reconcile_managed_roots(live_root_identities=[], proof_started_at=0.5)
+            self.assertEqual("SUSPECT", self.lease_states_by_session(store)["tab-a"])
+
+            clock["now"] = 2.0
+            restored = store.reconcile_managed_roots(live_root_identities=[(700, "root-a")], proof_started_at=1.5)
+            self.assertEqual(1, restored["restored_leases"])
+            self.assertEqual("ACTIVE", self.lease_states_by_session(store)["tab-a"])
+        finally:
+            self.capacity.current_time = original_time  # type: ignore[assignment]
+
+    def test_reused_pid_with_different_start_marker_is_treated_as_missing_owner(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, capacity=2, provisional_ttl_seconds=999)
+        store.acquire_or_queue(
+            **self.request(1, session="tab-a", turn="t1"),
+            root_pid=700,
+            root_start_marker="root-old",
+        )
+        store.activate_next(session_id="tab-a", turn_id="t1", agent_id="agent-a")
+
+        result = store.reconcile_managed_roots(live_root_identities=[(700, "root-new")], proof_started_at=time.time() + 1)
+
+        self.assertEqual(1, result["suspect_leases"])
+        self.assertEqual("SUSPECT", self.lease_states_by_session(store)["tab-a"])
+
+    def test_invalid_or_incomplete_root_proof_does_not_release_capacity(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, capacity=1, provisional_ttl_seconds=999)
+        store.acquire_or_queue(
+            **self.request(1, session="tab-a", turn="t1"),
+            root_pid=700,
+            root_start_marker="root-a",
+        )
+        store.activate_next(session_id="tab-a", turn_id="t1", agent_id="agent-a")
+
+        invalid_identity = store.reconcile_managed_roots(live_root_identities=[(700, "")], proof_started_at=time.time() + 1)
+        invalid_time = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=float("nan"))
+
+        self.assertEqual("ERROR", invalid_identity["state"])
+        self.assertEqual("ERROR", invalid_time["state"])
+        self.assertEqual("ACTIVE", self.lease_states_by_session(store)["tab-a"])
+        self.assertEqual(1, store.snapshot()["active_count"])
+
+    def test_recovery_skips_leases_updated_after_proof_started(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, capacity=1, provisional_ttl_seconds=999)
+        store.acquire_or_queue(
+            **self.request(1, session="tab-a", turn="t1"),
+            root_pid=700,
+            root_start_marker="root-a",
+        )
+        store.activate_next(session_id="tab-a", turn_id="t1", agent_id="agent-a")
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("update leases set updated_at = 200 where session_id = 'tab-a'")
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=100.0)
+
+        self.assertEqual(0, result["suspect_leases"])
+        self.assertEqual("ACTIVE", self.lease_states_by_session(store)["tab-a"])
+
+    def test_final_recovery_does_not_cancel_tickets_updated_after_proof_started(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, capacity=1, provisional_ttl_seconds=999)
+        original_time = self.capacity.current_time
+        clock = {"now": 0.0}
+        self.capacity.current_time = lambda: clock["now"]  # type: ignore[assignment]
+        try:
+            store.acquire_or_queue(
+                **self.request(1, session="tab-a", turn="t1"),
+                root_pid=700,
+                root_start_marker="root-a",
+            )
+            store.activate_next(session_id="tab-a", turn_id="t1", agent_id="agent-a")
+            old_ticket = store.acquire_or_queue(**self.request(2, session="tab-a", turn="t1"))
+            new_ticket = store.acquire_or_queue(**self.request(3, session="tab-a", turn="t1"))
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("update leases set state = 'RECOVERING', cleanup_after = 1, updated_at = 1 where session_id = 'tab-a'")
+                conn.execute("update tickets set updated_at = 1 where ticket_id = ?", (old_ticket["ticket_id"],))
+                conn.execute("update tickets set updated_at = 200 where ticket_id = ?", (new_ticket["ticket_id"],))
+                conn.commit()
+            finally:
+                conn.close()
+
+            clock["now"] = 20.0
+            result = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=100.0)
+
+            self.assertEqual(1, result["released_leases"])
+            self.assertEqual("CANCELED", store.wait(str(old_ticket["ticket_id"]))["ticket_state"])
+            self.assertEqual("READY", store.wait(str(new_ticket["ticket_id"]))["ticket_state"])
+            self.assertEqual(1, store.snapshot()["managed_root_count"])
+        finally:
+            self.capacity.current_time = original_time  # type: ignore[assignment]
+
+    def test_recovery_returns_exact_counts_after_release_cancel_and_promote(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, capacity=1, provisional_ttl_seconds=999)
+        original_time = self.capacity.current_time
+        clock = {"now": 0.0}
+        self.capacity.current_time = lambda: clock["now"]  # type: ignore[assignment]
+        try:
+            store.acquire_or_queue(
+                **self.request(1, session="tab-a", turn="t1"),
+                root_pid=700,
+                root_start_marker="root-a",
+            )
+            store.activate_next(session_id="tab-a", turn_id="t1", agent_id="agent-a")
+            same_session_ticket = store.acquire_or_queue(**self.request(2, session="tab-a", turn="t1"))
+            other_session_ticket = store.acquire_or_queue(**self.request(1, session="tab-b", turn="t1"))
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("update leases set state = 'RECOVERING', cleanup_after = 1, updated_at = 1 where session_id = 'tab-a'")
+                conn.execute(
+                    "update tickets set state = 'READY', ready_at = 1, updated_at = 1 where ticket_id = ?",
+                    (same_session_ticket["ticket_id"],),
+                )
+                conn.execute("update tickets set updated_at = 1 where ticket_id = ?", (other_session_ticket["ticket_id"],))
+                conn.commit()
+            finally:
+                conn.close()
+
+            clock["now"] = 20.0
+            result = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=100.0)
+
+            self.assertEqual(1, result["released_leases"])
+            self.assertEqual(0, result["active_count"])
+            self.assertEqual(1, result["reserved_count"])
+            self.assertEqual("CANCELED", store.wait(str(same_session_ticket["ticket_id"]))["ticket_state"])
+            self.assertEqual("READY", store.wait(str(other_session_ticket["ticket_id"]))["ticket_state"])
+            snapshot = store.snapshot()
+            self.assertEqual(result["active_count"], snapshot["active_count"])
+            self.assertEqual(result["reserved_count"], snapshot["reserved_count"])
+        finally:
+            self.capacity.current_time = original_time  # type: ignore[assignment]
+
+    def test_recovery_uses_shared_database_across_tabs_and_does_not_log_identity(self) -> None:
+        first = self.capacity.CapacityStore(home=self.home, capacity=1, provisional_ttl_seconds=999)
+        second = self.capacity.CapacityStore(home=self.home, capacity=1, provisional_ttl_seconds=999)
+        first.acquire_or_queue(
+            **self.request(1, session="tab-a", turn="t1"),
+            root_pid=700,
+            root_start_marker="root-secret",
+        )
+        first.activate_next(session_id="tab-a", turn_id="t1", agent_id="agent-a")
+
+        result = second.reconcile_managed_roots(live_root_identities=[], proof_started_at=time.time() + 1)
+
+        self.assertEqual(1, result["suspect_leases"])
+        self.assertEqual("SUSPECT", self.lease_states_by_session(first)["tab-a"])
+        event_log = (self.state_dir / "events.jsonl").read_text(encoding="utf-8")
+        self.assertNotIn("700", event_log)
+        self.assertNotIn("root-secret", event_log)
 
     def test_schema_v1_database_migrates_managed_root_registry_without_losing_leases(self) -> None:
         self.state_dir.mkdir(parents=True, mode=0o700)
