@@ -660,13 +660,34 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
         self.assertNotIn("message", self.audit_text())
 
     def test_lifecycle_identity_fail_open_but_pretool_fails_closed(self) -> None:
-        self.assertEqual(0, self.run_policy("SubagentStart", {"session_id": "s"}).returncode)
+        self.assertEqual(
+            0,
+            self.run_policy(
+                "SubagentStart",
+                {"session_id": "s", "agent_type": "worker"},
+            ).returncode,
+        )
         self.assertEqual(0, self.run_policy("SubagentStop", {"session_id": "s"}).returncode)
         self.assertEqual(0, self.run_policy("SessionEnd", {}).returncode)
 
         missing = self.run_policy("PreToolUse", {"tool_name": "spawn_agent", "tool_input": {"task_name": "x"}})
         self.assertEqual(2, missing.returncode)
         self.assertIn("session_id", missing.stderr)
+
+    def test_subagent_start_blocks_unknown_or_missing_role(self) -> None:
+        unknown = self.run_policy(
+            "SubagentStart",
+            {"agent_id": "agent-unknown", "agent_type": "unapproved-worker"},
+        )
+        missing = self.run_policy(
+            "SubagentStart",
+            {"agent_id": "agent-missing", "agent_type": ""},
+        )
+
+        self.assertEqual(2, unknown.returncode)
+        self.assertIn("approved role set", unknown.stderr)
+        self.assertEqual(2, missing.returncode)
+        self.assertIn("identify agent type", missing.stderr)
 
     def test_pretool_capacity_path_fails_closed_when_absolute_deadline_is_exhausted(self) -> None:
         env = dict(self.env, CODEX_CAPACITY_HOOK_DEADLINE_MS="1")

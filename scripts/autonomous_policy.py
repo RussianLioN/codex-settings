@@ -694,6 +694,8 @@ def handle_subagent_start(
 ) -> tuple[str, str, dict[str, Any]]:
     role_decision = evaluate_spawn_role(payload, tool_name)
     details.update(role_decision[2])
+    if role_decision[0] == "block":
+        return role_decision[0], role_decision[1], details
     session_id = hook_string(payload, "session_id")
     turn_id = hook_string(payload, "turn_id")
     agent_id = hook_string(payload, "agent_id")

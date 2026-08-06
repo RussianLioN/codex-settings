@@ -60,11 +60,16 @@ FD_GUARDRAILS_TARGETS_V2_PROFILES = (
     *FD_GUARDRAILS_TARGETS_V2_FULL,
     *((f"{name}.config.toml", f"{name}.config.toml") for name in PROFILE_CONFIG_NAMES),
 )
-FD_GUARDRAILS_TARGETS = FD_GUARDRAILS_TARGETS_V2_PROFILES
+FD_GUARDRAILS_TARGETS_V2_WITH_HIGHFD = (
+    *FD_GUARDRAILS_TARGETS_V2_PROFILES,
+    ("codex-highfd", "codex-highfd"),
+)
+FD_GUARDRAILS_TARGETS = FD_GUARDRAILS_TARGETS_V2_WITH_HIGHFD
 FD_GUARDRAILS_TARGET_SETS_V2 = (
     FD_GUARDRAILS_TARGETS_V2_BASE,
     FD_GUARDRAILS_TARGETS_V2_FULL,
     FD_GUARDRAILS_TARGETS_V2_PROFILES,
+    FD_GUARDRAILS_TARGETS_V2_WITH_HIGHFD,
 )
 
 
@@ -86,6 +91,11 @@ def main() -> int:
         "--installed-doctor",
         type=Path,
         default=HOME / ".local/libexec/codex_fd_doctor.sh",
+    )
+    parser.add_argument(
+        "--installed-highfd",
+        type=Path,
+        default=HOME / ".local/bin/codex-highfd",
     )
     parser.add_argument("--installed-process-inventory", type=Path, default=None)
     parser.add_argument("--installed-manifest-validator", type=Path, default=None)
@@ -141,6 +151,7 @@ def main() -> int:
             args.apply,
             codex_home=codex_home,
             installed_doctor=args.installed_doctor,
+            installed_highfd=args.installed_highfd,
             installed_process_inventory=installed_process_inventory,
             installed_manifest_validator=installed_manifest_validator,
             installed_trusted_registry=installed_trusted_registry,
@@ -162,6 +173,7 @@ def handle_runtime_backup(
     *,
     codex_home: Path | None = None,
     installed_doctor: Path | None = None,
+    installed_highfd: Path | None = None,
     installed_process_inventory: Path | None = None,
     installed_manifest_validator: Path | None = None,
     installed_trusted_registry: Path | None = None,
@@ -182,6 +194,7 @@ def handle_runtime_backup(
             target_paths=fd_guardrails_target_paths(
                 codex_home=codex_home,
                 installed_doctor=doctor,
+                installed_highfd=installed_highfd or HOME / ".local/bin/codex-highfd",
                 installed_process_inventory=installed_process_inventory
                 or doctor.parent / "codex_process_inventory.py",
                 installed_manifest_validator=installed_manifest_validator
@@ -279,6 +292,7 @@ def fd_guardrails_target_paths(
     *,
     codex_home: Path,
     installed_doctor: Path,
+    installed_highfd: Path,
     installed_process_inventory: Path,
     installed_manifest_validator: Path,
     installed_trusted_registry: Path,
@@ -291,6 +305,7 @@ def fd_guardrails_target_paths(
         "config.toml": codex_home / "config.toml",
         "AGENTS.md": codex_home / "AGENTS.md",
         "codex_fd_doctor.sh": installed_doctor,
+        "codex-highfd": installed_highfd,
         "codex_process_inventory.py": installed_process_inventory,
         "validate_wide_wave_manifest.py": installed_manifest_validator,
         "trusted-wide-wave-skills.json": installed_trusted_registry,

@@ -26,6 +26,7 @@ LEGACY_AGENT_THREAD_KEY = "max_threads"
 LEGACY_NATIVE_THREAD_KEY = "max_concurrent_threads_per_session"
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PROCESS_INVENTORY = SOURCE_ROOT / "scripts" / "codex_process_inventory.py"
+SOURCE_HIGHFD = SOURCE_ROOT / "scripts" / "codex-highfd"
 SOURCE_AUTONOMOUS_POLICY = SOURCE_ROOT / "scripts" / "autonomous_policy.py"
 SOURCE_CAPACITY = SOURCE_ROOT / "scripts" / "codex_capacity.py"
 SOURCE_CAPACITY_OBSERVER = SOURCE_ROOT / "scripts" / "codex_capacity_observer.py"
@@ -33,6 +34,7 @@ SOURCE_MANIFEST_VALIDATOR = SOURCE_ROOT / "scripts" / "validate_wide_wave_manife
 SOURCE_TRUSTED_WIDE_WAVE_REGISTRY = SOURCE_ROOT / "config" / "trusted-wide-wave-skills.json"
 MANAGED_SOURCE_IDS = (
     "codex_fd_doctor.sh",
+    "codex-highfd",
     "codex_process_inventory.py",
     "validate_wide_wave_manifest.py",
     "trusted-wide-wave-skills.json",
@@ -100,6 +102,16 @@ def parse_args() -> argparse.Namespace:
         "--source-doctor",
         type=Path,
         default=Path(__file__).resolve().with_name("codex_fd_doctor.sh"),
+    )
+    parser.add_argument(
+        "--installed-highfd",
+        type=Path,
+        default=Path.home() / ".local/bin/codex-highfd",
+    )
+    parser.add_argument(
+        "--source-highfd",
+        type=Path,
+        default=SOURCE_HIGHFD,
     )
     parser.add_argument("--installed-process-inventory", type=Path, default=None)
     parser.add_argument(
@@ -446,6 +458,8 @@ def state_issues(
     agents_path: Path,
     installed_doctor: Path,
     source_doctor: Path,
+    installed_highfd: Path,
+    source_highfd: Path,
     installed_process_inventory: Path,
     source_process_inventory: Path,
     installed_manifest_validator: Path,
@@ -480,6 +494,8 @@ def state_issues(
         issues.append("agents_resource_policy_missing_or_drifted")
     if not installed_doctor.is_file() or installed_doctor.read_bytes() != source_doctor.read_bytes():
         issues.append("installed_fd_doctor_drifted")
+    if not installed_highfd.is_file() or installed_highfd.read_bytes() != source_highfd.read_bytes():
+        issues.append("installed_highfd_drifted")
     if (
         not installed_process_inventory.is_file()
         or installed_process_inventory.read_bytes() != source_process_inventory.read_bytes()
@@ -752,6 +768,7 @@ def resolve_source_commit(explicit: str | None) -> str:
 def managed_source_paths(
     *,
     source_doctor: Path,
+    source_highfd: Path,
     source_process_inventory: Path,
     source_manifest_validator: Path,
     source_trusted_registry: Path,
@@ -761,6 +778,7 @@ def managed_source_paths(
 ) -> dict[str, Path]:
     return {
         "codex_fd_doctor.sh": source_doctor,
+        "codex-highfd": source_highfd,
         "codex_process_inventory.py": source_process_inventory,
         "validate_wide_wave_manifest.py": source_manifest_validator,
         "trusted-wide-wave-skills.json": source_trusted_registry,
@@ -891,6 +909,8 @@ def main() -> int:
     codex_home = normalize_managed_path(args.codex_home)
     installed_doctor = normalize_managed_path(args.installed_doctor)
     source_doctor = normalize_existing_path(args.source_doctor)
+    installed_highfd = normalize_managed_path(args.installed_highfd)
+    source_highfd = normalize_existing_path(args.source_highfd)
     source_process_inventory = normalize_existing_path(args.source_process_inventory)
     source_autonomous_policy = normalize_existing_path(args.source_autonomous_policy)
     source_capacity = normalize_existing_path(args.source_capacity)
@@ -937,6 +957,7 @@ def main() -> int:
     target_paths = fd_guardrails_target_paths(
         codex_home=codex_home,
         installed_doctor=installed_doctor,
+        installed_highfd=installed_highfd,
         installed_process_inventory=installed_process_inventory,
         installed_manifest_validator=installed_manifest_validator,
         installed_trusted_registry=installed_trusted_registry,
@@ -948,6 +969,7 @@ def main() -> int:
     source_commit = resolve_source_commit(args.source_commit)
     source_paths = managed_source_paths(
         source_doctor=source_doctor,
+        source_highfd=source_highfd,
         source_process_inventory=source_process_inventory,
         source_manifest_validator=source_manifest_validator,
         source_trusted_registry=source_trusted_registry,
@@ -983,6 +1005,8 @@ def main() -> int:
         agents_path=agents_path,
         installed_doctor=installed_doctor,
         source_doctor=source_doctor,
+        installed_highfd=installed_highfd,
+        source_highfd=source_highfd,
         installed_process_inventory=installed_process_inventory,
         source_process_inventory=source_process_inventory,
         installed_manifest_validator=installed_manifest_validator,
@@ -1021,6 +1045,7 @@ def main() -> int:
     config_bytes = desired_config(config_path.read_text(encoding="utf-8")).encode()
     agents_bytes = desired_agents(agents_path.read_text(encoding="utf-8")).encode()
     doctor_bytes = source_bytes["codex_fd_doctor.sh"]
+    highfd_bytes = source_bytes["codex-highfd"]
     process_inventory_bytes = source_bytes["codex_process_inventory.py"]
     autonomous_policy_bytes = source_bytes["autonomous_policy.py"]
     capacity_bytes = source_bytes["codex_capacity.py"]
@@ -1045,6 +1070,7 @@ def main() -> int:
         ("config.toml", config_path, config_bytes, file_mode(config_path, 0o600)),
         ("AGENTS.md", agents_path, agents_bytes, file_mode(agents_path, 0o644)),
         ("codex_fd_doctor.sh", installed_doctor, doctor_bytes, 0o755),
+        ("codex-highfd", installed_highfd, highfd_bytes, 0o755),
         ("codex_process_inventory.py", installed_process_inventory, process_inventory_bytes, 0o755),
         ("validate_wide_wave_manifest.py", installed_manifest_validator, manifest_validator_bytes, 0o755),
         ("trusted-wide-wave-skills.json", installed_trusted_registry, trusted_registry_bytes, 0o600),
@@ -1077,6 +1103,8 @@ def main() -> int:
             agents_path=agents_path,
             installed_doctor=installed_doctor,
             source_doctor=source_doctor,
+            installed_highfd=installed_highfd,
+            source_highfd=source_highfd,
             installed_process_inventory=installed_process_inventory,
             source_process_inventory=source_process_inventory,
             installed_manifest_validator=installed_manifest_validator,
