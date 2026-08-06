@@ -22,6 +22,7 @@ def stop_deadline_from_environ(
     *,
     fallback_budget_seconds: float = STOP_HOOK_BUDGET_SECONDS,
 ) -> float:
+    local_deadline = time.monotonic() + fallback_budget_seconds
     raw = environ.get(STOP_HOOK_DEADLINE_MONOTONIC_NS_ENV)
     if raw is not None:
         try:
@@ -29,8 +30,8 @@ def stop_deadline_from_environ(
         except ValueError:
             deadline_ns = 0
         if deadline_ns > 0:
-            return deadline_ns / _NANOSECONDS_PER_SECOND
-    return time.monotonic() + fallback_budget_seconds
+            return min(deadline_ns / _NANOSECONDS_PER_SECOND, local_deadline)
+    return local_deadline
 
 
 def require_time_remaining(deadline: float, reason: str) -> None:

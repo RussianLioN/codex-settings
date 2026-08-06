@@ -25,6 +25,8 @@ SRC = PLUGIN_ROOT / "src"
 sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(SRC))
 
+from hook_deadline import stop_deadline_from_environ  # noqa: E402
+
 
 def load_module(name: str, relative_path: str) -> ModuleType:
     path = PLUGIN_ROOT / relative_path
@@ -58,6 +60,37 @@ def environment(state_home: Path) -> dict[str, str]:
         ),
         "XDG_STATE_HOME": str(state_home.resolve()),
     }
+
+
+def stop_hook_command() -> list[str]:
+    return [str(PLUGIN_ROOT / "bin" / "codex-smart-subagents-hook"), "stop"]
+
+
+def stop_payload() -> bytes:
+    return json.dumps(
+        {
+            "session_id": "session-1",
+            "turn_id": "turn-1",
+            "hook_event_name": "Stop",
+        }
+    ).encode("utf-8")
+
+
+def parse_single_deferred_stdout(stdout: bytes) -> dict[str, Any]:
+    text = stdout.decode("utf-8")
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise AssertionError(f"expected one JSON line, got {text!r}")
+    response = json.loads(lines[0])
+    if response.get("code") != "SMART_HOOK_DEFERRED":
+        raise AssertionError(response)
+    if response.get("continue") is not True:
+        raise AssertionError(response)
+    return response
+
+
+def write_fake_pathlib(directory: Path, lines: list[str]) -> None:
+    (directory / "pathlib.py").write_text("\n".join(lines), encoding="utf-8")
 
 
 class SessionStartHookTests(unittest.TestCase):
@@ -292,8 +325,16 @@ class PluginMetadataTests(unittest.TestCase):
             PLUGIN_ROOT / "bin" / "codex-smart-subagents-hook"
         ).read_text(encoding="utf-8")
         self.assertLess(
-            launcher_source.index("os.environ[STOP_HOOK_DEADLINE_MONOTONIC_NS_ENV]"),
-            launcher_source.index("import runpy"),
+            launcher_source.index("_EARLY_STOP_STARTED_NS"),
+            launcher_source.index("import json"),
+        )
+        self.assertLess(
+            launcher_source.index('if len(sys.argv) == 2 and sys.argv[1] == "stop"'),
+            launcher_source.index("\n\nimport runpy\nfrom pathlib import Path"),
+        )
+        self.assertIn(
+            "environment[STOP_HOOK_DEADLINE_MONOTONIC_NS_ENV]",
+            launcher_source,
         )
         with tempfile.TemporaryDirectory() as tmp:
             marker = Path(tmp) / "marker.json"
@@ -306,8 +347,9 @@ class PluginMetadataTests(unittest.TestCase):
                         "import sys",
                         "started = os.environ.get('CODEX_SMART_HOOK_STARTED_MONOTONIC_NS')",
                         "deadline = os.environ.get('CODEX_SMART_HOOK_DEADLINE_MONOTONIC_NS')",
+                        "dont_write = os.environ.get('PYTHONDONTWRITEBYTECODE')",
                         "with open(os.environ['SMART_TEST_MARKER'], 'w', encoding='utf-8') as stream:",
-                        "    json.dump({'started': started, 'deadline': deadline}, stream)",
+                        "    json.dump({'started': started, 'deadline': deadline, 'dont_write_bytecode': dont_write}, stream)",
                         "raise SystemExit(0)",
                     ]
                 ),
@@ -336,6 +378,7 @@ class PluginMetadataTests(unittest.TestCase):
             observed = json.loads(marker.read_text(encoding="utf-8"))
             self.assertNotEqual("user-start", observed["started"])
             self.assertNotEqual("user-deadline", observed["deadline"])
+            self.assertEqual("1", observed["dont_write_bytecode"])
             started = int(observed["started"])
             deadline = int(observed["deadline"])
             self.assertGreater(started, 0)
@@ -384,6 +427,218 @@ class PluginMetadataTests(unittest.TestCase):
             self.assertTrue(response["continue"])
             self.assertEqual("SMART_HOOK_DEFERRED", response["code"])
             self.assertIn("срок", response["reason"].lower())
+
+    def test_stop_parent_supervises_slow_import_before_main(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            write_fake_pathlib(
+                Path(tmp),
+                [
+                    "import time",
+                    "time.sleep(2.2)",
+                    "raise RuntimeError('slow import should be supervised')",
+                ],
+            )
+            environment_copy = dict(getattr(os, "environ"))
+            environment_copy["PYTHONPATH"] = tmp
+
+            started = time.monotonic()
+            result = subprocess.run(
+                stop_hook_command(),
+                input=stop_payload(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment_copy,
+                check=False,
+                timeout=2.0,
+            )
+            elapsed = time.monotonic() - started
+
+            self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
+            parse_single_deferred_stdout(result.stdout)
+            self.assertLess(elapsed, 1.75)
+
+    def test_stop_parent_reports_import_exception_as_one_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            write_fake_pathlib(
+                Path(tmp),
+                ["raise RuntimeError('import exploded before main')"],
+            )
+            environment_copy = dict(getattr(os, "environ"))
+            environment_copy["PYTHONPATH"] = tmp
+
+            result = subprocess.run(
+                stop_hook_command(),
+                input=stop_payload(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment_copy,
+                check=False,
+                timeout=2.0,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
+            response = parse_single_deferred_stdout(result.stdout)
+            self.assertIn("worker", response["reason"])
+
+    def test_stop_parent_supervises_open_stdin(self) -> None:
+        process = subprocess.Popen(
+            stop_hook_command(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=dict(getattr(os, "environ")),
+        )
+        started = time.monotonic()
+        try:
+            process.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=1.0)
+            raise
+        elapsed = time.monotonic() - started
+        stdout, stderr = process.communicate(timeout=1.0)
+
+        self.assertEqual(0, process.returncode, stderr.decode("utf-8"))
+        parse_single_deferred_stdout(stdout)
+        self.assertLess(elapsed, 1.75)
+
+    def test_stop_parent_discards_partial_worker_stdout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            write_fake_pathlib(
+                Path(tmp),
+                [
+                    "import sys",
+                    "import time",
+                    "sys.stdout.write('{')",
+                    "sys.stdout.flush()",
+                    "time.sleep(2.2)",
+                ],
+            )
+            environment_copy = dict(getattr(os, "environ"))
+            environment_copy["PYTHONPATH"] = tmp
+
+            result = subprocess.run(
+                stop_hook_command(),
+                input=stop_payload(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment_copy,
+                check=False,
+                timeout=2.0,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
+            response = parse_single_deferred_stdout(result.stdout)
+            self.assertIn("срок", response["reason"].lower())
+
+    def test_stop_parent_is_repeatable_after_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            write_fake_pathlib(
+                Path(tmp),
+                [
+                    "import time",
+                    "time.sleep(2.2)",
+                    "raise RuntimeError('late')",
+                ],
+            )
+            environment_copy = dict(getattr(os, "environ"))
+            environment_copy["PYTHONPATH"] = tmp
+
+            for _attempt in range(2):
+                result = subprocess.run(
+                    stop_hook_command(),
+                    input=stop_payload(),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=environment_copy,
+                    check=False,
+                    timeout=2.0,
+                )
+                self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
+                parse_single_deferred_stdout(result.stdout)
+
+    def test_stop_parent_overwrites_future_environment_deadline(self) -> None:
+        start_name = "CODEX_SMART_HOOK_STARTED_MONOTONIC_NS"
+        deadline_name = "CODEX_SMART_HOOK_DEADLINE_MONOTONIC_NS"
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "marker.json"
+            write_fake_pathlib(
+                Path(tmp),
+                [
+                    "import json",
+                    "import os",
+                    f"started = os.environ.get('{start_name}')",
+                    f"deadline = os.environ.get('{deadline_name}')",
+                    "marker = os.environ.get('SMART_TEST_MARKER')",
+                    "with open(marker, 'w', encoding='utf-8') as stream:",
+                    "    json.dump({'started': started, 'deadline': deadline}, stream)",
+                    "raise SystemExit(0)",
+                ],
+            )
+            environment_copy = dict(getattr(os, "environ"))
+            environment_copy.update(
+                {
+                    "PYTHONPATH": tmp,
+                    "SMART_TEST_MARKER": str(marker),
+                    start_name: "1",
+                    deadline_name: str(10**30),
+                }
+            )
+
+            result = subprocess.run(
+                stop_hook_command(),
+                input=stop_payload(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment_copy,
+                check=False,
+                timeout=2.0,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
+            observed = json.loads(marker.read_text(encoding="utf-8"))
+            self.assertNotEqual("1", observed["started"])
+            self.assertNotEqual(str(10**30), observed["deadline"])
+            self.assertEqual(
+                1_500_000_000,
+                int(observed["deadline"]) - int(observed["started"]),
+            )
+
+    def test_stop_deadline_helper_does_not_extend_from_future_environment(
+        self,
+    ) -> None:
+        deadline_name = "CODEX_SMART_HOOK_DEADLINE_MONOTONIC_NS"
+        started = time.monotonic()
+        deadline = stop_deadline_from_environ(
+            {deadline_name: str(10**30)},
+            fallback_budget_seconds=1.5,
+        )
+
+        self.assertLessEqual(deadline - started, 1.6)
+
+    def test_stop_fast_path_latency_distribution_stays_under_targets(self) -> None:
+        durations: list[float] = []
+        environment_copy = dict(getattr(os, "environ"))
+        for _attempt in range(30):
+            started = time.monotonic()
+            result = subprocess.run(
+                stop_hook_command(),
+                input=stop_payload(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment_copy,
+                check=False,
+                timeout=2.0,
+            )
+            durations.append(time.monotonic() - started)
+            self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
+            self.assertIn(result.stdout.decode("utf-8"), {"", "\n"})
+
+        ordered = sorted(durations)
+        p95 = ordered[int(0.95 * (len(ordered) - 1))]
+        p99 = ordered[-1]
+        self.assertLessEqual(p95, 1.0)
+        self.assertLessEqual(p99, 1.5)
 
     def test_bundled_entrypoints_are_executable_regular_files(self) -> None:
         for relative in (

@@ -8,16 +8,265 @@ import sys
 import time
 
 
+_EARLY_STOP_STARTED_NS = (
+    time.monotonic_ns()
+    if len(sys.argv) == 2 and sys.argv[1] == "stop"
+    else None
+)
+
+
+import json
+import select
+
+
 STOP_HOOK_BUDGET_NS = 1_500_000_000
 STOP_HOOK_STARTED_MONOTONIC_NS_ENV = "CODEX_SMART_HOOK_STARTED_MONOTONIC_NS"
 STOP_HOOK_DEADLINE_MONOTONIC_NS_ENV = "CODEX_SMART_HOOK_DEADLINE_MONOTONIC_NS"
+WORKER_ARG = "--codex-smart-stop-worker"
+WORKER_MAGIC = b"codex-smart-stop-worker-v1\n"
+MAX_WORKER_STDOUT_BYTES = 64 * 1024
+PARENT_RESPONSE_RESERVE_NS = 350_000_000
+
+
+def _plugin_root() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _target(event: str) -> str:
+    return os.path.join(_plugin_root(), "hooks", event)
+
+
+def _write_json(response: dict[str, object]) -> None:
+    try:
+        sys.stdout.write(
+            json.dumps(response, ensure_ascii=False, separators=(",", ":")) + "\n"
+        )
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
+def _deferred(reason: str) -> dict[str, object]:
+    return {
+        "continue": True,
+        "code": "SMART_HOOK_DEFERRED",
+        "reason": reason,
+        "systemMessage": "SMART_HOOK_DEFERRED: " + reason,
+    }
+
+
+def _remaining_seconds(deadline_ns: int) -> float:
+    return max(0.0, (deadline_ns - time.monotonic_ns()) / 1_000_000_000)
+
+
+def _valid_worker_stdout(stdout: bytes) -> bool:
+    if not stdout:
+        return True
+    if len(stdout) > MAX_WORKER_STDOUT_BYTES:
+        return False
+    try:
+        text = stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) != 1:
+        return False
+    try:
+        decoded = json.loads(lines[0])
+    except json.JSONDecodeError:
+        return False
+    return isinstance(decoded, dict)
+
+
+def _collect_worker(
+    pid: int,
+    stdout_fd: int,
+    stderr_fd: int,
+    deadline_ns: int,
+) -> int:
+    stdout_chunks: list[bytes] = []
+    open_fds = {stdout_fd, stderr_fd}
+    status: int | None = None
+    timed_out = False
+    try:
+        os.set_blocking(stdout_fd, False)
+        os.set_blocking(stderr_fd, False)
+        while open_fds:
+            if status is None:
+                try:
+                    observed_pid, observed_status = os.waitpid(pid, os.WNOHANG)
+                except ChildProcessError:
+                    status = 0
+                else:
+                    if observed_pid == pid:
+                        status = observed_status
+            remaining = _remaining_seconds(deadline_ns)
+            if remaining <= 0 and status is None:
+                timed_out = True
+                try:
+                    os.kill(pid, 9)
+                except ProcessLookupError:
+                    pass
+                _wait_for_child(pid)
+                _drain_fd(stdout_fd, stdout_chunks)
+                break
+            timeout = min(remaining, 0.05) if status is None else 0.0
+            try:
+                readable, _writable, _errors = select.select(
+                    list(open_fds), [], [], timeout
+                )
+            except OSError:
+                timed_out = True
+                try:
+                    os.kill(pid, 9)
+                except ProcessLookupError:
+                    pass
+                _wait_for_child(pid)
+                break
+            if not readable and status is not None:
+                for descriptor in list(open_fds):
+                    _drain_fd(descriptor, stdout_chunks if descriptor == stdout_fd else None)
+                    open_fds.discard(descriptor)
+                break
+            for descriptor in readable:
+                data = _read_chunk(descriptor)
+                if data:
+                    if descriptor == stdout_fd:
+                        stdout_chunks.append(data)
+                else:
+                    open_fds.discard(descriptor)
+                    os.close(descriptor)
+        if status is None and not timed_out:
+            _pid, status = os.waitpid(pid, 0)
+    finally:
+        for descriptor in list(open_fds):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+    stdout = b"".join(stdout_chunks)
+    if timed_out:
+        _write_json(_deferred("истёк общий срок Stop worker"))
+        return 0
+    if status is None or not os.WIFEXITED(status) or os.WEXITSTATUS(status) != 0:
+        _write_json(_deferred("worker Stop завершился ошибкой"))
+        return 0
+    if not _valid_worker_stdout(stdout):
+        _write_json(_deferred("worker Stop вернул некорректный JSON"))
+        return 0
+    if stdout:
+        sys.stdout.buffer.write(stdout)
+        sys.stdout.flush()
+    return 0
+
+
+def _read_chunk(descriptor: int) -> bytes:
+    try:
+        return os.read(descriptor, 8192)
+    except BlockingIOError:
+        return b""
+
+
+def _drain_fd(descriptor: int, chunks: list[bytes] | None) -> None:
+    while True:
+        data = _read_chunk(descriptor)
+        if not data:
+            break
+        if chunks is not None:
+            chunks.append(data)
+
+
+def _wait_for_child(pid: int) -> None:
+    while True:
+        try:
+            os.waitpid(pid, 0)
+            return
+        except ChildProcessError:
+            return
+        except InterruptedError:
+            continue
+
+
+def _supervise_stop() -> int:
+    started_ns = _EARLY_STOP_STARTED_NS or time.monotonic_ns()
+    deadline_ns = started_ns + STOP_HOOK_BUDGET_NS
+    environment = dict(getattr(os, "environ"))
+    environment[STOP_HOOK_STARTED_MONOTONIC_NS_ENV] = str(started_ns)
+    environment[STOP_HOOK_DEADLINE_MONOTONIC_NS_ENV] = str(deadline_ns)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    try:
+        control_read, control_write = os.pipe()
+        stdout_read, stdout_write = os.pipe()
+        stderr_read, stderr_write = os.pipe()
+    except OSError:
+        _write_json(_deferred("worker Stop не запустился"))
+        return 0
+    try:
+        os.write(control_write, WORKER_MAGIC)
+    finally:
+        os.close(control_write)
+    try:
+        pid = os.fork()
+    except OSError:
+        for descriptor in (control_read, stdout_read, stdout_write, stderr_read, stderr_write):
+            os.close(descriptor)
+        _write_json(_deferred("worker Stop не запустился"))
+        return 0
+    if pid == 0:
+        try:
+            os.close(stdout_read)
+            os.close(stderr_read)
+            os.dup2(stdout_write, 1)
+            os.dup2(stderr_write, 2)
+            for descriptor in (stdout_write, stderr_write):
+                if descriptor > 2:
+                    os.close(descriptor)
+            os.set_inheritable(control_read, True)
+            executable = sys.executable
+            argv = [executable, os.path.abspath(__file__), WORKER_ARG, str(control_read)]
+            os.execve(executable, argv, environment)
+        except BaseException:
+            os._exit(127)
+    os.close(control_read)
+    os.close(stdout_write)
+    os.close(stderr_write)
+    parent_deadline_ns = max(started_ns, deadline_ns - PARENT_RESPONSE_RESERVE_NS)
+    try:
+        return _collect_worker(pid, stdout_read, stderr_read, parent_deadline_ns)
+    except Exception:
+        try:
+            os.kill(pid, 9)
+        except ProcessLookupError:
+            pass
+        _wait_for_child(pid)
+        _write_json(_deferred("ошибка родительского надзора Stop"))
+        return 0
+
+
+def _run_stop_worker(control_fd: int) -> int:
+    try:
+        observed = os.read(control_fd, len(WORKER_MAGIC))
+    finally:
+        os.close(control_fd)
+    if observed != WORKER_MAGIC:
+        return 2
+    import runpy
+
+    target = _target("stop.py")
+    sys.argv = [target]
+    runpy.run_path(target, run_name="__main__")
+    return 0
+
 
 if len(sys.argv) == 2 and sys.argv[1] == "stop":
-    started_ns = time.monotonic_ns()
-    os.environ[STOP_HOOK_STARTED_MONOTONIC_NS_ENV] = str(started_ns)
-    os.environ[STOP_HOOK_DEADLINE_MONOTONIC_NS_ENV] = str(
-        started_ns + STOP_HOOK_BUDGET_NS
-    )
+    raise SystemExit(_supervise_stop())
+
+if len(sys.argv) == 3 and sys.argv[1] == WORKER_ARG:
+    try:
+        descriptor = int(sys.argv[2])
+    except ValueError:
+        raise SystemExit(2)
+    raise SystemExit(_run_stop_worker(descriptor))
 
 
 import runpy
@@ -28,7 +277,6 @@ ROOT = Path(__file__).resolve().parents[1]
 TARGETS = {
     "session-start": ROOT / "hooks" / "session_start.py",
     "user-prompt-submit": ROOT / "hooks" / "user_prompt_submit.py",
-    "stop": ROOT / "hooks" / "stop.py",
     "session-end": ROOT / "hooks" / "session_end.py",
 }
 

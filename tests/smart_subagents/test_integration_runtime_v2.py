@@ -9,6 +9,7 @@ import runpy
 import socket
 import sqlite3
 import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -2199,6 +2200,117 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             self.assertTrue(response["continue"])
             self.assertEqual("SMART_HOOK_DEFERRED", response["code"])
             self.assertIn("resume", response["reason"])
+
+    def test_stop_parent_supervises_slow_resume_lease_route_worker(self) -> None:
+        database_id = "db2_" + "f" * 32
+        self._write_schema_routes_database(
+            database_id,
+            include_route=True,
+            state="SUCCEEDED",
+        )
+        self._write_active_manifest(database_id)
+        TurnContextStoreV2(self.config).save(self.record)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        self._publish_launch_gate(environment)
+        environment["CODEX_SMART_LAUNCH_KIND"] = "resume"
+        environment["CODEX_SMART_ROOT_PID"] = str(os.getpid())
+        environment["CODEX_SMART_ROOT_START_MARKER"] = "test-root-start"
+        project = ProjectIdentityV2(
+            repo_root=self.record.repo_root,
+            base_sha=self.record.base_sha,
+            worktree_fingerprint=self.record.worktree_fingerprint,
+            compatibility_fingerprint=self.compatibility_fingerprint,
+        )
+        root = RootIdentityV2(
+            pid=os.getpid(),
+            process_start_marker="test-root-start",
+        )
+        lease_store = RootSessionLeaseStoreV2(
+            self.state_home,
+            process_marker_reader=(
+                lambda pid: "test-root-start" if pid == os.getpid() else None
+            ),
+        )
+        lease_store.register_startup(
+            session_id=self.record.session_id,
+            shell_session_id=self.config.shell_session_id,
+            root=root,
+            project=project,
+        )
+        candidate = ResumeCandidateV2(
+            route_id="route2_" + "1" * 32,
+            original_shell_session_id=self.config.shell_session_id,
+            original_session_id=self.record.session_id,
+            original_turn_id=self.record.turn_id,
+            route_state="SUCCEEDED",
+            start_request_id="sr2_" + "2" * 32,
+            node_id="node2_" + "3" * 32,
+            terminal_result_unacknowledged=True,
+        )
+        lease_store.prepare_resume(
+            session_id=self.record.session_id,
+            shell_session_id=self.config.shell_session_id,
+            root=root,
+            project=project,
+            candidate=candidate,
+        )
+        lease_store.bind_resume(
+            session_id=self.record.session_id,
+            shell_session_id=self.config.shell_session_id,
+            turn_id=self.record.turn_id,
+            root=root,
+            project=project,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "sitecustomize.py").write_text(
+                "\n".join(
+                    [
+                        "import builtins",
+                        "import time",
+                        "_original_import = builtins.__import__",
+                        "def _patched_import(name, globals=None, locals=None, fromlist=(), level=0):",
+                        "    module = _original_import(name, globals, locals, fromlist, level)",
+                        "    if name == 'integration_runtime_v2':",
+                        "        module.durable_stop_smart_turn_state_v2 = lambda *args, **kwargs: 'DELEGATE_TERMINAL'",
+                        "    if name == 'codex_smart_subagents.resume_session_v2':",
+                        "        module.system_process_marker_reader_v2 = lambda pid: 'test-root-start'",
+                        "        original_load = module.RootSessionLeaseStoreV2.load",
+                        "        def slow_load(self, session_id):",
+                        "            time.sleep(2.2)",
+                        "            return original_load(self, session_id)",
+                        "        module.RootSessionLeaseStoreV2.load = slow_load",
+                        "    return module",
+                        "builtins.__import__ = _patched_import",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            execution_env = dict(getattr(os, "environ"))
+            execution_env.update(environment)
+            execution_env["PYTHONPATH"] = tmp
+            started = time.monotonic()
+            result = subprocess.run(
+                [str(PLUGIN / "bin" / "codex-smart-subagents-hook"), "stop"],
+                input=json.dumps(
+                    {
+                        "session_id": self.record.session_id,
+                        "turn_id": self.record.turn_id,
+                        "hook_event_name": "Stop",
+                    }
+                ).encode("utf-8"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=execution_env,
+                check=False,
+                timeout=2.0,
+            )
+            elapsed = time.monotonic() - started
+
+        self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
+        response = json.loads(result.stdout.decode("utf-8"))
+        self.assertEqual("SMART_HOOK_DEFERRED", response["code"])
+        self.assertLess(elapsed, 1.75)
 
     def test_v2_stop_blocks_unfinished_delegate_and_allows_terminal_route(
         self,
