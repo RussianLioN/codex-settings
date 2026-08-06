@@ -216,6 +216,51 @@ class CapacityObserverTests(unittest.TestCase):
             )
             cases.append(invalid_step)
 
+            invalid_history = root / "invalid-history"
+            invalid_history.mkdir()
+            (invalid_history / "calibration_state.json").write_text(
+                json.dumps(
+                    {
+                        "protocol_version": 1,
+                        "classes": {
+                            "normal": {
+                                "accepted_count": 40,
+                                "samples": [],
+                                "effective_capacity": 8,
+                                "proven_capacity": 8,
+                                "saturated_clean_cycles": 0,
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cases.append(invalid_history)
+
+            invalid_cycle = root / "invalid-cycle"
+            invalid_cycle.mkdir()
+            (invalid_cycle / "calibration_state.json").write_text(
+                json.dumps(
+                    {
+                        "protocol_version": 1,
+                        "classes": {
+                            "normal": {
+                                "accepted_count": 30,
+                                "samples": [
+                                    {"memory_bytes": 1, "processes": 1, "root_fds": 1, "system_fds": 1, "heavy_lanes": 0}
+                                    for _ in range(30)
+                                ],
+                                "effective_capacity": 6,
+                                "proven_capacity": 6,
+                                "saturated_clean_cycles": 10,
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cases.append(invalid_cycle)
+
             for state_dir in cases:
                 with self.subTest(state_dir=state_dir.name):
                     result = observer.observe(snapshot=calibration_snapshot(active_slots=0), state_dir=state_dir, now_epoch=1000.0)
@@ -378,6 +423,39 @@ class CapacityObserverTests(unittest.TestCase):
             self.assertEqual("ARMED", wrong_session["phase"])
             self.assertEqual("ARMED", missing_agent["phase"])
             self.assertEqual(0, missing_agent["classes"]["normal"]["rejected_count"])
+
+    def test_out_of_order_or_identity_incomplete_events_do_not_rewrite_bracket(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            incomplete = observer.calibration_hook_event(
+                "pretool_lease",
+                state_dir=state_dir,
+                snapshot=calibration_snapshot(active_slots=0),
+                now_epoch=999.0,
+                session_id="s",
+                turn_id="t",
+            )
+            self.assertEqual("IDLE", incomplete["phase"])
+
+            observer.calibration_hook_event("pretool_lease", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=0), now_epoch=1000.0, session_id="s", turn_id="t", request_id="r")
+            early_stop = observer.calibration_hook_event("subagent_stop_before_release", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1000.5, session_id="s", agent_id="a")
+            empty_agent = observer.calibration_hook_event("subagent_start", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1000.8, session_id="s", turn_id="t")
+            self.assertEqual("ARMED", early_stop["phase"])
+            self.assertEqual("ARMED", empty_agent["phase"])
+
+            observer.calibration_hook_event("subagent_start", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1001.1, session_id="s", turn_id="t", agent_id="a")
+            duplicate_start = observer.calibration_hook_event("subagent_start", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1001.5, session_id="s", turn_id="t", agent_id="other")
+            measuring = observer.CalibrationStore(state_dir).load(deadline=time.monotonic() + 0.5)["active"]
+            self.assertEqual("MEASURING", duplicate_start["phase"])
+            self.assertEqual(1001.1, measuring["started_at"])
+
+            observer.calibration_hook_event("subagent_stop_before_release", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1002.3, session_id="s", agent_id="a")
+            duplicate_stop = observer.calibration_hook_event("subagent_stop_before_release", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1002.5, session_id="s", agent_id="a")
+            late_start = observer.calibration_hook_event("subagent_start", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1002.6, session_id="s", turn_id="t", agent_id="a")
+            settling = observer.CalibrationStore(state_dir).load(deadline=time.monotonic() + 0.5)["active"]
+            self.assertEqual("SETTLING", duplicate_stop["phase"])
+            self.assertEqual("SETTLING", late_start["phase"])
+            self.assertEqual(1002.3, settling["stopped_at"])
 
     def test_stop_and_session_end_preserve_only_settling_after_normal_subagent_stop(self):
         for cancel_event in ("stop", "session_end"):

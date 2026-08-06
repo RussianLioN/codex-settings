@@ -895,31 +895,46 @@ def default_calibration_state() -> dict[str, Any]:
 def validate_calibration_state(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ObservationError("calibration_state_not_object")
+    if set(payload) - {"protocol_version", "active", "classes"}:
+        raise ObservationError("calibration_state_unknown_keys")
     if int(payload.get("protocol_version", PROTOCOL_VERSION)) != PROTOCOL_VERSION:
         raise ObservationError("calibration_state_bad_version")
     state = default_calibration_state()
     classes = payload.get("classes") or {}
     if not isinstance(classes, dict):
         raise ObservationError("calibration_classes_not_object")
+    if set(classes) - set(MIN_COSTS):
+        raise ObservationError("calibration_classes_unknown_keys")
     for workload_class in MIN_COSTS:
         profile = default_calibration_class(workload_class)
         existing = classes.get(workload_class) or {}
         if not isinstance(existing, dict):
             raise ObservationError(f"calibration_class_not_object:{workload_class}")
+        if set(existing) - set(profile):
+            raise ObservationError(f"calibration_class_unknown_keys:{workload_class}")
         for key in profile:
             if key in existing:
                 profile[key] = existing[key]
         profile["samples"] = [normalize_delta_sample(sample) for sample in list(profile.get("samples") or [])[-OBSERVATION_LIMIT:]]
         profile["accepted_count"] = state_int(f"calibration.{workload_class}.accepted_count", profile["accepted_count"], maximum=10_000_000)
         profile["rejected_count"] = state_int(f"calibration.{workload_class}.rejected_count", profile["rejected_count"], maximum=10_000_000)
-        profile["saturated_clean_cycles"] = state_int(f"calibration.{workload_class}.saturated_clean_cycles", profile["saturated_clean_cycles"], maximum=10_000_000)
+        profile["saturated_clean_cycles"] = state_int(
+            f"calibration.{workload_class}.saturated_clean_cycles",
+            profile["saturated_clean_cycles"],
+            maximum=CLEAN_CYCLES_PER_STEP - 1,
+        )
         profile["effective_capacity"] = state_int(f"calibration.{workload_class}.effective_capacity", profile["effective_capacity"], minimum=0, maximum=MAX_CAPACITY)
         profile["proven_capacity"] = state_int(f"calibration.{workload_class}.proven_capacity", profile["proven_capacity"], minimum=0, maximum=MAX_CAPACITY)
         if profile["effective_capacity"] not in VALID_CAPACITIES or profile["proven_capacity"] not in VALID_CAPACITIES:
             raise ObservationError(f"calibration_invalid_capacity:{workload_class}")
+        if profile["effective_capacity"] > profile["proven_capacity"]:
+            raise ObservationError(f"calibration_effective_exceeds_proven:{workload_class}")
         if profile["accepted_count"] < MIN_SUCCESSFUL_OBSERVATIONS:
             if profile["effective_capacity"] != DEFAULT_CAPACITY or profile["proven_capacity"] != DEFAULT_CAPACITY or profile["saturated_clean_cycles"] != 0:
                 raise ObservationError(f"calibration_invalid_prethreshold_state:{workload_class}")
+        expected_samples = min(profile["accepted_count"], OBSERVATION_LIMIT)
+        if len(profile["samples"]) < expected_samples:
+            raise ObservationError(f"calibration_samples_missing:{workload_class}")
         profile["cost_estimate"] = normalize_cost(profile.get("cost_estimate") or {}, workload_class)
         profile["cost_updated_at"] = state_optional_time(f"calibration.{workload_class}.cost_updated_at", profile.get("cost_updated_at"))
         last_code = profile.get("last_rejection_code")
@@ -933,6 +948,8 @@ def validate_calibration_state(payload: Any) -> dict[str, Any]:
             "phase", "workload_class", "session_token", "turn_token", "request_token", "agent_token", "armed_at",
             "started_at", "stopped_at", "settle_after", "last_observed_at", "baseline", "peak_start", "peak_stop", "settle",
         }
+        if set(active) - allowed:
+            raise ObservationError("calibration_active_unknown_keys")
         active_state = {key: active[key] for key in active if key in allowed}
         if active_state.get("phase") not in {"ARMED", "MEASURING", "SETTLING"}:
             raise ObservationError("calibration_invalid_phase")
@@ -941,8 +958,13 @@ def validate_calibration_state(payload: Any) -> dict[str, Any]:
         for key in ("session_token", "turn_token", "request_token", "armed_at", "last_observed_at", "baseline"):
             if active_state.get(key) in (None, ""):
                 raise ObservationError(f"calibration_missing_active:{key}")
+        for key in ("session_token", "turn_token", "request_token"):
+            if not re.fullmatch(r"[a-f0-9]{24}", str(active_state.get(key) or "")):
+                raise ObservationError(f"calibration_invalid_active_token:{key}")
         if active_state.get("phase") in {"MEASURING", "SETTLING"} and active_state.get("agent_token") in (None, ""):
             raise ObservationError("calibration_missing_active:agent_token")
+        if active_state.get("agent_token") not in (None, "") and not re.fullmatch(r"[a-f0-9]{24}", str(active_state["agent_token"])):
+            raise ObservationError("calibration_invalid_active_token:agent_token")
         for key in ("armed_at", "started_at", "stopped_at", "settle_after", "last_observed_at"):
             if key in active_state:
                 active_state[key] = state_optional_time(f"calibration.active.{key}", active_state[key])
@@ -953,6 +975,31 @@ def validate_calibration_state(payload: Any) -> dict[str, Any]:
             active_state["peak_stop"] = validate_calibration_snapshot_record("calibration.active.peak_stop", active_state["peak_stop"])
         if active_state.get("settle") is not None:
             active_state["settle"] = validate_calibration_snapshot_record("calibration.active.settle", active_state["settle"])
+        phase = str(active_state["phase"])
+        phase_requirements = {
+            "ARMED": ((), ("started_at", "stopped_at", "settle_after", "peak_start", "peak_stop", "settle")),
+            "MEASURING": (("started_at", "peak_start", "agent_token"), ("stopped_at", "settle_after", "peak_stop", "settle")),
+            "SETTLING": (("started_at", "stopped_at", "settle_after", "peak_start", "peak_stop", "agent_token"), ("settle",)),
+        }
+        required, forbidden = phase_requirements[phase]
+        if any(active_state.get(key) in (None, "") for key in required):
+            raise ObservationError(f"calibration_invalid_phase_fields:{phase}")
+        if any(active_state.get(key) not in (None, "") for key in forbidden):
+            raise ObservationError(f"calibration_invalid_phase_fields:{phase}")
+        armed_at = float(active_state["armed_at"])
+        last_observed_at = float(active_state["last_observed_at"])
+        if last_observed_at < armed_at or float(active_state["baseline"]["observed_at"]) != armed_at:
+            raise ObservationError("calibration_invalid_active_timeline")
+        if phase in {"MEASURING", "SETTLING"}:
+            started_at = float(active_state["started_at"])
+            if started_at < armed_at or last_observed_at < started_at or float(active_state["peak_start"]["observed_at"]) != started_at:
+                raise ObservationError("calibration_invalid_active_timeline")
+        if phase == "SETTLING":
+            stopped_at = float(active_state["stopped_at"])
+            if stopped_at < started_at or last_observed_at < stopped_at or float(active_state["settle_after"]) < stopped_at:
+                raise ObservationError("calibration_invalid_active_timeline")
+            if float(active_state["peak_stop"]["observed_at"]) != stopped_at:
+                raise ObservationError("calibration_invalid_active_timeline")
         state["active"] = active_state
     return state
 
@@ -1216,7 +1263,7 @@ def apply_calibration_event(
             reject_active_calibration(state, event)
         return
     if event == "pretool_lease":
-        if active is not None or snapshot is None:
+        if active is not None or snapshot is None or any(not tokens.get(key) for key in ("session_token", "turn_token", "request_token")):
             return
         try:
             record = calibration_snapshot_record(snapshot, now_epoch)
@@ -1243,7 +1290,7 @@ def apply_calibration_event(
     if active is None:
         return
     if event == "subagent_start":
-        if snapshot is None or not token_matches(active, tokens, require_agent=False, require_turn=True):
+        if active.get("phase") != "ARMED" or snapshot is None or not tokens.get("agent_token") or not token_matches(active, tokens, require_agent=False, require_turn=True):
             return
         try:
             record = calibration_snapshot_record(snapshot, now_epoch)
@@ -1256,7 +1303,7 @@ def apply_calibration_event(
         active["peak_start"] = record
         return
     if event == "subagent_stop_before_release":
-        if snapshot is None or not token_matches(active, tokens, require_agent=True, require_turn=False):
+        if active.get("phase") != "MEASURING" or snapshot is None or not token_matches(active, tokens, require_agent=True, require_turn=False):
             return
         try:
             record = calibration_snapshot_record(snapshot, now_epoch)
