@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import sys
 import time
 
@@ -149,10 +150,7 @@ def _collect_worker(
             remaining = _remaining_seconds(effective_deadline_ns)
             if remaining <= 0 and status is None:
                 timed_out = True
-                try:
-                    os.kill(pid, 9)
-                except ProcessLookupError:
-                    pass
+                _kill_worker_tree(pid)
                 _wait_for_child(pid)
                 break
             for descriptor in list(open_fds):
@@ -182,10 +180,7 @@ def _collect_worker(
                         stdout_size += len(data)
                         if stdout_size > MAX_WORKER_STDOUT_BYTES:
                             stdout_too_large = True
-                            try:
-                                os.kill(pid, 9)
-                            except ProcessLookupError:
-                                pass
+                            _kill_worker_tree(pid)
                             _wait_for_child(pid)
                             status = 0
                             for open_descriptor in list(open_fds):
@@ -258,6 +253,34 @@ def _wait_for_child(pid: int) -> None:
             continue
 
 
+def _isolate_worker_process_group() -> None:
+    try:
+        os.setsid()
+    except (AttributeError, OSError):
+        pass
+
+
+def _kill_worker_tree(pid: int) -> None:
+    killed_group = False
+    try:
+        worker_group = os.getpgid(pid)
+        parent_group = os.getpgrp()
+    except (AttributeError, ProcessLookupError, OSError):
+        worker_group = None
+        parent_group = None
+    if worker_group is not None and worker_group != parent_group:
+        try:
+            os.killpg(worker_group, signal.SIGKILL)
+            killed_group = True
+        except (AttributeError, ProcessLookupError, OSError):
+            pass
+    if not killed_group:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def _supervise_stop() -> int:
     started_ns = _EARLY_STOP_STARTED_NS or time.monotonic_ns()
     deadline_ns = started_ns + STOP_HOOK_BUDGET_NS
@@ -301,6 +324,7 @@ def _supervise_stop() -> int:
         return 0
     if pid == 0:
         try:
+            _isolate_worker_process_group()
             os.close(stdout_read)
             os.close(stderr_read)
             os.dup2(stdout_write, 1)
@@ -325,10 +349,7 @@ def _supervise_stop() -> int:
             parent_deadline_ns,
         )
     except Exception:
-        try:
-            os.kill(pid, 9)
-        except ProcessLookupError:
-            pass
+        _kill_worker_tree(pid)
         _wait_for_child(pid)
         _write_deferred("ошибка родительского надзора Stop")
         return 0

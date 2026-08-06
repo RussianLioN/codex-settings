@@ -1381,8 +1381,14 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         config = IntegrationConfigV2.from_environ(environment)
         calls: list[str] = []
 
-        def absence_checker(value: object, *, expected_journal: Path) -> object:
+        def absence_checker(
+            value: object,
+            *,
+            expected_journal: Path,
+            deadline: float | None = None,
+        ) -> object:
             calls.append("absence")
+            self.assertIsNotNone(deadline)
             self.assertEqual(gate["journalAbsenceProof"], value)
             self.assertEqual(
                 self.codex_home
@@ -1394,6 +1400,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
 
         def health_checker(**kwargs: object) -> None:
             calls.append("health")
+            self.assertIsNotNone(kwargs["deadline"])
             self.assertEqual(self.codex_home, kwargs["codex_home"])
             self.assertEqual(self.state_home, kwargs["state_home"])
             self.assertEqual(self.activation_id, kwargs["activation_id"])
@@ -1411,6 +1418,67 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         )
 
         self.assertEqual(["absence", "health", "absence", "health"], calls)
+
+    def test_stop_rechecks_absence_and_health_with_one_absolute_deadline(self) -> None:
+        runtime = sys.modules["integration_runtime_v2"]
+        database_id = "db2_" + "f" * 32
+        self._write_schema_routes_database(database_id, include_route=False)
+        self._write_active_manifest(database_id)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        self._publish_launch_gate(environment)
+        config = IntegrationConfigV2.from_environ(environment)
+        deadline = time.monotonic() + 0.75
+        observed_deadlines: list[float | None] = []
+        observed_operation_deadlines: list[object | None] = []
+
+        def absence_checker(
+            _value: object,
+            *,
+            expected_journal: Path,
+            deadline: float | None = None,
+        ) -> object:
+            self.assertEqual(
+                self.codex_home
+                / "install-manifests"
+                / "codex-smart-subagents-v2.transaction.json",
+                expected_journal,
+            )
+            observed_deadlines.append(deadline)
+            observed_operation_deadlines.append(
+                runtime.operation_deadline_v2.current_operation_deadline_v2()
+            )
+            return _value
+
+        def health_checker(
+            *,
+            codex_home: Path,
+            state_home: Path,
+            activation_id: str,
+            deadline: float | None = None,
+        ) -> None:
+            self.assertEqual(self.codex_home, codex_home)
+            self.assertEqual(self.state_home, state_home)
+            self.assertEqual(self.activation_id, activation_id)
+            observed_deadlines.append(deadline)
+            observed_operation_deadlines.append(
+                runtime.operation_deadline_v2.current_operation_deadline_v2()
+            )
+
+        self.assertEqual(
+            "MISSING",
+            runtime.durable_stop_smart_turn_state_v2(
+                config,
+                self.record,
+                environ=environment,
+                deadline=deadline,
+                absence_checker=absence_checker,
+                health_checker=health_checker,
+            ),
+        )
+
+        self.assertEqual([deadline, deadline, deadline, deadline], observed_deadlines)
+        self.assertTrue(all(item is not None for item in observed_operation_deadlines))
 
     def test_resume_binding_uses_pinned_database_without_waiting_for_controller(
         self,
@@ -2285,23 +2353,35 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             root=root,
             project=project,
         )
+        marker_value: str | None = None
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "sitecustomize.py").write_text(
                 "\n".join(
                     [
                         "import builtins",
+                        "import os",
                         "import time",
+                        "from pathlib import Path",
                         "_original_import = builtins.__import__",
                         "def _patched_import(name, globals=None, locals=None, fromlist=(), level=0):",
                         "    module = _original_import(name, globals, locals, fromlist, level)",
                         "    if name == 'integration_runtime_v2':",
                         "        module.durable_stop_smart_turn_state_v2 = lambda *args, **kwargs: 'DELEGATE_TERMINAL'",
+                        "        class _Binding:",
+                        "            database_path = Path(os.getenv(\"SMART_TEST_DATABASE_PATH\"))",
+                        "            compatibility_fingerprint = os.getenv(\"SMART_TEST_COMPATIBILITY_FINGERPRINT\")",
+                        "        module.FreshActivationProviderV2.runtime_binding = lambda self, *, deadline: _Binding()",
                         "    if name == 'codex_smart_subagents.resume_session_v2':",
                         "        module.system_process_marker_reader_v2 = lambda pid: 'test-root-start'",
                         "        original_load = module.RootSessionLeaseStoreV2.load",
-                        "        def slow_load(self, session_id):",
+                        "        def slow_load(self, session_id, *, deadline=None):",
+                        "            if deadline is None:",
+                        "                raise AssertionError(\"deadline was not passed to resume load\")",
+                        "            marker = os.getenv(\"SMART_TEST_SLOW_LOAD_MARKER\")",
+                        "            if marker:",
+                        "                Path(marker).write_text(str(deadline), encoding=\"utf-8\")",
                         "            time.sleep(2.2)",
-                        "            return original_load(self, session_id)",
+                        "            return original_load(self, session_id, deadline=deadline)",
                         "        module.RootSessionLeaseStoreV2.load = slow_load",
                         "    return module",
                         "builtins.__import__ = _patched_import",
@@ -2312,6 +2392,17 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             execution_env = dict(getattr(os, "environ"))
             execution_env.update(environment)
             execution_env["PYTHONPATH"] = tmp
+            marker = Path(tmp) / "slow-load-marker.txt"
+            execution_env["SMART_TEST_SLOW_LOAD_MARKER"] = str(marker)
+            execution_env["SMART_TEST_DATABASE_PATH"] = str(
+                self.state_home
+                / "databases"
+                / database_id
+                / "smart-subagents.sqlite3"
+            )
+            execution_env["SMART_TEST_COMPATIBILITY_FINGERPRINT"] = (
+                self.compatibility_fingerprint
+            )
             started = time.monotonic()
             result = subprocess.run(
                 [str(PLUGIN / "bin" / "codex-smart-subagents-hook"), "stop"],
@@ -2329,11 +2420,15 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
                 timeout=2.0,
             )
             elapsed = time.monotonic() - started
+            if marker.exists():
+                marker_value = marker.read_text(encoding="utf-8")
 
         self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
         response = json.loads(result.stdout.decode("utf-8"))
         self.assertEqual("SMART_HOOK_DEFERRED", response["code"])
         self.assertLess(elapsed, 1.75)
+        self.assertIsNotNone(marker_value)
+        self.assertGreater(float(marker_value or "0"), started)
 
     def test_v2_stop_blocks_unfinished_delegate_and_allows_terminal_route(
         self,

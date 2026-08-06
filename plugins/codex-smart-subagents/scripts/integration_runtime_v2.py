@@ -839,6 +839,7 @@ def durable_stop_smart_turn_state_v2(
         layout=layout,
         absence_checker=absence_checker,
         health_checker=health_checker,
+        deadline=deadline,
     )
     _remaining_hook_budget(deadline)
     return route_state
@@ -910,12 +911,14 @@ def _pinned_stop_database_path_v2(
             absence_checker(
                 gate["journalAbsenceProof"],
                 expected_journal=layout.journal_path,
+                deadline=deadline,
             )
             operation_deadline.checkpoint()
             health_checker(
                 codex_home=config.codex_home,
                 state_home=config.state_home,
                 activation_id=config.launch_activation_id,
+                deadline=deadline,
             )
             operation_deadline.checkpoint()
             manifest = _read_private_json_document_v2(
@@ -969,19 +972,34 @@ def _require_stop_transition_guard_v2(
     layout: GatewayLayout,
     absence_checker: Callable[..., Any],
     health_checker: Callable[..., Any],
+    deadline: float,
 ) -> None:
     """Повторно доказывает, что установка не сменилась после чтения базы."""
 
+    operation_deadline = operation_deadline_v2.current_operation_deadline_v2()
+    if operation_deadline is None:
+        operation_deadline = operation_deadline_v2.OperationDeadlineV2.start(
+            operation="stop-transition-guard",
+            timeout_seconds=_remaining_hook_budget(deadline),
+            timeout_code="STOP_TRANSITION_GUARD_DEADLINE",
+        )
     try:
-        absence_checker(
-            gate["journalAbsenceProof"],
-            expected_journal=layout.journal_path,
-        )
-        health_checker(
-            codex_home=config.codex_home,
-            state_home=config.state_home,
-            activation_id=config.launch_activation_id,
-        )
+        with operation_deadline_v2.scoped_current_deadline_v2(operation_deadline):
+            operation_deadline.checkpoint()
+            absence_checker(
+                gate["journalAbsenceProof"],
+                expected_journal=layout.journal_path,
+                deadline=deadline,
+            )
+            operation_deadline.checkpoint()
+            health_checker(
+                codex_home=config.codex_home,
+                state_home=config.state_home,
+                activation_id=config.launch_activation_id,
+                deadline=deadline,
+            )
+            operation_deadline.checkpoint()
+            _remaining_hook_budget(deadline)
     except Exception as exc:
         raise IntegrationV2Error(
             "закреплённая активация изменилась после чтения smart_plan"

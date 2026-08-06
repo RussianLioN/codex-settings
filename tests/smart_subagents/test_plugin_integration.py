@@ -785,6 +785,57 @@ class PluginMetadataTests(unittest.TestCase):
             response = parse_single_deferred_stdout(result.stdout)
             self.assertIn("срок", response["reason"].lower())
 
+    def test_stop_parent_kills_worker_process_group_on_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pid_file = Path(tmp) / "grandchild.pid"
+            write_fake_pathlib(
+                Path(tmp),
+                [
+                    "import os",
+                    "import subprocess",
+                    "import sys",
+                    "import time",
+                    "marker = os.getenv(\"SMART_TEST_GRANDCHILD_PID\")",
+                    "script = \"import os, sys, time; open(sys.argv[1], \\\"w\\\").write(str(os.getpid())); time.sleep(30)\"",
+                    "subprocess.Popen([sys.executable, \"-c\", script, marker])",
+                    "time.sleep(2.2)",
+                ],
+            )
+            environment_copy = dict(getattr(os, "environ"))
+            environment_copy["PYTHONPATH"] = tmp
+            environment_copy["SMART_TEST_GRANDCHILD_PID"] = str(pid_file)
+
+            result = subprocess.run(
+                stop_hook_command(),
+                input=stop_payload(),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment_copy,
+                check=False,
+                timeout=2.0,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
+            response = parse_single_deferred_stdout(result.stdout)
+            self.assertIn("срок", response["reason"].lower())
+            pid = int(pid_file.read_text(encoding="utf-8"))
+            alive = True
+            try:
+                for _attempt in range(20):
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        alive = False
+                        break
+                    time.sleep(0.05)
+                self.assertFalse(alive, f"grandchild process leaked: {pid}")
+            finally:
+                if alive:
+                    try:
+                        os.kill(pid, 9)
+                    except ProcessLookupError:
+                        pass
+
     def test_stop_parent_rejects_worker_stdout_over_64kib(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             write_fake_pathlib(
