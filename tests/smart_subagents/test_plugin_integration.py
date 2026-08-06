@@ -6,6 +6,7 @@ import json
 import os
 import socket
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
@@ -279,11 +280,110 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertGreaterEqual(start_command["timeout"], 9)
         self.assertEqual("command", prompt["type"])
         self.assertIn("$PLUGIN_ROOT", prompt["command"])
-        self.assertEqual(2, prompt["timeout"])
+        self.assertEqual(5, prompt["timeout"])
         self.assertEqual("command", stop["type"])
         self.assertIn("$PLUGIN_ROOT", stop["command"])
-        self.assertLessEqual(stop["timeout"], 2)
+        self.assertEqual(5, stop["timeout"])
         self.assertIn("session-end", session_end["command"])
+        self.assertEqual(5, session_end["timeout"])
+
+    def test_stop_launcher_overwrites_deadline_before_runpy(self) -> None:
+        launcher_source = (
+            PLUGIN_ROOT / "bin" / "codex-smart-subagents-hook"
+        ).read_text(encoding="utf-8")
+        self.assertLess(
+            launcher_source.index("os.environ[STOP_HOOK_DEADLINE_MONOTONIC_NS_ENV]"),
+            launcher_source.index("import runpy"),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "marker.json"
+            fake_pathlib = Path(tmp) / "pathlib.py"
+            fake_pathlib.write_text(
+                "\n".join(
+                    [
+                        "import json",
+                        "import os",
+                        "import sys",
+                        "started = os.environ.get('CODEX_SMART_HOOK_STARTED_MONOTONIC_NS')",
+                        "deadline = os.environ.get('CODEX_SMART_HOOK_DEADLINE_MONOTONIC_NS')",
+                        "with open(os.environ['SMART_TEST_MARKER'], 'w', encoding='utf-8') as stream:",
+                        "    json.dump({'started': started, 'deadline': deadline}, stream)",
+                        "raise SystemExit(0)",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PYTHONPATH": tmp,
+                    "SMART_TEST_MARKER": str(marker),
+                    "CODEX_SMART_HOOK_STARTED_MONOTONIC_NS": "user-start",
+                    "CODEX_SMART_HOOK_DEADLINE_MONOTONIC_NS": "user-deadline",
+                }
+            )
+
+            result = subprocess.run(
+                [str(PLUGIN_ROOT / "bin" / "codex-smart-subagents-hook"), "stop"],
+                input=b'{"hook_event_name":"Stop"}',
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                check=False,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
+            observed = json.loads(marker.read_text(encoding="utf-8"))
+            self.assertNotEqual("user-start", observed["started"])
+            self.assertNotEqual("user-deadline", observed["deadline"])
+            started = int(observed["started"])
+            deadline = int(observed["deadline"])
+            self.assertGreater(started, 0)
+            self.assertEqual(1_500_000_000, deadline - started)
+
+    def test_stop_subprocess_returns_fail_open_json_when_deadline_elapsed(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_pathlib = Path(tmp) / "pathlib.py"
+            fake_pathlib.write_text(
+                "\n".join(
+                    [
+                        "import importlib",
+                        "import os",
+                        "import sys",
+                        "import time",
+                        "time.sleep(1.55)",
+                        "sys.path = [p for p in sys.path if p != os.path.dirname(__file__)]",
+                        "sys.modules.pop(__name__, None)",
+                        "module = importlib.import_module(__name__)",
+                        "globals().update(module.__dict__)",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["PYTHONPATH"] = tmp
+            payload = {
+                "session_id": "session-1",
+                "turn_id": "turn-1",
+                "hook_event_name": "Stop",
+            }
+
+            result = subprocess.run(
+                [str(PLUGIN_ROOT / "bin" / "codex-smart-subagents-hook"), "stop"],
+                input=json.dumps(payload).encode("utf-8"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                check=False,
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr.decode("utf-8"))
+            response = json.loads(result.stdout.decode("utf-8"))
+            self.assertTrue(response["continue"])
+            self.assertEqual("SMART_HOOK_DEFERRED", response["code"])
+            self.assertIn("срок", response["reason"].lower())
 
     def test_bundled_entrypoints_are_executable_regular_files(self) -> None:
         for relative in (
@@ -308,6 +408,10 @@ class HookIntegrationTests(unittest.TestCase):
         cls.stop_hook = load_module(
             "smart_stop_hook",
             "hooks/stop.py",
+        )
+        cls.session_end_hook = load_module(
+            "smart_session_end_hook",
+            "hooks/session_end.py",
         )
         cls.runtime = load_module(
             "smart_integration_runtime",
@@ -467,6 +571,26 @@ class HookIntegrationTests(unittest.TestCase):
             self.assertNotIn("hookSpecificOutput", response)
         self.assertTrue(third["continue"])
         self.assertIn("двух", third["systemMessage"].lower())
+
+    def test_session_end_error_returns_fail_open_json(self) -> None:
+        payload = hook_payload("SessionEnd")
+        with (
+            mock.patch.object(
+                self.session_end_hook,
+                "environment_is_active",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.session_end_hook.IntegrationConfigV2,
+                "from_environ",
+                side_effect=RuntimeError("broken runtime"),
+            ),
+        ):
+            response = self.session_end_hook.handle(payload, self.env)
+
+        self.assertTrue(response["continue"])
+        self.assertEqual("SMART_HOOK_DEFERRED", response["code"])
+        self.assertIn("SessionEnd", response["reason"])
 
     def test_new_turn_best_effort_cancels_superseded_active_route(self) -> None:
         self.prompt_hook.handle(

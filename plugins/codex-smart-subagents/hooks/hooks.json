@@ -19,7 +19,7 @@
           {
             "type": "command",
             "command": "\"$PLUGIN_ROOT/bin/codex-smart-subagents-hook\" user-prompt-submit",
-            "timeout": 2,
+            "timeout": 5,
             "statusMessage": "Подготовка умного маршрута"
           }
         ]
@@ -31,7 +31,7 @@
           {
             "type": "command",
             "command": "\"$PLUGIN_ROOT/bin/codex-smart-subagents-hook\" stop",
-            "timeout": 2,
+            "timeout": 5,
             "statusMessage": "Проверка состояния умного маршрута"
           }
         ]
@@ -43,7 +43,7 @@
           {
             "type": "command",
             "command": "\"$PLUGIN_ROOT/bin/codex-smart-subagents-hook\" session-end",
-            "timeout": 2,
+            "timeout": 5,
             "statusMessage": "Освобождение умного сеанса проекта"
           }
         ]

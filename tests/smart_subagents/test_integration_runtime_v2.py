@@ -2099,6 +2099,107 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         self.assertLess(provider_remaining[0], 0.10)
         self.assertLess(elapsed, 0.30)
 
+    def test_v2_stop_skips_resume_acknowledgement_after_shared_deadline(
+        self,
+    ) -> None:
+        TurnContextStoreV2(self.config).save(self.record)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        environment["CODEX_SMART_LAUNCH_KIND"] = "resume"
+        path = PLUGIN / "hooks" / "stop.py"
+        spec = importlib.util.spec_from_file_location(
+            "smart_stop_resume_ack_deadline_test",
+            path,
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        def terminal_after_deadline(
+            _config: IntegrationConfigV2,
+            _record: HookTurnContextV2,
+            *,
+            environ: Mapping[str, str],
+            deadline: float,
+        ) -> str:
+            time.sleep(0.08)
+            return "DIRECT"
+
+        with (
+            mock.patch.object(
+                module,
+                "HOOK_TOTAL_BUDGET_SECONDS_V2",
+                0.05,
+                create=True,
+            ),
+            mock.patch.object(
+                module,
+                "_acknowledge_resume_result_v2",
+                side_effect=AssertionError("ack must not run after deadline"),
+            ) as acknowledge,
+        ):
+            response = module.handle(
+                {
+                    "session_id": self.record.session_id,
+                    "turn_id": self.record.turn_id,
+                    "hook_event_name": "Stop",
+                },
+                environment,
+                v2_plan_state_provider=terminal_after_deadline,
+            )
+
+        self.assertTrue(response["continue"])
+        self.assertEqual("SMART_HOOK_DEFERRED", response["code"])
+        acknowledge.assert_not_called()
+
+    def test_v2_stop_resume_acknowledgement_error_is_fail_open_and_repeatable(
+        self,
+    ) -> None:
+        TurnContextStoreV2(self.config).save(self.record)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        environment["CODEX_SMART_LAUNCH_KIND"] = "resume"
+        path = PLUGIN / "hooks" / "stop.py"
+        spec = importlib.util.spec_from_file_location(
+            "smart_stop_resume_ack_error_test",
+            path,
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        payload = {
+            "session_id": self.record.session_id,
+            "turn_id": self.record.turn_id,
+            "hook_event_name": "Stop",
+        }
+
+        with mock.patch.object(
+            module,
+            "_acknowledge_resume_result_v2",
+            side_effect=RuntimeError("ack failed"),
+        ):
+            first = module.handle(
+                payload,
+                environment,
+                v2_plan_state_provider=(
+                    lambda _config, _record, *, environ, deadline: "DIRECT"
+                ),
+            )
+            second = module.handle(
+                payload,
+                environment,
+                v2_plan_state_provider=(
+                    lambda _config, _record, *, environ, deadline: "DIRECT"
+                ),
+            )
+
+        for response in (first, second):
+            self.assertTrue(response["continue"])
+            self.assertEqual("SMART_HOOK_DEFERRED", response["code"])
+            self.assertIn("resume", response["reason"])
+
     def test_v2_stop_blocks_unfinished_delegate_and_allows_terminal_route(
         self,
     ) -> None:

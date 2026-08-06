@@ -3,8 +3,24 @@
 
 from __future__ import annotations
 
-import runpy
+import os
 import sys
+import time
+
+
+STOP_HOOK_BUDGET_NS = 1_500_000_000
+STOP_HOOK_STARTED_MONOTONIC_NS_ENV = "CODEX_SMART_HOOK_STARTED_MONOTONIC_NS"
+STOP_HOOK_DEADLINE_MONOTONIC_NS_ENV = "CODEX_SMART_HOOK_DEADLINE_MONOTONIC_NS"
+
+if len(sys.argv) == 2 and sys.argv[1] == "stop":
+    started_ns = time.monotonic_ns()
+    os.environ[STOP_HOOK_STARTED_MONOTONIC_NS_ENV] = str(started_ns)
+    os.environ[STOP_HOOK_DEADLINE_MONOTONIC_NS_ENV] = str(
+        started_ns + STOP_HOOK_BUDGET_NS
+    )
+
+
+import runpy
 from pathlib import Path
 
 
