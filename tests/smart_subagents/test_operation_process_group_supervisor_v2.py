@@ -1008,6 +1008,9 @@ class OperationProcessGroupSupervisorV2Tests(unittest.TestCase):
         module = _load_module()
         process = _FakeProcess()
         process.returncode = 0
+        process.stdin = _TrackedStream()
+        process.stdout = _TrackedStream()
+        process.stderr = _TrackedStream()
         group_alive = True
         supervisor = module.OperationProcessGroupSupervisorV2(
             popen_factory=lambda _argv, **_kwargs: process,
@@ -1049,11 +1052,17 @@ class OperationProcessGroupSupervisorV2Tests(unittest.TestCase):
             module.OutstandingProcessCleanupObligationV2
         ):
             supervisor.assert_continuation_allowed()
+        self.assertFalse(process.stdin.closed)
+        self.assertFalse(process.stdout.closed)
+        self.assertFalse(process.stderr.closed)
 
         group_alive = False
         self.assertEqual(
             (lease.lease_id,), supervisor.reconcile_completed_transients()
         )
+        self.assertTrue(process.stdin.closed)
+        self.assertTrue(process.stdout.closed)
+        self.assertTrue(process.stderr.closed)
         supervisor.assert_continuation_allowed()
 
     def test_scoped_supervisor_reuses_identity_and_restores_outer_state(
