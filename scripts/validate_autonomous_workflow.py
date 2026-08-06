@@ -9,6 +9,7 @@ import io
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -39,6 +40,8 @@ ENTRYPOINT_JOURNAL = (
 CHATGPT_RESOURCES = Path("/Applications/ChatGPT.app/Contents/Resources")
 DEFAULT_WAVE_SIZE = 6
 MAX_BASE_THREADS = 20
+PUBLIC_THREAD_CAP_KEY = "max_concurrent_threads_per_session"
+LEGACY_THREAD_CAP_KEY = "max_threads"
 HIGH_FD_LIMIT = 4096
 ENTRYPOINT_ALIASES_BYTES = (
     b"alias codex='CODEX_SMART_ENABLED=1 "
@@ -57,7 +60,7 @@ ENTRYPOINT_ALIASES_BYTES = (
     b"$HOME/.local/bin/codex-highfd --fd-doctor'\n"
 )
 EXPECTED_BASE_AGENT_LIMITS = {
-    "max_threads": MAX_BASE_THREADS,
+    PUBLIC_THREAD_CAP_KEY: MAX_BASE_THREADS,
     "max_depth": 1,
     "job_max_runtime_seconds": 1800,
 }
@@ -88,7 +91,7 @@ SKILLS = {
     "quality-gate",
     "safe-cleanup",
 }
-HOOK_EVENTS = {"PreToolUse", "PermissionRequest", "PostToolUse", "SubagentStart", "SubagentStop", "Stop"}
+HOOK_EVENTS = {"PreToolUse", "PermissionRequest", "PostToolUse", "SubagentStart", "SubagentStop", "Stop", "SessionEnd"}
 WRITER_FIELDS = {
     "mission",
     "owned write scope",
@@ -241,11 +244,27 @@ def markdown_policy_marker_failures(text: str) -> list[str]:
 
 def base_agent_limit_failures(config: dict[str, Any]) -> list[str]:
     agents = config.get("agents", {})
-    return [
+    failures = [
         f"agents.{setting} must be {expected}, got {agents.get(setting)!r}"
         for setting, expected in EXPECTED_BASE_AGENT_LIMITS.items()
         if type(agents.get(setting)) is not int or agents.get(setting) != expected
     ]
+    if LEGACY_THREAD_CAP_KEY in agents:
+        failures.append(
+            "agents.max_threads is a legacy alias; use "
+            "agents.max_concurrent_threads_per_session"
+        )
+    multi_agent_v2 = config.get("features", {}).get("multi_agent_v2", {})
+    if multi_agent_v2.get("enabled") is not True:
+        failures.append(
+            "features.multi_agent_v2.enabled must be true"
+        )
+    if "max_concurrent_threads_per_session" in multi_agent_v2:
+        failures.append(
+            "features.multi_agent_v2.max_concurrent_threads_per_session "
+            "is an internal legacy limit; use agents.max_concurrent_threads_per_session"
+        )
+    return failures
 
 
 def extract_interface_default_prompt(text: str) -> str:
@@ -267,11 +286,11 @@ def extract_interface_default_prompt(text: str) -> str:
 
 def check_subagent_wait_policy_regressions() -> None:
     for setting, wrong_value in (
-        ("max_threads", 19),
+        ("max_concurrent_threads_per_session", 19),
         ("max_depth", 2),
         ("job_max_runtime_seconds", 1799),
         ("max_depth", True),
-        ("max_threads", 20.0),
+        ("max_concurrent_threads_per_session", 20.0),
     ):
         agents = dict(EXPECTED_BASE_AGENT_LIMITS)
         agents[setting] = wrong_value
@@ -396,17 +415,37 @@ def check_profiles() -> None:
     for name, expected in PROFILES.items():
         path = CODEX_HOME / f"{name}.config.toml"
         data = load_toml(path)
-        model, effort, sandbox, approval, threads, depth, runtime = expected
-        assert data.get("model") == model, f"{path} model mismatch"
-        assert data.get("model_reasoning_effort") == effort, f"{path} effort mismatch"
-        assert data.get("sandbox_mode") == sandbox, f"{path} sandbox mismatch"
-        assert data.get("approval_policy") == approval, f"{path} approval mismatch"
-        agents = data.get("agents", {})
-        assert agents.get("max_threads") == threads, f"{path} max_threads mismatch"
-        assert agents.get("max_depth") == depth, f"{path} max_depth mismatch"
-        if runtime is not None:
-            assert agents.get("job_max_runtime_seconds") == runtime, f"{path} runtime mismatch"
+        failures = profile_config_failures(name, data, str(path))
+        assert not failures, "profile config mismatch:\n- " + "\n- ".join(failures)
         assert_no_unlimited(data, str(path))
+
+
+def profile_config_failures(name: str, data: dict[str, Any], label: str | None = None) -> list[str]:
+    label = label or name
+    model, effort, sandbox, approval, threads, depth, runtime = PROFILES[name]
+    failures: list[str] = []
+    if data.get("model") != model:
+        failures.append(f"{label} model mismatch")
+    if data.get("model_reasoning_effort") != effort:
+        failures.append(f"{label} effort mismatch")
+    if data.get("sandbox_mode") != sandbox:
+        failures.append(f"{label} sandbox mismatch")
+    if data.get("approval_policy") != approval:
+        failures.append(f"{label} approval mismatch")
+    agents = data.get("agents", {})
+    if not isinstance(agents, dict):
+        failures.append(f"{label} agents table missing")
+        return failures
+    if LEGACY_THREAD_CAP_KEY in agents:
+        failures.append(f"{label} agents.max_threads is legacy; use agents.{PUBLIC_THREAD_CAP_KEY}")
+    actual_threads = agents.get(PUBLIC_THREAD_CAP_KEY)
+    if type(actual_threads) is not int or actual_threads != threads:
+        failures.append(f"{label} agents.{PUBLIC_THREAD_CAP_KEY} must be {threads}, got {actual_threads!r}")
+    if type(agents.get("max_depth")) is not int or agents.get("max_depth") != depth:
+        failures.append(f"{label} agents.max_depth must be {depth}, got {agents.get('max_depth')!r}")
+    if runtime is not None and (type(agents.get("job_max_runtime_seconds")) is not int or agents.get("job_max_runtime_seconds") != runtime):
+        failures.append(f"{label} agents.job_max_runtime_seconds must be {runtime}, got {agents.get('job_max_runtime_seconds')!r}")
+    return failures
 
 
 def check_agents() -> None:
@@ -430,6 +469,8 @@ def check_hooks() -> None:
     assert HOOK_EVENTS <= configured, f"hooks missing events: {sorted(HOOK_EVENTS - configured)}"
     assert policy_path.exists(), f"missing hook policy: {policy_path}"
     assert HOOK_POLICY.read_bytes() == policy_path.read_bytes(), "installed hook policy differs from tracked source"
+    hook_failures = managed_hook_contract_failures(hooks, policy_path)
+    assert not hook_failures, "managed hook contract mismatch:\n- " + "\n- ".join(hook_failures)
     allowed_reviewer_start = run_hook(
         policy_path,
         "SubagentStart",
@@ -594,6 +635,46 @@ def check_hooks() -> None:
     assert allowed_copy.returncode == 0, "hook blocked an outside read copied into the worktree"
 
 
+def managed_hook_contract_failures(hooks_document: dict[str, Any], policy_path: Path) -> list[str]:
+    hooks = hooks_document.get("hooks", {})
+    failures: list[str] = []
+    if not isinstance(hooks, dict):
+        return ["hooks field must be an object"]
+    for event in sorted(HOOK_EVENTS):
+        entries = hooks.get(event)
+        if not isinstance(entries, list):
+            failures.append(f"{event} must contain a list")
+            continue
+        managed = [hook for entry in entries for hook in entry_hooks(entry) if hook_matches_policy_event(hook, policy_path, event)]
+        if len(managed) != 1:
+            failures.append(f"{event} must contain exactly one managed autonomous_policy hook, got {len(managed)}")
+            continue
+        expected_timeout = 3 if event == "SessionEnd" else 1
+        if managed[0].get("timeout") != expected_timeout:
+            failures.append(f"{event} managed hook timeout must be {expected_timeout}")
+    return failures
+
+
+def entry_hooks(entry: Any) -> list[dict[str, Any]]:
+    if not isinstance(entry, dict):
+        return []
+    hooks = entry.get("hooks")
+    if not isinstance(hooks, list):
+        return []
+    return [hook for hook in hooks if isinstance(hook, dict)]
+
+
+def hook_matches_policy_event(hook: dict[str, Any], policy_path: Path, event: str) -> bool:
+    command = hook.get("command")
+    if not isinstance(command, str):
+        return False
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+    return str(policy_path) in tokens and event in tokens
+
+
 def check_skills() -> None:
     for name in SKILLS:
         path = CODEX_HOME / "skills" / name / "SKILL.md"
@@ -728,7 +809,13 @@ def check_rollback() -> None:
     backups = sorted((CODEX_HOME / "backups").glob("runtime-fd-*"))
     assert backups, "runtime FD backup set is missing"
     result = subprocess.run(
-        [sys.executable, str(REPO / "scripts/codex_autonomous_rollback.py"), "--backup", str(backups[-1])],
+        [
+            sys.executable,
+            str(REPO / "scripts/codex_autonomous_rollback.py"),
+            "--backup",
+            str(backups[-1]),
+            "--legacy-runtime-cache-rollback",
+        ],
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -770,8 +857,18 @@ def check_runtime_rollback_apply(script: Path) -> None:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         module.CODEX_HOME = codex_home
+        try:
+            module.handle_runtime_backup(backup, False)
+        except SystemExit as exc:
+            assert "--legacy-runtime-cache-rollback" in str(exc)
+        else:
+            raise AssertionError("legacy runtime cache rollback lacked explicit confirmation")
         with redirect_stdout(io.StringIO()):
-            assert module.handle_runtime_backup(backup, True) == 0
+            assert module.handle_runtime_backup(
+                backup,
+                True,
+                allow_legacy_cache_restore=True,
+            ) == 0
 
         browser_target = codex_home / "plugins/cache/openai-bundled/browser"
         marketplace_target = codex_home / ".tmp/bundled-marketplaces/openai-bundled"
@@ -880,13 +977,19 @@ def run_fd_doctor(
         {
             "CODEX_FD_DOCTOR_SOFT_LIMIT": str(soft_limit),
             "CODEX_FD_DOCTOR_HARD_LIMIT": "unlimited",
-            "CODEX_FD_DOCTOR_LAUNCHD_SOFT_LIMIT": "256",
+            "CODEX_FD_DOCTOR_LAUNCHD_FD_SOFT_LIMIT": str(soft_limit),
             "CODEX_FD_DOCTOR_CODEX_FD_COUNT": str(fd_count),
             "CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT": "2",
             "CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT": "2",
             "CODEX_FD_DOCTOR_ORPHAN_NODE_REPL_COUNT": str(orphan_count),
             "CODEX_FD_DOCTOR_STALE_NODE_REPL_COUNT": str(stale_count),
             "CODEX_FD_DOCTOR_MCP_COMMAND": str(CHATGPT_RESOURCES / "cua_node/bin/node_repl"),
+            "CODEX_FD_DOCTOR_AGENT_THREAD_CAP": str(MAX_BASE_THREADS),
+            "CODEX_FD_DOCTOR_USER_PROCESS_SOFT_LIMIT": "4096",
+            "CODEX_FD_DOCTOR_LAUNCHD_MAXPROC_SOFT_LIMIT": "2666",
+            "CODEX_FD_DOCTOR_KERN_MAXPROCPERUID": "3000",
+            "CODEX_FD_DOCTOR_USER_PROCESS_COUNT": "100",
+            "CODEX_FD_DOCTOR_TEST_MODE": "1",
         }
     )
     return subprocess.run(
