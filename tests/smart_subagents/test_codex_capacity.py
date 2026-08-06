@@ -235,6 +235,157 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertEqual(1, store.snapshot()["active_count"])
         self.assertNotIn("task-1", self.db_path.read_text(encoding="utf-8", errors="ignore"))
 
+    def test_managed_root_registry_deduplicates_sessions_and_requires_start_marker(self) -> None:
+        store = self.manager()
+
+        first = store.acquire_or_queue(
+            **self.request(1, session="tab-a"),
+            root_pid=700,
+            root_start_marker="start-a",
+        )
+        second = store.acquire_or_queue(
+            **self.request(1, session="tab-b"),
+            root_pid=700,
+            root_start_marker="start-a",
+        )
+
+        self.assertEqual("LEASED", first["state"])
+        self.assertEqual("LEASED", second["state"])
+        self.assertEqual(
+            [(700, "start-a")],
+            store.managed_root_identities(),
+        )
+        self.assertTrue(store.is_managed_root(root_pid=700, root_start_marker="start-a"))
+        self.assertFalse(store.is_managed_root(root_pid=700, root_start_marker="start-b"))
+        self.assertEqual(2, store.snapshot()["managed_root_session_count"])
+        self.assertEqual(1, store.snapshot()["managed_root_count"])
+
+    def test_session_end_removes_only_that_session_root_registration(self) -> None:
+        store = self.manager()
+        store.acquire_or_queue(
+            **self.request(1, session="tab-a"),
+            root_pid=700,
+            root_start_marker="start-a",
+        )
+        store.acquire_or_queue(
+            **self.request(1, session="tab-b"),
+            root_pid=800,
+            root_start_marker="start-b",
+        )
+
+        store.cancel_session(session_id="tab-a")
+
+        self.assertFalse(store.is_managed_root(root_pid=700, root_start_marker="start-a"))
+        self.assertTrue(store.is_managed_root(root_pid=800, root_start_marker="start-b"))
+        self.assertEqual([(800, "start-b")], store.managed_root_identities())
+
+    def test_schema_v1_database_migrates_managed_root_registry_without_losing_leases(self) -> None:
+        self.state_dir.mkdir(parents=True, mode=0o700)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.executescript(
+                """
+                create table meta (key text primary key, value text not null);
+                insert into meta (key, value) values ('next_epoch', '2'), ('fair_cursor', '');
+                create table requests (
+                  request_id text primary key,
+                  session_id text not null,
+                  turn_id text not null,
+                  ticket_id text,
+                  lease_id text,
+                  created_at real not null,
+                  updated_at real not null
+                );
+                create table tickets (
+                  ticket_id text primary key,
+                  request_id text not null unique references requests(request_id),
+                  session_id text not null,
+                  turn_id text not null,
+                  state text not null check (state in ('PENDING', 'READY', 'CANCELED')),
+                  created_at real not null,
+                  ready_at real,
+                  consumed_at real,
+                  updated_at real not null
+                );
+                create table leases (
+                  lease_id text primary key,
+                  request_id text not null references requests(request_id),
+                  ticket_id text references tickets(ticket_id),
+                  session_id text not null,
+                  turn_id text not null,
+                  state text not null check (
+                    state in ('PROVISIONAL', 'ACTIVE', 'SUSPECT', 'RECOVERING', 'CLEANUP_REQUIRED', 'RELEASED')
+                  ),
+                  fencing_epoch integer not null,
+                  agent_id text,
+                  created_at real not null,
+                  updated_at real not null,
+                  cleanup_after real,
+                  released_at real
+                );
+                create unique index leases_active_request
+                  on leases(request_id)
+                  where state != 'RELEASED';
+                create table events (
+                  id integer primary key autoincrement,
+                  created_at real not null,
+                  event text not null,
+                  payload_json text not null
+                );
+                insert into requests (request_id, session_id, turn_id, lease_id, created_at, updated_at)
+                values ('request-a', 'session-a', 'turn-a', 'lease-a', 1.0, 1.0);
+                insert into leases (lease_id, request_id, session_id, turn_id, state, fencing_epoch, created_at, updated_at)
+                values ('lease-a', 'request-a', 'session-a', 'turn-a', 'ACTIVE', 1, 1.0, 1.0);
+                pragma user_version = 1;
+                """
+            )
+        finally:
+            conn.close()
+
+        snapshot = self.manager().snapshot()
+
+        self.assertEqual("OK", snapshot["state"])
+        self.assertEqual(1, snapshot["active_count"])
+        self.assertEqual(0, snapshot["managed_root_count"])
+        conn = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(2, conn.execute("pragma user_version").fetchone()[0])
+            self.assertIsNotNone(
+                conn.execute("select name from sqlite_master where type = 'table' and name = 'managed_roots'").fetchone()
+            )
+        finally:
+            conn.close()
+
+    def test_failed_initial_schema_creation_rolls_back_without_partial_tables_or_version(self) -> None:
+        store = self.manager()
+        store._prepare_state_dir()
+        conn = sqlite3.connect(self.db_path, isolation_level=None)
+        original_ensure_column = store._ensure_column
+
+        def fail_after_base_schema(*args: object, **kwargs: object) -> None:
+            raise RuntimeError("injected migration failure")
+
+        store._ensure_column = fail_after_base_schema  # type: ignore[method-assign]
+        try:
+            with self.assertRaises(RuntimeError):
+                store._run_initialization_transaction(conn, time.monotonic() + 1.0)
+        finally:
+            store._ensure_column = original_ensure_column  # type: ignore[method-assign]
+            conn.close()
+
+        verify = sqlite3.connect(self.db_path)
+        try:
+            tables = {
+                row[0]
+                for row in verify.execute(
+                    "select name from sqlite_master where type = 'table' and name not like 'sqlite_%'"
+                )
+            }
+            self.assertEqual(set(), tables)
+            self.assertEqual(0, verify.execute("pragma user_version").fetchone()[0])
+        finally:
+            verify.close()
+
     def test_ready_tickets_do_not_hold_capacity_and_cancellation_covers_ready(self) -> None:
         store = self.manager(limit=1)
         lease = store.acquire_or_queue(**self.request(1, session="s1", turn="t1"))
@@ -957,6 +1108,25 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertEqual(0o600, db_mode)
         self.assertEqual(0o600, lock_mode)
         self.assertEqual(0o600, log_mode)
+
+    def test_hot_path_skips_chmod_when_private_modes_are_already_exact(self) -> None:
+        store = self.manager()
+        store.acquire_or_queue(**self.request(1))
+        real_chmod = self.capacity.os.chmod
+        chmod_calls: list[tuple[Path, int]] = []
+
+        def record_chmod(path: str | bytes | os.PathLike[str] | os.PathLike[bytes], mode: int) -> None:
+            chmod_calls.append((Path(path), mode))
+            real_chmod(path, mode)
+
+        self.capacity.os.chmod = record_chmod
+        try:
+            result = store.acquire_or_queue(**self.request(2))
+        finally:
+            self.capacity.os.chmod = real_chmod
+
+        self.assertEqual("LEASED", result["state"])
+        self.assertEqual([], chmod_calls)
 
     def test_state_paths_reject_symlinks_unexpected_types_and_wrong_owner(self) -> None:
         symlink_home = self.root / "symlink-home"

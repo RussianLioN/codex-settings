@@ -308,6 +308,66 @@ class CapacityObserverTests(unittest.TestCase):
 
         self.assertEqual(roots, [21])
 
+    def test_codex_app_server_commands_are_not_cli_roots(self):
+        ps_text = "\n".join(
+            [
+                "20 1 501 user Mon Aug  3 10:00:00 2026 0.1 codex app-server",
+                "21 1 501 user Mon Aug  3 10:00:00 2026 0.1 codex-app-server",
+                "22 1 501 user Mon Aug  3 10:00:00 2026 0.1 /opt/homebrew/bin/codex app-server",
+                "23 1 501 user Mon Aug  3 10:00:00 2026 0.1 codex_app_server",
+                "24 1 501 user Mon Aug  3 10:00:00 2026 0.1 /opt/homebrew/bin/codex run",
+            ]
+        )
+
+        roots = observer.codex_root_pids(observer.parse_ps_snapshot(ps_text), 501)
+
+        self.assertEqual(roots, [24])
+
+    def test_newer_reused_parent_pid_does_not_hide_codex_root(self):
+        rows = observer.parse_ps_snapshot(
+            "\n".join(
+                [
+                    "100 1 501 user Mon Aug  3 10:05:00 2026 2.5 /opt/homebrew/bin/codex run",
+                    "101 100 501 user Mon Aug  3 10:00:00 2026 1.0 /opt/homebrew/bin/codex exec",
+                ]
+            )
+        )
+
+        roots = observer.codex_root_pids(rows, 501)
+        occupancy = observer.codex_root_occupancy(rows, 501, managed_root_identities=[], caller_pid=101)
+
+        self.assertEqual([100, 101], roots)
+        self.assertEqual(2.0, occupancy["codex_root_count"])
+        self.assertEqual(1.0, occupancy["external_codex_roots"])
+        self.assertEqual((101, rows[1]["start_marker"]), occupancy["current_codex_root_identity"])
+
+    def test_newer_reused_parent_pid_is_not_current_ancestor(self):
+        rows = observer.parse_ps_snapshot(
+            "\n".join(
+                [
+                    "100 1 501 user Mon Aug  3 10:05:00 2026 2.5 /opt/homebrew/bin/codex run",
+                    "101 100 501 user Mon Aug  3 10:00:00 2026 1.0 /usr/bin/python hook.py",
+                ]
+            )
+        )
+
+        occupancy = observer.codex_root_occupancy(rows, 501, managed_root_identities=[], caller_pid=101)
+
+        self.assertEqual(1.0, occupancy["codex_root_count"])
+        self.assertEqual(1.0, occupancy["external_codex_roots"])
+        self.assertIsNone(occupancy["current_codex_root_identity"])
+
+    def test_duplicate_ps_pid_fails_closed(self):
+        ps_text = "\n".join(
+            [
+                "100 1 501 user Mon Aug  3 10:00:00 2026 2.5 /opt/homebrew/bin/codex run",
+                "100 1 501 user Mon Aug  3 10:01:00 2026 2.5 /opt/homebrew/bin/codex run",
+            ]
+        )
+
+        with self.assertRaisesRegex(observer.ObservationError, "duplicate_ps_pid:100"):
+            observer.parse_ps_snapshot(ps_text)
+
     def test_partial_or_unavailable_root_lsof_is_red_with_zero_admission(self):
         partial = clean_snapshot(root_fd_state="partial")
 
@@ -348,8 +408,79 @@ class CapacityObserverTests(unittest.TestCase):
             observer.run_command = original
 
         ps_calls = [call for call in calls if call[0] == "ps"]
-        self.assertEqual(len(ps_calls), 1)
+        self.assertEqual(ps_calls, [["ps", "-axo", "pid=,ppid=,uid=,user=,lstart=,%cpu=,command="]])
         self.assertEqual(snapshot["codex_root_count"], 1.0)
+
+    def test_managed_root_registry_and_current_root_define_external_roots_from_one_ps_snapshot(self):
+        rows = observer.parse_ps_snapshot(
+            "\n".join(
+                [
+                    "100 1 501 user Mon Aug  3 10:00:00 2026 2.5 /opt/homebrew/bin/codex run",
+                    "101 100 501 user Mon Aug  3 10:00:01 2026 1.0 /usr/bin/python hook.py",
+                    "200 1 501 user Mon Aug  3 10:00:00 2026 2.5 /opt/homebrew/bin/codex run",
+                    "300 1 501 user Mon Aug  3 10:00:00 2026 2.5 /opt/homebrew/bin/codex run",
+                ]
+            )
+        )
+        managed = [(200, rows[2]["start_marker"]), (300, "different-start-marker")]
+
+        occupancy = observer.codex_root_occupancy(rows, 501, managed_root_identities=managed, caller_pid=101)
+
+        self.assertEqual(3.0, occupancy["codex_root_count"])
+        self.assertEqual(1.0, occupancy["external_codex_roots"])
+
+    def test_current_root_identity_uses_topmost_codex_ancestor(self):
+        rows = observer.parse_ps_snapshot(
+            "\n".join(
+                [
+                    "100 1 501 user Mon Aug  3 10:00:00 2026 2.5 /opt/homebrew/bin/codex run",
+                    "150 100 501 user Mon Aug  3 10:00:01 2026 2.5 /opt/homebrew/bin/codex exec",
+                    "151 150 501 user Mon Aug  3 10:00:02 2026 1.0 /usr/bin/python hook.py",
+                ]
+            )
+        )
+
+        occupancy = observer.codex_root_occupancy(rows, 501, managed_root_identities=[], caller_pid=151)
+
+        self.assertEqual(1.0, occupancy["codex_root_count"])
+        self.assertEqual(0.0, occupancy["external_codex_roots"])
+        self.assertEqual((100, rows[0]["start_marker"]), occupancy["current_codex_root_identity"])
+
+    def test_collect_process_snapshot_uses_existing_ps_for_managed_roots_without_second_ps_call(self):
+        calls = []
+        original = observer.run_command
+        ps_text = "\n".join(
+            [
+                "100 1 501 user Mon Aug  3 10:00:00 2026 2.5 /opt/homebrew/bin/codex run",
+                "101 100 501 user Mon Aug  3 10:00:01 2026 1.0 /usr/bin/python hook.py",
+                "200 1 501 user Mon Aug  3 10:00:00 2026 2.5 /opt/homebrew/bin/codex run",
+            ]
+        )
+        parsed = observer.parse_ps_snapshot(ps_text)
+
+        def fake_run(command, *, deadline=None):
+            calls.append(command)
+            if command[0] == "ps":
+                return ps_text
+            if command[0] == "lsof":
+                return "COMMAND PID USER FD\na 100 user txt\nb 200 user txt\n"
+            raise AssertionError(command)
+
+        try:
+            observer.run_command = fake_run
+            snapshot = observer.collect_process_snapshot(
+                managed_root_identities=[(200, parsed[2]["start_marker"])],
+                caller_pid=101,
+                deadline=time.monotonic() + 0.5,
+            )
+        finally:
+            observer.run_command = original
+
+        ps_calls = [call for call in calls if call[0] == "ps"]
+        self.assertEqual(ps_calls, [["ps", "-axo", "pid=,ppid=,uid=,user=,lstart=,%cpu=,command="]])
+        self.assertEqual(2.0, snapshot["codex_root_count"])
+        self.assertEqual(0.0, snapshot["external_codex_roots"])
+        self.assertEqual((100, parsed[0]["start_marker"]), snapshot["current_codex_root_identity"])
 
     def test_observe_passes_state_dir_to_disk_measurement(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -429,6 +560,29 @@ class CapacityObserverTests(unittest.TestCase):
 
         self.assertLess(elapsed, 0.5)
         self.assertIn("measurement_timeout", str(caught.exception))
+
+    def test_run_command_forces_c_locale_for_system_output(self):
+        calls = []
+        original = observer.subprocess.run
+
+        class Completed:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def fake_run(command, **kwargs):
+            calls.append((command, kwargs))
+            return Completed()
+
+        try:
+            observer.subprocess.run = fake_run
+            result = observer.run_command(["ps", "-axo", "pid="], deadline=time.monotonic() + 0.5)
+        finally:
+            observer.subprocess.run = original
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(calls[0][1]["env"]["LC_ALL"], "C")
+        self.assertEqual(calls[0][1]["env"]["LANG"], "C")
 
     def test_two_consecutive_critical_swapout_windows_are_red(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 DEFAULT_CAPACITY = 6
 MAX_CAPACITY = 20
+SCHEMA_VERSION = 2
 MAX_OPERATION_SECONDS = 0.45
 OPERATION_BUDGET_ENV = "CODEX_CAPACITY_MAX_OPERATION_SECONDS"
 SQLITE_BUSY_TIMEOUT_MS = 1
@@ -34,6 +35,82 @@ MAX_PENDING_PER_USER = 512
 ACTIVE_LEASE_STATES = {"PROVISIONAL", "ACTIVE", "SUSPECT", "RECOVERING", "CLEANUP_REQUIRED"}
 TERMINAL_LEASE_STATES = {"RELEASED"}
 MANAGED_FILE_NAMES = {"capacity.sqlite3", "capacity.sqlite3-wal", "capacity.sqlite3-shm", "capacity.lock", "events.jsonl"}
+INITIAL_SCHEMA_STATEMENTS = (
+    """
+    create table if not exists meta (
+      key text primary key,
+      value text not null
+    )
+    """,
+    """
+    create table if not exists requests (
+      request_id text primary key,
+      session_id text not null,
+      turn_id text not null,
+      ticket_id text,
+      lease_id text,
+      created_at real not null,
+      updated_at real not null
+    )
+    """,
+    """
+    create table if not exists tickets (
+      ticket_id text primary key,
+      request_id text not null unique references requests(request_id),
+      session_id text not null,
+      turn_id text not null,
+      state text not null check (state in ('PENDING', 'READY', 'CANCELED')),
+      created_at real not null,
+      ready_at real,
+      consumed_at real,
+      updated_at real not null
+    )
+    """,
+    """
+    create table if not exists leases (
+      lease_id text primary key,
+      request_id text not null references requests(request_id),
+      ticket_id text references tickets(ticket_id),
+      session_id text not null,
+      turn_id text not null,
+      state text not null check (
+        state in ('PROVISIONAL', 'ACTIVE', 'SUSPECT', 'RECOVERING', 'CLEANUP_REQUIRED', 'RELEASED')
+      ),
+      fencing_epoch integer not null,
+      agent_id text,
+      created_at real not null,
+      updated_at real not null,
+      cleanup_after real,
+      released_at real
+    )
+    """,
+    """
+    create unique index if not exists leases_active_request
+      on leases(request_id)
+      where state != 'RELEASED'
+    """,
+    """
+    create table if not exists events (
+      id integer primary key autoincrement,
+      created_at real not null,
+      event text not null,
+      payload_json text not null
+    )
+    """,
+    """
+    create table if not exists managed_roots (
+      session_id text primary key,
+      root_pid integer not null,
+      root_start_marker text not null,
+      created_at real not null,
+      updated_at real not null
+    )
+    """,
+    """
+    create index if not exists managed_roots_identity
+      on managed_roots(root_pid, root_start_marker)
+    """,
+)
 _INITIALIZED_DATABASES: Dict[Path, Tuple[int, int]] = {}
 _INITIALIZE_LOCK = threading.Lock()
 
@@ -78,14 +155,19 @@ class CapacityStore:
         turn_id: str,
         task_name: str,
         wave_limit: Optional[int] = None,
+        root_pid: Optional[int] = None,
+        root_start_marker: Optional[str] = None,
     ) -> dict[str, Any]:
         request_id = request_hash(session_id, turn_id, task_name)
+        root_identity = normalize_root_identity(root_pid, root_start_marker)
         now = current_time()
 
         def work(conn: sqlite3.Connection) -> dict[str, Any]:
             released = self._expire_stale_leases(conn, now)
             if released:
                 self._promote_pending(conn, now, limit=released)
+            if root_identity is not None:
+                self._register_managed_root(conn, session_id=session_id, root_identity=root_identity, now=now)
             existing = self._request_row(conn, request_id)
             if existing:
                 return self._existing_request_result(conn, existing, now, wave_limit=wave_limit)
@@ -359,15 +441,17 @@ class CapacityStore:
                 """,
                 (now + self.cleanup_ttl_seconds, now, session_id, *sorted(ACTIVE_LEASE_STATES - {"CLEANUP_REQUIRED"})),
             ).rowcount
+            roots = self._unregister_managed_root(conn, session_id=session_id)
             if ready_canceled:
                 self._promote_pending(conn, now, limit=ready_canceled)
-            self._log(conn, now, "cancel-session", session_id=session_id, tickets=tickets, leases=leases)
+            self._log(conn, now, "cancel-session", session_id=session_id, tickets=tickets, leases=leases, roots=roots)
             return {
                 "state": "OK",
                 "session_id": session_id,
                 "canceled_tickets": tickets,
                 "ready_canceled": ready_canceled,
                 "leases_marked": leases,
+                "managed_roots_unregistered": roots,
             }
 
         return self._write(work)
@@ -464,11 +548,49 @@ class CapacityStore:
                 "capacity": self.capacity,
                 "active_count": self._active_lease_count(conn),
                 "reserved_count": self._reserved_count(conn),
+                "managed_root_count": self._managed_root_count(conn),
+                "managed_root_session_count": self._managed_root_session_count(conn),
                 "leases": leases,
                 "tickets": tickets,
             }
 
         return self._read(work)
+
+    def managed_root_identities(self) -> list[tuple[int, str]]:
+        def work(conn: sqlite3.Connection) -> dict[str, Any]:
+            rows = conn.execute(
+                """
+                select root_pid, root_start_marker
+                from managed_roots
+                group by root_pid, root_start_marker
+                order by root_pid, root_start_marker
+                """
+            ).fetchall()
+            return {"state": "OK", "identities": [(int(row["root_pid"]), str(row["root_start_marker"])) for row in rows]}
+
+        result = self._read(work)
+        if result.get("state") == "ERROR":
+            return []
+        return list(result.get("identities") or [])
+
+    def is_managed_root(self, *, root_pid: int, root_start_marker: str) -> bool:
+        identity = normalize_root_identity(root_pid, root_start_marker)
+        if identity is None:
+            return False
+
+        def work(conn: sqlite3.Connection) -> dict[str, Any]:
+            row = conn.execute(
+                """
+                select 1 from managed_roots
+                where root_pid = ? and root_start_marker = ?
+                limit 1
+                """,
+                identity,
+            ).fetchone()
+            return {"state": "OK", "managed": row is not None}
+
+        result = self._read(work)
+        return bool(result.get("managed")) if result.get("state") != "ERROR" else False
 
     def _write(self, callback: Callable[[sqlite3.Connection], dict[str, Any]]) -> dict[str, Any]:
         try:
@@ -542,7 +664,7 @@ class CapacityStore:
                 raise CapacityError("unsafe_state_dir_type")
             if state.st_uid != os.geteuid():
                 raise CapacityError("unsafe_state_dir_owner")
-        os.chmod(self.state_dir, 0o700)
+            self._chmod_if_needed(self.state_dir, state.st_mode, 0o700)
         for path in (self.db_path, self.lock_path, self.log_path):
             self._verify_state_file(path, allow_missing=True)
         if not self.db_path.exists():
@@ -557,15 +679,19 @@ class CapacityStore:
                 flags |= os.O_NOFOLLOW
             descriptor = os.open(path, flags, 0o600)
             os.close(descriptor)
-            os.chmod(path, 0o600)
             self._verify_state_file(path, allow_missing=False)
+            self._chmod_if_needed(path, path.lstat().st_mode, 0o600)
         self._verify_state_file(self.db_path, allow_missing=False)
 
     def _chmod_state_files(self) -> None:
         for path in self._managed_file_paths():
             if path.exists() or path.is_symlink():
                 self._verify_state_file(path, allow_missing=False)
-                os.chmod(path, 0o600)
+                self._chmod_if_needed(path, path.lstat().st_mode, 0o600)
+
+    def _chmod_if_needed(self, path: Path, current_mode: int, expected_mode: int) -> None:
+        if stat.S_IMODE(current_mode) != expected_mode:
+            os.chmod(path, expected_mode)
 
     def _managed_file_paths(self) -> List[Path]:
         return [self.state_dir / name for name in sorted(MANAGED_FILE_NAMES)]
@@ -673,10 +799,11 @@ class CapacityStore:
     def _schema_ready(self, conn: sqlite3.Connection) -> bool:
         try:
             version = conn.execute("pragma user_version").fetchone()[0]
-            if int(version) != 1:
+            if int(version) != SCHEMA_VERSION:
                 return False
             row = conn.execute("select name from sqlite_master where type = 'table' and name = 'leases'").fetchone()
-            return row is not None
+            roots = conn.execute("select name from sqlite_master where type = 'table' and name = 'managed_roots'").fetchone()
+            return row is not None and roots is not None
         except sqlite3.DatabaseError:
             return False
 
@@ -697,64 +824,37 @@ class CapacityStore:
         raise CapacityError(f"database_error: {last_error or 'begin_immediate_timeout'}")
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
-        conn.executescript(
-            """
-            create table if not exists meta (
-              key text primary key,
-              value text not null
-            );
-            create table if not exists requests (
-              request_id text primary key,
-              session_id text not null,
-              turn_id text not null,
-              ticket_id text,
-              lease_id text,
-              created_at real not null,
-              updated_at real not null
-            );
-            create table if not exists tickets (
-              ticket_id text primary key,
-              request_id text not null unique references requests(request_id),
-              session_id text not null,
-              turn_id text not null,
-              state text not null check (state in ('PENDING', 'READY', 'CANCELED')),
-              created_at real not null,
-              ready_at real,
-              consumed_at real,
-              updated_at real not null
-            );
-            create table if not exists leases (
-              lease_id text primary key,
-              request_id text not null references requests(request_id),
-              ticket_id text references tickets(ticket_id),
-              session_id text not null,
-              turn_id text not null,
-              state text not null check (
-                state in ('PROVISIONAL', 'ACTIVE', 'SUSPECT', 'RECOVERING', 'CLEANUP_REQUIRED', 'RELEASED')
-              ),
-              fencing_epoch integer not null,
-              agent_id text,
-              created_at real not null,
-              updated_at real not null,
-              cleanup_after real,
-              released_at real
-            );
-            create unique index if not exists leases_active_request
-              on leases(request_id)
-              where state != 'RELEASED';
-            create table if not exists events (
-              id integer primary key autoincrement,
-              created_at real not null,
-              event text not null,
-              payload_json text not null
-            );
-            """
-        )
+        for statement in INITIAL_SCHEMA_STATEMENTS:
+            conn.execute(statement)
         conn.execute("insert or ignore into meta (key, value) values ('next_epoch', '1')")
         conn.execute("insert or ignore into meta (key, value) values ('fair_cursor', '')")
         self._ensure_column(conn, "leases", "cleanup_after", "real")
         self._ensure_column(conn, "tickets", "consumed_at", "real")
-        conn.execute("pragma user_version = 1")
+        conn.execute(f"pragma user_version = {SCHEMA_VERSION}")
+
+    def _register_managed_root(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        session_id: str,
+        root_identity: tuple[int, str],
+        now: float,
+    ) -> None:
+        root_pid, root_start_marker = root_identity
+        conn.execute(
+            """
+            insert into managed_roots (session_id, root_pid, root_start_marker, created_at, updated_at)
+            values (?, ?, ?, ?, ?)
+            on conflict(session_id) do update set
+              root_pid = excluded.root_pid,
+              root_start_marker = excluded.root_start_marker,
+              updated_at = excluded.updated_at
+            """,
+            (session_id, root_pid, root_start_marker, now, now),
+        )
+
+    def _unregister_managed_root(self, conn: sqlite3.Connection, *, session_id: str) -> int:
+        return conn.execute("delete from managed_roots where session_id = ?", (session_id,)).rowcount
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
         columns = {row["name"] for row in conn.execute(f"pragma table_info({table})")}
@@ -966,6 +1066,15 @@ class CapacityStore:
             tuple(sorted(ACTIVE_LEASE_STATES)),
         )
 
+    def _managed_root_count(self, conn: sqlite3.Connection) -> int:
+        return self._count(
+            conn,
+            "select count(*) from (select 1 from managed_roots group by root_pid, root_start_marker)",
+        )
+
+    def _managed_root_session_count(self, conn: sqlite3.Connection) -> int:
+        return self._count(conn, "select count(*) from managed_roots")
+
     def _request_row(self, conn: sqlite3.Connection, request_id: str) -> Optional[sqlite3.Row]:
         return conn.execute("select * from requests where request_id = ?", (request_id,)).fetchone()
 
@@ -1117,6 +1226,19 @@ def request_hash(session_id: str, turn_id: str, task_name: str) -> str:
     ]
     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def normalize_root_identity(root_pid: Optional[int], root_start_marker: Optional[str]) -> Optional[tuple[int, str]]:
+    if root_pid is None or root_start_marker in (None, ""):
+        return None
+    try:
+        pid = int(root_pid)
+    except (TypeError, ValueError):
+        return None
+    marker = str(root_start_marker).strip()
+    if pid <= 0 or not marker:
+        return None
+    return pid, marker
 
 
 def current_time() -> float:
@@ -1293,6 +1415,7 @@ def prepare_wave(
         state_dir=observer_state_dir or store.state_dir,
         workload_class=workload_class,
         active_slots=managed_slots,
+        managed_root_identities=store.managed_root_identities(),
     )
     measurements = observation.get("measurements") if isinstance(observation.get("measurements"), dict) else {}
     external_roots = max(0, int(float(measurements.get("external_codex_roots") or 0)))
@@ -1435,6 +1558,8 @@ def add_request_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--turn-id", required=True)
     parser.add_argument("--task-name", required=True)
+    parser.add_argument("--root-pid", type=int)
+    parser.add_argument("--root-start-marker")
 
 
 def add_capacity_argument(parser: argparse.ArgumentParser) -> None:
@@ -1454,6 +1579,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 session_id=args.session_id,
                 turn_id=args.turn_id,
                 task_name=args.task_name,
+                root_pid=args.root_pid,
+                root_start_marker=args.root_start_marker,
             )
             print_json(result)
             return exit_for_result(result)

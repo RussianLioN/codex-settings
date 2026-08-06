@@ -208,7 +208,7 @@ def handle_spawn_capacity(payload: dict[str, Any], details: dict[str, Any], *, d
         return "block", deadline_reason, details
 
     base_store = capacity_store(capacity=DEFAULT_CAPACITY, max_operation_seconds=snapshot_budget)
-    capacity_limit, wave_limit, observer_reason = observed_capacity_limit(base_store, details, deadline=deadline)
+    capacity_limit, wave_limit, observer_reason, root_identity = observed_capacity_limit(base_store, details, deadline=deadline)
     if observer_reason:
         return "block", observer_reason, details
 
@@ -226,6 +226,8 @@ def handle_spawn_capacity(payload: dict[str, Any], details: dict[str, Any], *, d
         turn_id=request.turn_id,
         task_name=request.task_name,
         wave_limit=wave_limit,
+        root_pid=root_identity[0] if root_identity else None,
+        root_start_marker=root_identity[1] if root_identity else None,
     )
     details["capacity"] = sanitize_capacity_result(result)
     state = str(result.get("state") or "")
@@ -239,11 +241,11 @@ def handle_spawn_capacity(payload: dict[str, Any], details: dict[str, Any], *, d
     return "block", f"unexpected capacity state: {state or 'missing'}", details
 
 
-def observed_capacity_limit(store: CapacityStore, details: dict[str, Any], *, deadline: float | None = None) -> tuple[int, Optional[int], str]:
+def observed_capacity_limit(store: CapacityStore, details: dict[str, Any], *, deadline: float | None = None) -> tuple[int, Optional[int], str, tuple[int, str] | None]:
     snapshot_result = store.snapshot()
     if snapshot_result.get("state") == "ERROR":
         details["capacity_snapshot"] = sanitize_capacity_result(snapshot_result)
-        return 0, 0, f"capacity error: {snapshot_result.get('reason') or 'snapshot_failed'}"
+        return 0, 0, f"capacity error: {snapshot_result.get('reason') or 'snapshot_failed'}", None
 
     _, deadline_reason = capacity_stage_budget(
         deadline,
@@ -252,15 +254,31 @@ def observed_capacity_limit(store: CapacityStore, details: dict[str, Any], *, de
         stage="observer",
     )
     if deadline_reason:
-        return 0, 0, deadline_reason
+        return 0, 0, deadline_reason, None
 
     managed_active = int(snapshot_result.get("active_count") or 0)
     managed_reserved = int(snapshot_result.get("reserved_count") or managed_active)
     managed_slots = max(managed_active, managed_reserved)
     details["capacity_snapshot"] = {"active_count": managed_active, "reserved_count": managed_reserved}
     snapshot = observer_snapshot_from_env(details)
+    root_identity = root_identity_from_snapshot(snapshot) if snapshot is not None else None
+    if snapshot is None:
+        try:
+            snapshot = capacity_observer.collect_snapshot(
+                state_dir=store.state_dir,
+                deadline=deadline,
+                managed_root_identities=store.managed_root_identities(),
+            )
+            raw_identity = snapshot.get("current_codex_root_identity")
+            if isinstance(raw_identity, (list, tuple)) and len(raw_identity) == 2:
+                root_identity = normalize_root_identity(raw_identity[0], raw_identity[1])
+        except Exception as exc:
+            observation = capacity_observer.fail_closed_output(str(exc))
+            details["capacity_observer"] = sanitize_observer_result(observation)
+            return 0, 0, capacity_observer_deny_json(observation), None
     if snapshot is not None:
         snapshot["active_slots"] = managed_slots
+        snapshot = observer_public_snapshot(snapshot)
     observer_budget, deadline_reason = capacity_stage_budget(
         deadline,
         reserve_seconds=CAPACITY_AFTER_OBSERVER_RESERVE_SECONDS,
@@ -268,7 +286,7 @@ def observed_capacity_limit(store: CapacityStore, details: dict[str, Any], *, de
         stage="observer_run",
     )
     if deadline_reason:
-        return 0, 0, deadline_reason
+        return 0, 0, deadline_reason, root_identity
     observation = observe_capacity_with_budget(
         snapshot=snapshot,
         state_dir=store.state_dir,
@@ -278,7 +296,7 @@ def observed_capacity_limit(store: CapacityStore, details: dict[str, Any], *, de
     details["capacity_observer"] = sanitize_observer_result(observation)
     status = str(observation.get("status") or "RED")
     if status == "RED":
-        return 0, 0, capacity_observer_deny_json(observation)
+        return 0, 0, capacity_observer_deny_json(observation), root_identity
     measurements = observation.get("measurements") if isinstance(observation.get("measurements"), dict) else {}
     external_roots = max(0, int(float(measurements.get("external_codex_roots") or 0)))
     admission = max(0, min(MAX_CAPACITY, int(observation.get("admission_capacity") or 0)))
@@ -293,7 +311,37 @@ def observed_capacity_limit(store: CapacityStore, details: dict[str, Any], *, de
     details["capacity_limit"] = capacity_limit
     if wave_limit is not None:
         details["capacity_wave_limit"] = wave_limit
-    return capacity_limit, wave_limit, ""
+    return capacity_limit, wave_limit, "", root_identity
+
+
+def root_identity_from_snapshot(snapshot: dict[str, Any] | None) -> tuple[int, str] | None:
+    if not isinstance(snapshot, dict):
+        return None
+    return normalize_root_identity(
+        snapshot.get("current_codex_root_pid"),
+        snapshot.get("current_codex_root_start_marker"),
+    )
+
+
+def normalize_root_identity(pid: Any, marker: Any) -> tuple[int, str] | None:
+    if pid in (None, "") or marker in (None, ""):
+        return None
+    try:
+        root_pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    start_marker = str(marker).strip()
+    if root_pid <= 0 or not start_marker:
+        return None
+    return root_pid, start_marker
+
+
+def observer_public_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    cleaned = dict(snapshot)
+    cleaned.pop("current_codex_root_identity", None)
+    cleaned.pop("current_codex_root_pid", None)
+    cleaned.pop("current_codex_root_start_marker", None)
+    return cleaned
 
 
 def capacity_observer_deny_json(observation: dict[str, Any]) -> str:

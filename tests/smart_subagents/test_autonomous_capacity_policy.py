@@ -229,6 +229,25 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
         self.assertEqual(0, allowed.returncode, allowed.stderr)
         self.assertEqual(1, self.capacity_cli("snapshot")["active_count"])
 
+    def test_pretool_registers_current_root_identity_without_auditing_it(self) -> None:
+        snapshot = self.write_observer_snapshot(
+            codex_root_count=1,
+            external_codex_roots=0,
+            current_codex_root_pid=700,
+            current_codex_root_start_marker="root-start-marker",
+        )
+        env = dict(self.env, CODEX_CAPACITY_OBSERVER_SNAPSHOT=str(snapshot))
+
+        allowed = self.run_policy("PreToolUse", self.spawn_payload("managed-root"), env=env)
+
+        self.assertEqual(0, allowed.returncode, allowed.stderr)
+        capacity = self.capacity_cli("snapshot")
+        self.assertEqual(1, capacity["managed_root_count"])
+        self.assertEqual(1, capacity["managed_root_session_count"])
+        audit = self.audit_text()
+        self.assertNotIn("700", audit)
+        self.assertNotIn("root-start-marker", audit)
+
     def test_two_codex_homes_share_one_global_capacity_database(self) -> None:
         codex_home_a = self.root / "codex-home-a"
         codex_home_b = self.root / "codex-home-b"

@@ -13,6 +13,7 @@ import resource
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -98,12 +99,24 @@ def observe(
     workload_class: str = "normal",
     expected_cost: dict[str, float] | None = None,
     active_slots: float | int | None = None,
+    managed_root_identities: list[tuple[int, str]] | None = None,
+    caller_pid: int | None = None,
 ) -> dict[str, Any]:
     now = float(time.time() if now_epoch is None else now_epoch)
     deadline = time.monotonic() + OBSERVE_TIMEOUT_SECONDS
     observed_state_dir = Path(state_dir or default_state_dir())
     try:
-        raw_snapshot = snapshot if snapshot is not None else collect_snapshot(state_dir=observed_state_dir, deadline=deadline)
+        if snapshot is not None:
+            raw_snapshot = snapshot
+        elif managed_root_identities is None and caller_pid is None:
+            raw_snapshot = collect_snapshot(state_dir=observed_state_dir, deadline=deadline)
+        else:
+            raw_snapshot = collect_snapshot(
+                state_dir=observed_state_dir,
+                deadline=deadline,
+                managed_root_identities=managed_root_identities,
+                caller_pid=caller_pid,
+            )
         if active_slots is not None:
             raw_snapshot = dict(raw_snapshot)
             raw_snapshot["active_slots"] = active_slots
@@ -991,11 +1004,21 @@ class ObserverStore:
             os.chmod(path, STATE_FILE_MODE)
 
 
-def collect_snapshot(*, state_dir: Path | None = None, deadline: float | None = None) -> dict[str, Any]:
+def collect_snapshot(
+    *,
+    state_dir: Path | None = None,
+    deadline: float | None = None,
+    managed_root_identities: list[tuple[int, str]] | None = None,
+    caller_pid: int | None = None,
+) -> dict[str, Any]:
     sysctl_values = collect_sysctl(deadline=deadline)
     vm_values = collect_vm_stat(deadline=deadline)
     pressure_values = collect_memory_pressure(sysctl_values["total_ram_bytes"], deadline=deadline)
-    process_values = collect_process_snapshot(deadline=deadline)
+    process_values = collect_process_snapshot(
+        deadline=deadline,
+        managed_root_identities=managed_root_identities,
+        caller_pid=caller_pid,
+    )
     disk_values = collect_disk(state_dir=state_dir, deadline=deadline)
     snapshot: dict[str, Any] = {"heavy_lanes_in_use": 0.0, "active_slots": 0.0}
     snapshot.update(sysctl_values)
@@ -1079,40 +1102,74 @@ def collect_sysctl(*, deadline: float | None = None) -> dict[str, Any]:
     }
 
 
-def collect_process_snapshot(*, deadline: float | None = None) -> dict[str, Any]:
-    rows = parse_ps_snapshot(run_command(["ps", "-axo", "pid=,ppid=,uid=,user=,%cpu=,command="], deadline=deadline))
+def collect_process_snapshot(
+    *,
+    deadline: float | None = None,
+    managed_root_identities: list[tuple[int, str]] | None = None,
+    caller_pid: int | None = None,
+) -> dict[str, Any]:
+    rows = parse_ps_snapshot(run_command(["ps", "-axo", "pid=,ppid=,uid=,user=,lstart=,%cpu=,command="], deadline=deadline))
     uid = os.getuid()
     user_process_count = sum(1 for row in rows if row["uid"] == uid)
     cpu_used = sum(row["cpu_percent"] for row in rows)
     cpu_idle = max(0.0, 100.0 - (cpu_used / max(1, os.cpu_count() or 1)))
     codex_roots = codex_root_pids(rows, uid)
     fd_usage = root_fd_usage_for_codex_roots(codex_roots, deadline=deadline)
+    occupancy = codex_root_occupancy(
+        rows,
+        uid,
+        managed_root_identities=managed_root_identities,
+        caller_pid=caller_pid,
+    )
     return {
         "user_process_count": float(user_process_count),
         "cpu_idle_percent": cpu_idle,
         "root_fd_used": float(fd_usage["root_fd_used"]),
         "root_fd_state": fd_usage["root_fd_state"],
-        "codex_root_count": float(len(codex_roots)),
+        "codex_root_count": occupancy["codex_root_count"],
+        "external_codex_roots": occupancy["external_codex_roots"],
+        "current_codex_root_identity": occupancy.get("current_codex_root_identity"),
     }
 
 
 def parse_ps_snapshot(text: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    seen_pids: set[int] = set()
     for line_number, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
             continue
-        parts = line.split(None, 5)
-        if len(parts) != 6:
+        parts = line.split(None, 10)
+        if len(parts) == 11:
+            pid, ppid, uid, user = parts[:4]
+            started_text = " ".join(parts[4:9])
+            cpu = parts[9]
+            command = parts[10]
+            try:
+                started_epoch = datetime.strptime(started_text, "%a %b %d %H:%M:%S %Y").timestamp()
+            except ValueError as exc:
+                raise ObservationError(f"malformed_ps_row:{line_number}") from exc
+            start_marker = str(int(started_epoch))
+        else:
+            legacy = line.split(None, 5)
+            if len(legacy) != 6:
+                raise ObservationError(f"malformed_ps_row:{line_number}")
+            pid, ppid, uid, user, cpu, command = legacy
+            start_marker = ""
+        if not command:
             raise ObservationError(f"malformed_ps_row:{line_number}")
-        pid, ppid, uid, user, cpu, command = parts
         argv0 = command_argv0(command)
+        pid_int = int(pid)
+        if pid_int in seen_pids:
+            raise ObservationError(f"duplicate_ps_pid:{pid_int}")
+        seen_pids.add(pid_int)
         rows.append(
             {
-                "pid": int(pid),
+                "pid": pid_int,
                 "ppid": int(ppid),
                 "uid": int(uid),
                 "user": user,
                 "cpu_percent": float(cpu),
+                "start_marker": start_marker,
                 "comm": argv0,
                 "command": command,
                 "executable": argv0,
@@ -1174,20 +1231,118 @@ def is_codex_process(row: dict[str, Any]) -> bool:
     if is_excluded_codex_helper(command):
         return False
     basename = os.path.basename(argv0).lower()
+    args = command.split()
+    if basename in {"codex-app-server", "codex_app_server"} or (
+        basename == "codex" and len(args) > 1 and args[1] == "app-server"
+    ):
+        return False
     return basename in {"codex", "codex-smart"}
 
 
 def codex_root_pids(rows: list[dict[str, Any]], uid: int) -> list[int]:
-    by_pid = {row["pid"]: row for row in rows}
-    roots: list[int] = []
+    return [int(row["pid"]) for row in codex_root_rows(rows, uid)]
+
+
+def codex_root_rows(rows: list[dict[str, Any]], uid: int) -> list[dict[str, Any]]:
+    by_pid = rows_by_pid(rows)
+    roots: list[dict[str, Any]] = []
     for row in rows:
         if row["uid"] != uid or not is_codex_process(row):
             continue
         parent = by_pid.get(row["ppid"])
-        if parent is not None and is_codex_process(parent):
+        if parent is not None and parent_started_not_after_child(parent, row) and is_codex_process(parent):
             continue
-        roots.append(int(row["pid"]))
-    return sorted(set(roots))
+        roots.append(row)
+    return sorted(roots, key=lambda item: int(item["pid"]))
+
+
+def rows_by_pid(rows: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+    by_pid: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        pid = int(row["pid"])
+        if pid in by_pid:
+            raise ObservationError(f"duplicate_ps_pid:{pid}")
+        by_pid[pid] = row
+    return by_pid
+
+
+def parent_started_not_after_child(parent: dict[str, Any], child: dict[str, Any]) -> bool:
+    parent_marker = str(parent.get("start_marker") or "").strip()
+    child_marker = str(child.get("start_marker") or "").strip()
+    if not parent_marker or not child_marker:
+        return True
+    try:
+        return int(parent_marker) <= int(child_marker)
+    except ValueError as exc:
+        raise ObservationError("invalid_ps_start_marker") from exc
+
+
+def codex_root_occupancy(
+    rows: list[dict[str, Any]],
+    uid: int,
+    *,
+    managed_root_identities: list[tuple[int, str]] | None = None,
+    caller_pid: int | None = None,
+) -> dict[str, Any]:
+    roots = codex_root_rows(rows, uid)
+    managed = normalize_root_identity_set(managed_root_identities or [])
+    current = current_codex_root_identity(rows, uid, caller_pid=caller_pid)
+    if current is not None:
+        managed.add(current)
+    external = 0
+    for root in roots:
+        identity = root_identity(root)
+        if identity is None or identity not in managed:
+            external += 1
+    return {
+        "codex_root_count": float(len(roots)),
+        "external_codex_roots": float(external),
+        "current_codex_root_identity": current,
+    }
+
+
+def current_codex_root_identity(
+    rows: list[dict[str, Any]],
+    uid: int,
+    *,
+    caller_pid: int | None = None,
+) -> tuple[int, str] | None:
+    by_pid = rows_by_pid(rows)
+    pid = int(caller_pid or os.getpid())
+    visited: set[int] = set()
+    root: dict[str, Any] | None = None
+    while pid > 1 and pid not in visited:
+        visited.add(pid)
+        row = by_pid.get(pid)
+        if row is None:
+            break
+        if int(row["uid"]) == uid and is_codex_process(row):
+            root = row
+        parent = by_pid.get(int(row["ppid"]))
+        if parent is None or not parent_started_not_after_child(parent, row):
+            break
+        pid = int(parent["pid"])
+    return root_identity(root) if root is not None else None
+
+
+def root_identity(row: dict[str, Any]) -> tuple[int, str] | None:
+    marker = str(row.get("start_marker") or "").strip()
+    if not marker:
+        return None
+    return int(row["pid"]), marker
+
+
+def normalize_root_identity_set(values: list[tuple[int, str]]) -> set[tuple[int, str]]:
+    identities: set[tuple[int, str]] = set()
+    for pid, marker in values:
+        marker_text = str(marker).strip()
+        try:
+            pid_int = int(pid)
+        except (TypeError, ValueError):
+            continue
+        if pid_int > 0 and marker_text:
+            identities.add((pid_int, marker_text))
+    return identities
 
 
 def root_fd_usage_for_codex_roots(
@@ -1260,10 +1415,14 @@ def remaining_timeout(deadline: float | None) -> float | None:
 
 
 def run_command(command: list[str], *, deadline: float | None = None) -> str:
+    env = os.environ.copy()
+    env["LC_ALL"] = "C"
+    env["LANG"] = "C"
     try:
         completed = subprocess.run(
             command,
             check=False,
+            env=env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
