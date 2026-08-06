@@ -147,6 +147,19 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             "CODEX_ADAPTIVE_CATALOG": str(self.catalog),
         }
 
+    def _controller_binding(
+        self,
+        _config: IntegrationConfigV2,
+        _environ: Mapping[str, str],
+        *,
+        deadline: float,
+    ) -> PinnedResumeBindingV2:
+        self.assertGreater(deadline, time.monotonic())
+        return PinnedResumeBindingV2(
+            self.state_home / "controller.sqlite3",
+            self.compatibility_fingerprint,
+        )
+
     def _launch_gate(self) -> dict[str, object]:
         absence_value = {
             "proofId": "ap2_" + "a" * 32,
@@ -961,14 +974,14 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         self,
     ) -> None:
         runtime = sys.modules["integration_runtime_v2"]
-        gate = self._launch_gate()
-        environment = self._environment()
-        environment["CODEX_SMART_GATE_FINGERPRINT"] = str(
-            gate["gateFingerprint"]
+        database_id = "db2_" + "f" * 32
+        database_path = self._write_schema_routes_database(
+            database_id,
+            include_route=False,
         )
-        environment["CODEX_SMART_ACTIVATION_GATE"] = canonical_json_bytes(
-            gate
-        ).decode("utf-8")
+        self._write_active_manifest(database_id)
+        environment = self._environment()
+        gate = self._publish_launch_gate(environment)
         config = IntegrationConfigV2.from_environ(environment)
         observed: list[tuple[str, object]] = []
 
@@ -992,7 +1005,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             self.assertEqual(self.state_home, kwargs["state_home"])
             self.assertEqual(self.activation_id, kwargs["activation_id"])
 
-        runtime.require_live_controller_v2(
+        binding = runtime.require_live_controller_v2(
             config,
             environment,
             deadline=time.monotonic() + 1,
@@ -1001,6 +1014,11 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         )
 
         self.assertEqual(["absence", "health"], [item[0] for item in observed])
+        self.assertEqual(database_path, binding.database_path)
+        self.assertEqual(
+            self.compatibility_fingerprint,
+            binding.compatibility_fingerprint,
+        )
         self.assertIsNotNone(observed[1][1])
         self.assertIsNone(operation_deadline_v2.current_operation_deadline_v2())
 
@@ -1510,6 +1528,36 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         self.assertIn("обычном режиме", response["systemMessage"].lower())
         self.assertFalse(TurnContextStoreV2(self.config).path.exists())
 
+    def test_missing_compatibility_proof_has_no_smart_instruction(self) -> None:
+        path = PLUGIN / "hooks" / "user_prompt_submit.py"
+        spec = importlib.util.spec_from_file_location(
+            "smart_prompt_missing_compatibility_proof_test",
+            path,
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+
+        response = module.handle(
+            {
+                "session_id": "session-from-hook",
+                "turn_id": "turn-no-compatibility-proof",
+                "cwd": str(ROOT),
+                "hook_event_name": "UserPromptSubmit",
+            },
+            environment,
+            v2_mcp_contract_checker=lambda _plugin_root: None,
+            v2_controller_checker=lambda _config, _environ, *, deadline: None,
+        )
+
+        self.assertTrue(response["continue"])
+        self.assertNotIn("stopReason", response)
+        self.assertNotIn("hookSpecificOutput", response)
+        self.assertFalse(TurnContextStoreV2(self.config).path.exists())
+
     def test_thread_capacity_exhaustion_disables_smart_turn_not_root_request(self) -> None:
         path = PLUGIN / "hooks" / "user_prompt_submit.py"
         spec = importlib.util.spec_from_file_location(
@@ -1600,7 +1648,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             },
             environment,
             v2_mcp_contract_checker=lambda _plugin_root: None,
-            v2_controller_checker=lambda _config, _environ, *, deadline: None,
+            v2_controller_checker=self._controller_binding,
         )
 
         self.assertTrue(response["continue"])
@@ -1639,7 +1687,12 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
                 },
                 environment,
                 v2_mcp_contract_checker=lambda _plugin_root: None,
-                v2_controller_checker=lambda _config, _environ, *, deadline: None,
+                v2_controller_checker=lambda _config, _environ, *, deadline: (
+                    PinnedResumeBindingV2(
+                        self.state_home / "owner.sqlite3",
+                        self.compatibility_fingerprint,
+                    )
+                ),
             )
 
         self.assertTrue(response["continue"])
@@ -1690,7 +1743,12 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
                 },
                 environment,
                 v2_mcp_contract_checker=lambda _plugin_root: None,
-                v2_controller_checker=lambda _config, _environ, *, deadline: None,
+                v2_controller_checker=lambda _config, _environ, *, deadline: (
+                    PinnedResumeBindingV2(
+                        self.state_home / "owner.sqlite3",
+                        self.compatibility_fingerprint,
+                    )
+                ),
             )
 
         self.assertIn("hookSpecificOutput", response)
@@ -1727,7 +1785,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             payload,
             valid,
             v2_mcp_contract_checker=lambda _plugin_root: None,
-            v2_controller_checker=lambda _config, _environ, *, deadline: None,
+            v2_controller_checker=self._controller_binding,
         )
         self.assertIn("hookSpecificOutput", response)
         self.assertEqual("turn-from-hook", store.load().turn_id)
@@ -1821,7 +1879,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             },
             environment,
             v2_mcp_contract_checker=lambda _plugin_root: None,
-            v2_controller_checker=lambda _config, _environ, *, deadline: None,
+            v2_controller_checker=self._controller_binding,
         )
         self.assertIn("hookSpecificOutput", response)
         self.assertEqual(
@@ -2244,7 +2302,12 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
                 },
                 environment,
                 v2_mcp_contract_checker=lambda _plugin_root: None,
-                v2_controller_checker=lambda _config, _environ, *, deadline: None,
+                v2_controller_checker=lambda _config, _environ, *, deadline: (
+                    PinnedResumeBindingV2(
+                        self.state_home / "recovery.sqlite3",
+                        self.compatibility_fingerprint,
+                    )
+                ),
             )
 
         self.assertIn("hookSpecificOutput", response)
@@ -2279,7 +2342,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             payload,
             environment,
             v2_mcp_contract_checker=lambda _plugin_root: None,
-            v2_controller_checker=lambda _config, _environ, *, deadline: None,
+            v2_controller_checker=self._controller_binding,
         )
 
         self.assertTrue(response["continue"])

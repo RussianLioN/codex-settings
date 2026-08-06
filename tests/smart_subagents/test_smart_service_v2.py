@@ -31,6 +31,12 @@ from codex_smart_subagents.state_store_v2 import (  # noqa: E402
     SmartStoreV2,
     attempt_id_for_evidence_job,
 )
+from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
+    ProjectIdentityV2,
+    ResumeCandidateV2,
+    RootIdentityV2,
+    RootSessionLeaseStoreV2,
+)
 
 
 NOW = datetime(2026, 7, 18, 12, 0, 0, tzinfo=timezone.utc)
@@ -347,6 +353,102 @@ class SmartServiceV2Tests(unittest.TestCase):
             )
 
         self.assertEqual("RESUME_ROUTE_PENDING", caught.exception.code)
+
+    def test_claiming_without_finalize_allows_only_fresh_plan_and_denies_old_route(
+        self,
+    ) -> None:
+        observed: dict[int, str | None] = {}
+        lease_store = RootSessionLeaseStoreV2(
+            Path(self.temporary.name) / "resume-state",
+            process_marker_reader=lambda pid: observed.get(pid),
+        )
+        project = ProjectIdentityV2(
+            repo_root=_context().repo_root,
+            base_sha=_context().base_sha,
+            worktree_fingerprint=_context().worktree_fingerprint,
+            compatibility_fingerprint=_context().compatibility_fingerprint,
+        )
+        original = RootIdentityV2(1001, "original-root")
+        observed[original.pid] = original.process_start_marker
+        lease_store.register_startup(
+            session_id=_context().session_id,
+            shell_session_id=_context().shell_session_id,
+            root=original,
+            project=project,
+        )
+        observed[original.pid] = None
+        current = RootIdentityV2(1002, "current-root")
+        observed[current.pid] = current.process_start_marker
+        candidate = ResumeCandidateV2(
+            route_id="route2_" + "9" * 32,
+            original_shell_session_id=_context().shell_session_id,
+            original_session_id=_context().session_id,
+            original_turn_id="turn-old",
+            route_state="RUNNING",
+            start_request_id="sr2_" + "8" * 32,
+            node_id="node2_" + "7" * 32,
+            terminal_result_unacknowledged=False,
+        )
+        lease_store.prepare_resume(
+            session_id=_context().session_id,
+            shell_session_id=_context().shell_session_id,
+            root=current,
+            project=project,
+            candidate=candidate,
+        )
+        claim = lease_store.begin_resume_claim(
+            session_id=_context().session_id,
+            shell_session_id=_context().shell_session_id,
+            turn_id=_context().turn_id,
+            root=current,
+            project=project,
+        )
+        self.assertEqual("CLAIMING", claim.status)
+
+        def allow_only_fresh(_request_context: RequestContextV2) -> None:
+            self.assertFalse(
+                lease_store.authorize_route(
+                    route_id=candidate.route_id,
+                    session_id=_context().session_id,
+                    shell_session_id=_context().shell_session_id,
+                    turn_id=_context().turn_id,
+                    root=current,
+                    project=project,
+                )
+            )
+
+        guarded = SmartServiceV2(
+            store=self.store,
+            policy_bundle=self.bundle,
+            bundled_catalog_projection=BUNDLED_CATALOG_PROJECTION,
+            activation_gate_verifier=lambda gate: dict(gate),
+            clock=lambda: NOW,
+            interface_evidence=self.interface,
+            account_evidence_executor=self.account_executor,
+            verify_snapshot_subject=lambda _subject: None,
+            account_home="/private/home",
+            account_tmpdir="/private/tmp",
+            resume_plan_guard=allow_only_fresh,
+        )
+        binding = guarded.issue_turn_binding(_context(), ttl_seconds=120)
+        fresh = guarded.smart_plan(
+            binding_id=binding.binding_id,
+            request_context=_context(),
+            request_key="idem2_" + "9" * 32,
+            nodes=_single_plan_node(_routing_input()),
+        )
+
+        self.assertNotEqual(candidate.route_id, fresh.route_id)
+        self.assertFalse(
+            lease_store.authorize_route(
+                route_id=candidate.route_id,
+                session_id=_context().session_id,
+                shell_session_id=_context().shell_session_id,
+                turn_id=_context().turn_id,
+                root=current,
+                project=project,
+            )
+        )
 
     def test_minimal_public_input_is_enriched_before_one_router_evaluation(
         self,

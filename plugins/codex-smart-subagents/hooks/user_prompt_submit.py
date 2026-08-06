@@ -33,6 +33,7 @@ from integration_runtime_v2 import (  # noqa: E402
     HOOK_TOTAL_BUDGET_SECONDS as HOOK_TOTAL_BUDGET_SECONDS_V2,
     IntegrationConfigV2,
     IntegrationV2Error,
+    PinnedResumeBindingV2,
     TurnContextStoreV2,
     capture_hook_turn_context_v2,
     require_current_user_mcp_policy_v2,
@@ -59,7 +60,7 @@ class V2ControllerChecker(Protocol):
         environ: Mapping[str, str],
         *,
         deadline: float,
-    ) -> None: ...
+    ) -> PinnedResumeBindingV2 | None: ...
 
 
 def handle(
@@ -199,7 +200,11 @@ def _handle_v2(
         # фактическом обращении к инструментам.
         require_current_user_mcp_policy_v2(config, environ)
         mcp_contract_checker(PLUGIN_ROOT)
-        controller_checker(config, environ, deadline=deadline)
+        controller_binding = controller_checker(config, environ, deadline=deadline)
+        if not isinstance(controller_binding, PinnedResumeBindingV2):
+            raise IntegrationV2Error(
+                "текущая совместимость умного контроллера не доказана"
+            )
     except Exception:
         return {
             "continue": True,
@@ -218,6 +223,7 @@ def _handle_v2(
             config,
             record,
             environ,
+            controller_binding=controller_binding,
         )
     except Exception:
         return {
@@ -247,6 +253,8 @@ def _bind_resume_instruction_v2(
     config: IntegrationConfigV2,
     record: Any,
     environ: Mapping[str, str],
+    *,
+    controller_binding: PinnedResumeBindingV2 | None,
 ) -> str | None:
     store = RootSessionLeaseStoreV2(
         config.state_home,
@@ -257,6 +265,10 @@ def _bind_resume_instruction_v2(
     if current is None:
         turn_store.save(record)
         return None
+    if not isinstance(controller_binding, PinnedResumeBindingV2):
+        raise IntegrationV2Error(
+            "текущая совместимость умного контроллера не доказана"
+        )
     root = RootIdentityV2(
         pid=int(environ.get("CODEX_SMART_ROOT_PID", "")),
         process_start_marker=environ.get("CODEX_SMART_ROOT_START_MARKER", ""),
@@ -265,7 +277,7 @@ def _bind_resume_instruction_v2(
         repo_root=record.repo_root,
         base_sha=record.base_sha,
         worktree_fingerprint=record.worktree_fingerprint,
-        compatibility_fingerprint=current.project.compatibility_fingerprint,
+        compatibility_fingerprint=controller_binding.compatibility_fingerprint,
     )
     attachment = current.attachment
     if attachment is not None and attachment.state == "CLAIMING":

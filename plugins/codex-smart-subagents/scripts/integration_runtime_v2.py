@@ -648,41 +648,30 @@ def require_live_controller_v2(
     deadline: float,
     absence_checker=refresh_activation_journal_absence_v2,
     health_checker=require_pinned_controller_health_v2,
-) -> None:
-    """Проверяет закреплённый шлюз и живой контроллер в коротком сроке хука.
+) -> PinnedResumeBindingV2:
+    """Возвращает доказанную привязку живого закреплённого контроллера.
 
-    Полный READY-проход выполняется загрузчиком перед ``execve`` и повторяется
-    поставщиком контроллера непосредственно перед каждой командой MCP.
+    Один проход в общем сроке хука проверяет шлюз, манифест, квитанцию,
+    закреплённую базу и живой контроллер. Возвращаемая совместимость поэтому
+    не зависит от ранее сохранённой аренды.
     """
 
-    remaining = _remaining_hook_budget(deadline)
-    current = operation_deadline_v2.current_operation_deadline_v2()
-    operation_deadline = current or operation_deadline_v2.OperationDeadlineV2.start(
-        operation="user-prompt-controller-check",
-        timeout_seconds=remaining,
-        timeout_code="USER_PROMPT_CONTROLLER_DEADLINE",
-    )
     try:
-        with operation_deadline_v2.scoped_current_deadline_v2(operation_deadline):
-            operation_deadline.checkpoint()
-            gate = _launch_gate_from_environ_v2(config, environ)
-            layout = GatewayLayout.for_codex_home(config.codex_home)
-            absence_checker(
-                gate["journalAbsenceProof"],
-                expected_journal=layout.journal_path,
-            )
-            operation_deadline.checkpoint()
-            health_checker(
-                codex_home=config.codex_home,
-                state_home=config.state_home,
-                activation_id=config.launch_activation_id,
-            )
-            operation_deadline.checkpoint()
-        _remaining_hook_budget(deadline)
+        database_path, _, _, _, _, pinned = _pinned_stop_database_path_v2(
+            config,
+            environ,
+            deadline=deadline,
+            absence_checker=absence_checker,
+            health_checker=health_checker,
+        )
     except Exception as exc:
         raise IntegrationV2Error(
             "живой контроллер текущей активации не доказан"
         ) from exc
+    return PinnedResumeBindingV2(
+        database_path=database_path,
+        compatibility_fingerprint=pinned["compatibility_fingerprint"],
+    )
 
 
 def durable_smart_plan_exists_v2(
