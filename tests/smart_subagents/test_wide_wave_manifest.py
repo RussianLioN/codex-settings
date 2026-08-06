@@ -24,6 +24,16 @@ class WideWaveManifestTests(unittest.TestCase):
         self.skill.write_text("---\nname: trusted-wide\n---\n", encoding="utf-8")
         self.registry = self.root / "trusted.json"
         self.manifest = self.root / "manifest.json"
+        self.default_participants = [
+            {"id": "reader-1", "access": "read-only", "owned_write_scope": []},
+            {"id": "reader-2", "access": "read-only", "owned_write_scope": []},
+            {"id": "reader-3", "access": "read-only", "owned_write_scope": []},
+            {"id": "reader-4", "access": "read-only", "owned_write_scope": []},
+            {"id": "reader-5", "access": "read-only", "owned_write_scope": []},
+            {"id": "reader-6", "access": "read-only", "owned_write_scope": []},
+            {"id": "writer-1", "access": "workspace-write", "owned_write_scope": ["src/a"]},
+            {"id": "writer-2", "access": "workspace-write", "owned_write_scope": ["src/b"]},
+        ]
         self.write_registry(
             {
                 "skill_id": "trusted-wide",
@@ -33,18 +43,7 @@ class WideWaveManifestTests(unittest.TestCase):
                 "fallback": "block",
             }
         )
-        self.write_manifest(
-            participants=[
-                {"id": "reader-1", "access": "read-only", "owned_write_scope": []},
-                {"id": "reader-2", "access": "read-only", "owned_write_scope": []},
-                {"id": "reader-3", "access": "read-only", "owned_write_scope": []},
-                {"id": "reader-4", "access": "read-only", "owned_write_scope": []},
-                {"id": "reader-5", "access": "read-only", "owned_write_scope": []},
-                {"id": "reader-6", "access": "read-only", "owned_write_scope": []},
-                {"id": "writer-1", "access": "workspace-write", "owned_write_scope": ["src/a"]},
-                {"id": "writer-2", "access": "workspace-write", "owned_write_scope": ["src/b"]},
-            ]
-        )
+        self.write_manifest()
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -62,14 +61,13 @@ class WideWaveManifestTests(unittest.TestCase):
             "wave_size": 8,
             "repository_root": str(self.repo),
             "base_commit": "1318542fb00df4eaef4fc4e8abfa8cd99e656bb3",
-            "participants": [],
+            "participants": list(getattr(self, "default_participants", [])),
         }
         payload.update(overrides)
         self.manifest.write_text(json.dumps(payload), encoding="utf-8")
 
-    def run_validator(self) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [
+    def run_validator(self, *extra: str) -> subprocess.CompletedProcess[str]:
+        command = [
                 sys.executable,
                 str(VALIDATOR),
                 "--manifest",
@@ -80,7 +78,10 @@ class WideWaveManifestTests(unittest.TestCase):
                 str(self.skill),
                 "--trusted-registry",
                 str(self.registry),
-            ],
+                *extra,
+            ]
+        return subprocess.run(
+            command,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -138,6 +139,35 @@ class WideWaveManifestTests(unittest.TestCase):
 
         self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("wave_size_exceeds_trusted_max", completed.stdout)
+
+    def test_blocks_expected_wave_size_mismatch(self) -> None:
+        completed = self.run_validator("--expected-wave-size", "20")
+
+        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("expected_wave_size_mismatch", completed.stdout)
+
+    def test_rejects_invalid_base_commit(self) -> None:
+        for base_commit in ("123456", "g" * 40, "1" * 65):
+            with self.subTest(base_commit=base_commit):
+                self.write_manifest(base_commit=base_commit)
+
+                completed = self.run_validator()
+
+                self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+                self.assertIn("base_commit_invalid", completed.stdout)
+
+    def test_rejects_relative_or_missing_repository_root(self) -> None:
+        for repository_root, reason in (
+            ("relative/repo", "repository_root_not_absolute"),
+            (str(self.root / "missing"), "repository_root_missing"),
+        ):
+            with self.subTest(repository_root=repository_root):
+                self.write_manifest(repository_root=repository_root)
+
+                completed = self.run_validator()
+
+                self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+                self.assertIn(reason, completed.stdout)
 
     def test_rejects_absolute_scope(self) -> None:
         self.write_manifest(

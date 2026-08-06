@@ -8,6 +8,8 @@ import hashlib
 import json
 import os
 import posixpath
+import re
+from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -39,6 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skill-id", required=True)
     parser.add_argument("--skill-file", required=True)
     parser.add_argument("--trusted-registry", required=True)
+    parser.add_argument("--expected-wave-size", type=int)
     return parser.parse_args()
 
 
@@ -93,10 +96,17 @@ def validate_manifest_shape(manifest: Any, reasons: list[str]) -> None:
     wave_size = manifest.get("wave_size")
     if type(wave_size) is not int or wave_size < 1 or wave_size > MAX_WAVE_SIZE:
         reasons.append("manifest_wave_size_invalid")
-    if not isinstance(manifest.get("repository_root"), str) or not manifest.get("repository_root"):
+    repository_root = manifest.get("repository_root")
+    if not isinstance(repository_root, str) or not repository_root:
         reasons.append("repository_root_invalid")
+    else:
+        repository_path = Path(repository_root)
+        if not repository_path.is_absolute():
+            reasons.append("repository_root_not_absolute")
+        elif not repository_path.is_dir():
+            reasons.append("repository_root_missing")
     base_commit = manifest.get("base_commit")
-    if not isinstance(base_commit, str) or not base_commit:
+    if not isinstance(base_commit, str) or not re.fullmatch(r"[0-9a-f]{7,64}", base_commit):
         reasons.append("base_commit_invalid")
     participants = manifest.get("participants")
     if not isinstance(participants, list) or not participants:
@@ -212,6 +222,18 @@ def validate_trust(
         reasons.append("trusted_fallback_invalid")
 
 
+def validate_expected_wave_size(
+    manifest: dict[str, Any],
+    expected_wave_size: int | None,
+    reasons: list[str],
+) -> None:
+    if expected_wave_size is None:
+        return
+    manifest_wave_size = manifest.get("wave_size")
+    if manifest_wave_size != expected_wave_size:
+        reasons.append("expected_wave_size_mismatch")
+
+
 def main() -> int:
     args = parse_args()
     reasons: list[str] = []
@@ -230,6 +252,7 @@ def main() -> int:
     validate_manifest_shape(manifest, reasons)
     entry = trust_entry(registry, args.skill_id, reasons)
     if isinstance(manifest, dict):
+        validate_expected_wave_size(manifest, args.expected_wave_size, reasons)
         validate_scopes(manifest, reasons)
         validate_trust(
             manifest=manifest,

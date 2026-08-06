@@ -105,7 +105,7 @@ class AutonomousWorkflowResourceLimitTests(unittest.TestCase):
         self.assertIn("user_process_soft_limit=2666", completed.stdout)
         self.assertIn("user_process_count=100", completed.stdout)
         self.assertIn("process_headroom=2566", completed.stdout)
-        self.assertIn("required_process_headroom=64", completed.stdout)
+        self.assertIn("required_process_headroom=248", completed.stdout)
 
     def test_fd_doctor_blocks_when_process_headroom_is_too_low(self) -> None:
         completed = self.run_fd_doctor(
@@ -116,27 +116,29 @@ class AutonomousWorkflowResourceLimitTests(unittest.TestCase):
         )
 
         self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
-        self.assertIn("process_headroom_below_64", completed.stdout)
+        self.assertIn("process_headroom_below_288", completed.stdout)
 
-    def test_fd_doctor_blocks_wide_wave_when_process_limit_is_unknown(self) -> None:
+    def test_fd_doctor_blocks_wide_wave_when_process_budget_is_unknown(self) -> None:
         completed = self.run_fd_doctor(
             8,
             CODEX_FD_DOCTOR_USER_PROCESS_SOFT_LIMIT="unknown",
             CODEX_FD_DOCTOR_LAUNCHD_MAXPROC_SOFT_LIMIT="unknown",
+            CODEX_FD_DOCTOR_KERN_MAXPROCPERUID="unknown",
         )
 
         self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
-        self.assertIn("process_limit_unknown_for_wide_wave", completed.stdout)
+        self.assertIn("process_budget_unavailable", completed.stdout)
 
-    def test_fd_doctor_warns_default_wave_when_process_limit_is_unknown(self) -> None:
+    def test_fd_doctor_blocks_default_wave_when_process_budget_is_unknown(self) -> None:
         completed = self.run_fd_doctor(
             6,
             CODEX_FD_DOCTOR_USER_PROCESS_SOFT_LIMIT="unknown",
             CODEX_FD_DOCTOR_LAUNCHD_MAXPROC_SOFT_LIMIT="unknown",
+            CODEX_FD_DOCTOR_KERN_MAXPROCPERUID="unknown",
         )
 
-        self.assertEqual(1, completed.returncode, completed.stdout + completed.stderr)
-        self.assertIn("process_limit_unknown", completed.stdout)
+        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("process_budget_unavailable", completed.stdout)
 
     def test_fd_doctor_distinguishes_maxfiles_from_maxproc(self) -> None:
         completed = self.run_fd_doctor(

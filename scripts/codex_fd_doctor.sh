@@ -7,6 +7,8 @@ MAX_WAVE_SIZE=20
 MAX_NATIVE_SESSION_THREADS=20
 HIGH_FD_LIMIT=4096
 MIN_FD_HEADROOM=64
+BASE_REQUIRED_PROCESS_HEADROOM=128
+PROCESS_HEADROOM_PER_WAVE=20
 
 usage() {
   cat <<'EOF'
@@ -64,8 +66,9 @@ fi
 soft_limit=${CODEX_FD_DOCTOR_SOFT_LIMIT:-$(ulimit -Sn)}
 hard_limit=${CODEX_FD_DOCTOR_HARD_LIMIT:-$(ulimit -Hn)}
 launchd_fd_soft_limit=${CODEX_FD_DOCTOR_LAUNCHD_FD_SOFT_LIMIT:-${CODEX_FD_DOCTOR_LAUNCHD_SOFT_LIMIT:-$(launchctl limit maxfiles 2>/dev/null | awk 'NR == 1 { print $2 }')}}
-user_process_ulimit=${CODEX_FD_DOCTOR_USER_PROCESS_SOFT_LIMIT:-$(ulimit -Su)}
-launchd_maxproc_soft_limit=${CODEX_FD_DOCTOR_LAUNCHD_MAXPROC_SOFT_LIMIT:-$(launchctl limit maxproc 2>/dev/null | awk 'NR == 1 { print $2 }')}
+user_process_ulimit=${CODEX_FD_DOCTOR_USER_PROCESS_SOFT_LIMIT:-${CODEX_FD_DOCTOR_USER_PROCESS_LIMIT:-$(ulimit -Su)}}
+launchd_maxproc_soft_limit=${CODEX_FD_DOCTOR_LAUNCHD_MAXPROC_SOFT_LIMIT:-${CODEX_FD_DOCTOR_LAUNCHD_PROCESS_LIMIT:-$(launchctl limit maxproc 2>/dev/null | awk 'NR == 1 { print $2 }')}}
+kern_maxprocperuid=${CODEX_FD_DOCTOR_KERN_MAXPROCPERUID:-$(sysctl -n kern.maxprocperuid 2>/dev/null)}
 
 find_codex_ancestor() {
   local pid=$PPID
@@ -116,23 +119,22 @@ read_agent_thread_cap() {
 }
 
 count_user_processes() {
-  local uid
-  uid=$(id -u)
-  ps -axo uid= 2>/dev/null | awk -v uid="$uid" '$1 == uid { count++ } END { print count + 0 }'
+  local process_rows
+  process_rows=$(ps -U "$EUID" -o pid= 2>/dev/null) || return 1
+  print -r -- "$process_rows" | awk 'NF { count++ } END { print count + 0 }'
 }
 
 effective_process_limit() {
-  local first=$1
-  local second=$2
   local minimum=""
-  for candidate in "$first" "$second"; do
-    if [[ "$candidate" =~ ^[0-9]+$ ]]; then
-      if [[ -z "$minimum" || $candidate -lt $minimum ]]; then
-        minimum=$candidate
-      fi
+  local candidate
+  for candidate in "$@"; do
+    [[ "$candidate" =~ ^[1-9][0-9]*$ ]] || continue
+    if [[ -z "$minimum" || $candidate -lt $minimum ]]; then
+      minimum=$candidate
     fi
   done
-  print -- "${minimum:-unknown}"
+  [[ -n "$minimum" ]] || return 1
+  print -- "$minimum"
 }
 
 inspect_node_repl_health() {
@@ -167,14 +169,16 @@ mcp_command=${CODEX_FD_DOCTOR_MCP_COMMAND:-$(read_mcp_command 2>/dev/null || tru
 agent_thread_cap=${CODEX_FD_DOCTOR_AGENT_THREAD_CAP:-$(read_agent_thread_cap 2>/dev/null || true)}
 codex_processes=${CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT:-$(pgrep -x codex 2>/dev/null | wc -l | tr -d ' ')}
 node_repl_processes=${CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT:-$(pgrep -f '/node_repl([[:space:]]|$)' 2>/dev/null | wc -l | tr -d ' ')}
-user_process_count=${CODEX_FD_DOCTOR_USER_PROCESS_COUNT:-$(count_user_processes)}
-user_process_soft_limit=$(effective_process_limit "$user_process_ulimit" "$launchd_maxproc_soft_limit")
-required_process_headroom=$(( wave_size * 4 ))
-if (( required_process_headroom < 64 )); then
-  required_process_headroom=64
+user_process_count=${CODEX_FD_DOCTOR_USER_PROCESS_COUNT:-$(count_user_processes 2>/dev/null || true)}
+required_process_headroom=$(( BASE_REQUIRED_PROCESS_HEADROOM + PROCESS_HEADROOM_PER_WAVE * wave_size ))
+if process_limit=$(effective_process_limit "$user_process_ulimit" "$launchd_maxproc_soft_limit" "$kern_maxprocperuid" 2>/dev/null); then
+  user_process_soft_limit=$process_limit
+else
+  process_limit=unknown
+  user_process_soft_limit=unknown
 fi
-if [[ "$user_process_soft_limit" =~ ^[0-9]+$ && "$user_process_count" =~ ^[0-9]+$ ]]; then
-  process_headroom=$(( user_process_soft_limit - user_process_count ))
+if [[ "$process_limit" =~ ^[0-9]+$ && "$user_process_count" =~ ^[0-9]+$ ]]; then
+  process_headroom=$(( process_limit - user_process_count ))
 else
   process_headroom=unknown
 fi
@@ -229,10 +233,24 @@ if [[ "$process_headroom" =~ ^-?[0-9]+$ ]]; then
   if (( process_headroom < required_process_headroom )); then
     block "process_headroom_below_${required_process_headroom}"
   fi
-elif (( wave_size > DEFAULT_WAVE_SIZE )); then
-  block "process_limit_unknown_for_wide_wave"
 else
-  warn "process_limit_unknown"
+  block "process_budget_unavailable"
+fi
+
+max_expected_node_repl_processes=unknown
+if [[ "$codex_processes" =~ ^[0-9]+$ ]]; then
+  effective_codex_processes=1
+  if (( codex_processes > effective_codex_processes )); then
+    effective_codex_processes=$codex_processes
+  fi
+  max_expected_node_repl_processes=$(( MAX_NATIVE_SESSION_THREADS * effective_codex_processes ))
+else
+  block "process_budget_unavailable"
+fi
+if [[ ! "$node_repl_processes" =~ ^[0-9]+$ ]]; then
+  block "process_budget_unavailable"
+elif [[ "$max_expected_node_repl_processes" =~ ^[0-9]+$ ]] && (( node_repl_processes > max_expected_node_repl_processes )); then
+  block "node_repl_processes_exceed_thread_capacity"
 fi
 
 if (( orphan_node_repl_processes > 0 )); then
@@ -256,7 +274,7 @@ if (( wave_size > DEFAULT_WAVE_SIZE )); then
     if [[ ! -x "$manifest_validator" && ! -f "$manifest_validator" ]]; then
       block "wide_wave_manifest_validator_missing"
     else
-      validator_output=$(python3 "$manifest_validator" --manifest "$manifest" --skill-id "$skill_id" --skill-file "$skill_file" --trusted-registry "$trusted_registry" 2>&1)
+      validator_output=$(python3 "$manifest_validator" --manifest "$manifest" --skill-id "$skill_id" --skill-file "$skill_file" --trusted-registry "$trusted_registry" --expected-wave-size "$wave_size" 2>&1)
       validator_status=$?
       if (( validator_status != 0 )); then
         block "wide_wave_manifest_untrusted"
@@ -290,11 +308,15 @@ print -- "codex_pid=${codex_pid:-none}"
 print -- "codex_fd_count=$codex_fd_count"
 print -- "fd_headroom=$fd_headroom"
 print -- "user_process_soft_limit=$user_process_soft_limit"
+print -- "launchd_process_limit=${launchd_maxproc_soft_limit:-unknown}"
+print -- "kern_maxprocperuid=${kern_maxprocperuid:-unknown}"
+print -- "process_limit=$process_limit"
 print -- "user_process_count=$user_process_count"
 print -- "process_headroom=$process_headroom"
 print -- "required_process_headroom=$required_process_headroom"
 print -- "codex_processes=$codex_processes"
 print -- "node_repl_processes=$node_repl_processes"
+print -- "max_expected_node_repl_processes=$max_expected_node_repl_processes"
 print -- "orphan_node_repl_processes=$orphan_node_repl_processes"
 print -- "stale_node_repl_processes=$stale_node_repl_processes"
 print -- "mcp_command=${mcp_command:-missing}"

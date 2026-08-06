@@ -259,11 +259,11 @@ def extract_interface_default_prompt(text: str) -> str:
 
 def check_subagent_wait_policy_regressions() -> None:
     for setting, wrong_value in (
-        ("max_threads", 19),
+        ("max_concurrent_threads_per_session", 19),
         ("max_depth", 2),
         ("job_max_runtime_seconds", 1799),
         ("max_depth", True),
-        ("max_threads", 20.0),
+        ("max_concurrent_threads_per_session", 20.0),
     ):
         agents = dict(EXPECTED_BASE_AGENT_LIMITS)
         agents[setting] = wrong_value
@@ -792,6 +792,7 @@ def run_fd_doctor(
             "CODEX_FD_DOCTOR_AGENT_THREAD_CAP": str(MAX_BASE_THREADS),
             "CODEX_FD_DOCTOR_USER_PROCESS_SOFT_LIMIT": "4096",
             "CODEX_FD_DOCTOR_LAUNCHD_MAXPROC_SOFT_LIMIT": "2666",
+            "CODEX_FD_DOCTOR_KERN_MAXPROCPERUID": "3000",
             "CODEX_FD_DOCTOR_USER_PROCESS_COUNT": "100",
         }
     )
