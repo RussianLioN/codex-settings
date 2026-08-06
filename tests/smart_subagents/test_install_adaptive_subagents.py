@@ -1242,6 +1242,20 @@ class InstallerV2ContractTests(_InstallerBase):
 
         self.assertEqual("PYTHON_RUNTIME_INVALID", captured.exception.code)
 
+    def test_source_digest_accepts_isolated_python_entrypoint(self) -> None:
+        entrypoint = self.layout.plugin_source / "bin" / "codex-smart-subagents-hook"
+        original = entrypoint.read_bytes()
+        line_end = original.find(b"\n")
+        self.addCleanup(entrypoint.write_bytes, original)
+        entrypoint.write_bytes(
+            b"#!/usr/bin/env -S python3 -S\n" + original[line_end + 1 :]
+        )
+        entrypoint.chmod(0o700)
+
+        digest = self.installer._source_digest(self.layout)
+
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
+
     def test_first_activation_reproduces_the_exact_source_digest(self) -> None:
         self.publish_fake_activation()
         identity = self.installer._load_lifecycle_identity(

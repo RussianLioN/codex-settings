@@ -298,6 +298,59 @@ class InstallerUpgradePreparationV2Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "bind different runtimes"):
             _installer_source_digest_from_activation_v2(preparation.definition)
 
+    def test_recovery_digest_accepts_isolated_python_entrypoint_runtime(
+        self,
+    ) -> None:
+        proof = self.fixture.capture()
+        preparation = build_upgrade_preparation_v2(
+            proof=proof,
+            operation_id="op2_" + "e" * 32,
+            source_root=ROOT,
+            codex_binary=self.fixture.codex_binary,
+            policy_bundle=self.fixture.policy,
+            snapshotter=self.fixture.snapshotter,
+            interface_executor=self.fixture.interface_executor,
+            source_digest=self._source_digest(),
+        )
+        ActivationPreparationExecutorV2(
+            definition=preparation.definition,
+            callbacks=preparation.callbacks,
+        ).execute()
+        plugin_root = (
+            preparation.definition.activation_intent.activation_dir
+            / "marketplace"
+            / "plugins"
+            / "codex-smart-subagents"
+        )
+        entrypoint = sorted(
+            (plugin_root / "bin").iterdir(),
+            key=lambda path: path.name.encode("utf-8"),
+        )[0]
+        payload = entrypoint.read_bytes()
+        line_end = payload.find(b"\n")
+        runtime = Path(sys.executable).resolve(strict=True)
+        entrypoint.chmod(0o700)
+        entrypoint.write_bytes(
+            f"#!{runtime} -S -B\n".encode("utf-8") + payload[line_end + 1 :]
+        )
+        entrypoint.chmod(0o500)
+
+        digest = _installer_source_digest_from_activation_v2(preparation.definition)
+
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
+
+    def test_bound_python_runtime_rejects_carriage_return_in_path(
+        self,
+    ) -> None:
+        entrypoint = self.fixture.root / "entrypoint"
+        payload = b"#!/tmp/py\rbin -S -B\nprint('no')\n"
+
+        with self.assertRaisesRegex(ValueError, "invalid runtime path"):
+            installer_upgrade_v2._bound_python_runtime_from_shebang_v2(
+                entrypoint,
+                payload,
+            )
+
     def setUp(self) -> None:
         self.fixture = ActivationTransitionV2Tests(methodName="runTest")
         self.fixture.setUp()
