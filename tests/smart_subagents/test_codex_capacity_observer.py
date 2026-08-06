@@ -20,6 +20,19 @@ MIB = 1024 * 1024
 GIB = 1024 * MIB
 
 
+def enable_observer_test_mode(testcase):
+    previous = os.environ.get("CODEX_CAPACITY_OBSERVER_TEST_MODE")
+    os.environ["CODEX_CAPACITY_OBSERVER_TEST_MODE"] = "1"
+
+    def restore():
+        if previous is None:
+            os.environ.pop("CODEX_CAPACITY_OBSERVER_TEST_MODE", None)
+        else:
+            os.environ["CODEX_CAPACITY_OBSERVER_TEST_MODE"] = previous
+
+    testcase.addCleanup(restore)
+
+
 def clean_snapshot(**overrides):
     snapshot = {
         "total_ram_bytes": 32 * GIB,
@@ -42,7 +55,452 @@ def clean_snapshot(**overrides):
     return snapshot
 
 
+def calibration_snapshot(**overrides):
+    snapshot = clean_snapshot(
+        codex_root_count=1,
+        external_codex_roots=0,
+        current_codex_root_pid=700,
+        current_codex_root_start_marker="root-start",
+        root_fd_used=100,
+        current_root_fd_used=100,
+        root_fd_state="measured",
+        _calibration_status="GREEN",
+    )
+    snapshot.update(overrides)
+    return snapshot
+
+
+def run_live_calibration_cycle(
+    state_dir,
+    index,
+    *,
+    workload_class="normal",
+    baseline_slots=0,
+    root_marker="root-start",
+    baseline_overrides=None,
+    peak_overrides=None,
+    settle_overrides=None,
+):
+    base_time = 2000.0 + index * 10.0
+    session = f"session-{index}"
+    turn = f"turn-{index}"
+    request = f"request-{index}"
+    agent = f"agent-{index}"
+    baseline_kwargs = {"active_slots": baseline_slots, "current_codex_root_start_marker": root_marker}
+    baseline_kwargs.update(baseline_overrides or {})
+    peak_kwargs = {
+        "active_slots": baseline_slots + 1,
+        "current_codex_root_start_marker": root_marker,
+        "available_memory_bytes": 15 * GIB,
+        "user_process_count": 310,
+        "root_fd_used": 150,
+        "current_root_fd_used": 150,
+        "system_fd_used": 6200,
+    }
+    peak_kwargs.update(peak_overrides or {})
+    settle_kwargs = {"active_slots": baseline_slots, "current_codex_root_start_marker": root_marker}
+    settle_kwargs.update(settle_overrides or {})
+    baseline = calibration_snapshot(**baseline_kwargs)
+    peak = calibration_snapshot(**peak_kwargs)
+    settle = calibration_snapshot(**settle_kwargs)
+    observer.calibration_hook_event(
+        "pretool_lease",
+        state_dir=state_dir,
+        snapshot=baseline,
+        now_epoch=base_time,
+        workload_class=workload_class,
+        session_id=session,
+        turn_id=turn,
+        request_id=request,
+    )
+    observer.calibration_hook_event(
+        "subagent_start",
+        state_dir=state_dir,
+        snapshot=peak,
+        now_epoch=base_time + 1.1,
+        workload_class=workload_class,
+        session_id=session,
+        turn_id=turn,
+        agent_id=agent,
+    )
+    observer.calibration_hook_event(
+        "subagent_stop_before_release",
+        state_dir=state_dir,
+        snapshot=peak,
+        now_epoch=base_time + 2.3,
+        workload_class=workload_class,
+        session_id=session,
+        agent_id=agent,
+    )
+    return observer.calibration_hook_event(
+        "settle_snapshot",
+        state_dir=state_dir,
+        snapshot=settle,
+        now_epoch=base_time + 4.4,
+        workload_class=workload_class,
+    )
+
+
 class CapacityObserverTests(unittest.TestCase):
+    def test_module_imports_with_calibration_store_defined(self):
+        self.assertTrue(hasattr(observer, "CalibrationStore"))
+
+    def test_calibration_status_is_safe_aggregate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            status = observer.calibration_status(state_dir=Path(tmp))
+
+            json.dumps(status, allow_nan=False)
+            self.assertEqual("IDLE", status["phase"])
+            self.assertIn("normal", status["classes"])
+            self.assertNotIn("root-start", json.dumps(status))
+
+    def test_corrupted_symlink_hardlink_and_invalid_calibration_state_keep_fixed_six(self):
+        cases = []
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            corrupted = root / "corrupted"
+            corrupted.mkdir()
+            (corrupted / "calibration_state.json").write_text("{broken", encoding="utf-8")
+            cases.append(corrupted)
+
+            symlink_dir = root / "symlink"
+            symlink_dir.mkdir()
+            target = root / "outside.json"
+            target.write_text("{}", encoding="utf-8")
+            os.symlink(target, symlink_dir / "calibration_state.json")
+            cases.append(symlink_dir)
+
+            hardlink_dir = root / "hardlink"
+            hardlink_dir.mkdir()
+            original = root / "original.json"
+            original.write_text("{}", encoding="utf-8")
+            os.link(original, hardlink_dir / "calibration_state.json")
+            cases.append(hardlink_dir)
+
+            invalid = root / "invalid"
+            invalid.mkdir()
+            (invalid / "calibration_state.json").write_text(
+                json.dumps(
+                    {
+                        "protocol_version": 1,
+                        "classes": {
+                            "normal": {
+                                "accepted_count": 1,
+                                "effective_capacity": 8,
+                                "proven_capacity": 8,
+                                "saturated_clean_cycles": 3,
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cases.append(invalid)
+
+            invalid_step = root / "invalid-step"
+            invalid_step.mkdir()
+            (invalid_step / "calibration_state.json").write_text(
+                json.dumps(
+                    {
+                        "protocol_version": 1,
+                        "classes": {
+                            "normal": {
+                                "accepted_count": 30,
+                                "effective_capacity": 7,
+                                "proven_capacity": 7,
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            cases.append(invalid_step)
+
+            for state_dir in cases:
+                with self.subTest(state_dir=state_dir.name):
+                    result = observer.observe(snapshot=calibration_snapshot(active_slots=0), state_dir=state_dir, now_epoch=1000.0)
+
+                    self.assertLessEqual(result["effective_capacity"], 6)
+                    self.assertLessEqual(result["admission_capacity"], 6)
+                    self.assertEqual("calibration_unavailable_fixed6", result["capacity_mode"])
+
+    def test_calibration_lock_contention_keeps_observe_fixed_six_before_deadline(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            store = observer.CalibrationStore(state_dir)
+            store.load(deadline=time.monotonic() + 0.5)
+            original_timeout = observer.OBSERVE_TIMEOUT_SECONDS
+            observer.OBSERVE_TIMEOUT_SECONDS = 0.05
+            try:
+                with (state_dir / "calibration.lock").open("r+", encoding="utf-8") as handle:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    started = time.perf_counter()
+                    result = observer.observe(snapshot=calibration_snapshot(active_slots=0), state_dir=state_dir, now_epoch=1000.0)
+                    elapsed = time.perf_counter() - started
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                observer.OBSERVE_TIMEOUT_SECONDS = original_timeout
+
+            self.assertLess(elapsed, 0.5)
+            self.assertEqual(6, result["effective_capacity"])
+            self.assertLessEqual(result["admission_capacity"], 6)
+            self.assertEqual("calibration_unavailable_fixed6", result["capacity_mode"])
+
+    def test_live_calibration_cycle_accepts_sample_but_keeps_fixed_six_before_thirty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+
+            armed = observer.calibration_hook_event(
+                "pretool_lease",
+                state_dir=state_dir,
+                snapshot=calibration_snapshot(active_slots=0),
+                now_epoch=1000.0,
+                session_id="session-secret",
+                turn_id="turn-secret",
+                request_id="request-secret",
+            )
+            measuring = observer.calibration_hook_event(
+                "subagent_start",
+                state_dir=state_dir,
+                snapshot=calibration_snapshot(active_slots=1, available_memory_bytes=15 * GIB, user_process_count=310, root_fd_used=150, current_root_fd_used=150, system_fd_used=6200),
+                now_epoch=1001.1,
+                session_id="session-secret",
+                turn_id="turn-secret",
+                agent_id="agent-secret",
+            )
+            settling = observer.calibration_hook_event(
+                "subagent_stop_before_release",
+                state_dir=state_dir,
+                snapshot=calibration_snapshot(active_slots=1, available_memory_bytes=15 * GIB, user_process_count=310, root_fd_used=150, current_root_fd_used=150, system_fd_used=6200),
+                now_epoch=1002.3,
+                session_id="session-secret",
+                agent_id="agent-secret",
+            )
+            after_stop = observer.calibration_hook_event(
+                "stop",
+                state_dir=state_dir,
+                now_epoch=1002.4,
+                session_id="session-secret",
+                turn_id="turn-secret",
+            )
+            observer.calibration_hook_event(
+                "settle_snapshot",
+                state_dir=state_dir,
+                snapshot=calibration_snapshot(active_slots=0),
+                now_epoch=1004.4,
+            )
+            result = observer.observe(snapshot=calibration_snapshot(active_slots=0), state_dir=state_dir, now_epoch=1005.0)
+
+            self.assertEqual("ARMED", armed["phase"])
+            self.assertEqual("MEASURING", measuring["phase"])
+            self.assertEqual("SETTLING", settling["phase"])
+            self.assertEqual("SETTLING", after_stop["phase"])
+            self.assertEqual(1, result["accepted_calibrations"])
+            self.assertEqual("fixed_until_calibrated", result["capacity_mode"])
+            self.assertEqual(6, result["effective_capacity"])
+            persisted = (state_dir / "calibration_state.json").read_text(encoding="utf-8")
+            self.assertNotIn("session-secret", persisted)
+            self.assertNotIn("agent-secret", persisted)
+            self.assertNotIn("root-start", persisted)
+
+    def test_live_calibration_opens_eight_after_thirty_plus_ten_saturated_cycles_only_for_class(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            for index in range(30):
+                status = run_live_calibration_cycle(state_dir, index, baseline_slots=0)
+            normal = status["classes"]["normal"]
+            self.assertEqual(30, normal["accepted_count"])
+            self.assertEqual(6, normal["effective_capacity"])
+            self.assertEqual(0, normal["saturated_clean_cycles"])
+
+            for index in range(30, 39):
+                status = run_live_calibration_cycle(state_dir, index, baseline_slots=5)
+                normal = status["classes"]["normal"]
+                self.assertEqual(6, normal["effective_capacity"])
+                self.assertEqual(index - 29, normal["saturated_clean_cycles"])
+
+            opened = run_live_calibration_cycle(state_dir, 39, baseline_slots=5)
+            normal = opened["classes"]["normal"]
+
+            self.assertEqual(40, normal["accepted_count"])
+            self.assertEqual(8, normal["effective_capacity"])
+            self.assertEqual(8, normal["proven_capacity"])
+            self.assertEqual(0, normal["saturated_clean_cycles"])
+            self.assertEqual(6, opened["classes"]["browser"]["effective_capacity"])
+            self.assertEqual(6, opened["classes"]["light"]["effective_capacity"])
+
+    def test_live_calibration_non_saturated_cycle_resets_saturated_sequence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            for index in range(30):
+                run_live_calibration_cycle(state_dir, index, baseline_slots=0)
+            for index in range(30, 35):
+                run_live_calibration_cycle(state_dir, index, baseline_slots=5)
+
+            reset = run_live_calibration_cycle(state_dir, 35, baseline_slots=0)
+
+            self.assertEqual(6, reset["classes"]["normal"]["effective_capacity"])
+            self.assertEqual(0, reset["classes"]["normal"]["saturated_clean_cycles"])
+
+    def test_calibration_cancel_events_reject_active_bracket(self):
+        for event in ("stop", "session_end", "spawn_failed"):
+            with tempfile.TemporaryDirectory() as tmp:
+                state_dir = Path(tmp)
+                observer.calibration_hook_event(
+                    "pretool_lease",
+                    state_dir=state_dir,
+                    snapshot=calibration_snapshot(active_slots=0),
+                    now_epoch=1000.0,
+                    session_id="session-secret",
+                    turn_id="turn-secret",
+                    request_id="request-secret",
+                )
+                status = observer.calibration_hook_event(
+                    event,
+                    state_dir=state_dir,
+                    now_epoch=1001.0,
+                    session_id="session-secret",
+                    turn_id="turn-secret",
+                    request_id="request-secret",
+                )
+
+                self.assertEqual("IDLE", status["phase"])
+                self.assertEqual(1, status["classes"]["normal"]["rejected_count"])
+
+    def test_calibration_token_mismatch_or_empty_agent_does_not_move_active_bracket(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            observer.calibration_hook_event("pretool_lease", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=0), now_epoch=1000, session_id="s", turn_id="t", request_id="r")
+
+            wrong_session = observer.calibration_hook_event("subagent_start", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1001.1, session_id="other", turn_id="t", agent_id="a")
+            missing_agent = observer.calibration_hook_event("subagent_stop_before_release", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1002.3, session_id="s")
+
+            self.assertEqual("ARMED", wrong_session["phase"])
+            self.assertEqual("ARMED", missing_agent["phase"])
+            self.assertEqual(0, missing_agent["classes"]["normal"]["rejected_count"])
+
+    def test_stop_and_session_end_preserve_only_settling_after_normal_subagent_stop(self):
+        for cancel_event in ("stop", "session_end"):
+            with self.subTest(cancel_event=cancel_event), tempfile.TemporaryDirectory() as tmp:
+                state_dir = Path(tmp)
+                observer.calibration_hook_event("pretool_lease", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=0), now_epoch=1000, session_id="s", turn_id="t", request_id="r")
+                canceled = observer.calibration_hook_event(cancel_event, state_dir=state_dir, now_epoch=1001, session_id="s", turn_id="t")
+                self.assertEqual("IDLE", canceled["phase"])
+                self.assertEqual(1, canceled["classes"]["normal"]["rejected_count"])
+
+            with self.subTest(cancel_event=f"settling-{cancel_event}"), tempfile.TemporaryDirectory() as tmp:
+                state_dir = Path(tmp)
+                observer.calibration_hook_event("pretool_lease", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=0), now_epoch=1000, session_id="s", turn_id="t", request_id="r")
+                observer.calibration_hook_event("subagent_start", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1001.1, session_id="s", turn_id="t", agent_id="a")
+                observer.calibration_hook_event("subagent_stop_before_release", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1002.3, session_id="s", agent_id="a")
+                preserved = observer.calibration_hook_event(cancel_event, state_dir=state_dir, now_epoch=1002.4, session_id="s", turn_id="t")
+                self.assertEqual("SETTLING", preserved["phase"])
+
+    def test_live_calibration_rejects_unstable_brackets_with_stable_codes(self):
+        cases = [
+            ("external_roots_changed", {"peak_overrides": {"external_codex_roots": 1}}),
+            ("active_slots_changed", {"peak_overrides": {"active_slots": 3}}),
+            ("root_token_changed", {"settle_overrides": {"current_codex_root_start_marker": "other-root"}}),
+            ("swap_growth", {"settle_overrides": {"swapouts_total_bytes": 1}}),
+            ("settle_memory_drift", {"settle_overrides": {"available_memory_bytes": 15 * GIB - 2 * GIB}}),
+            ("settle_process_drift", {"settle_overrides": {"user_process_count": 306}}),
+            ("settle_root_fd_drift", {"settle_overrides": {"current_root_fd_used": 109}}),
+            ("settle_system_fd_drift", {"settle_overrides": {"system_fd_used": 6200}}),
+            ("resource_not_green", {"baseline_overrides": {"_calibration_status": "YELLOW"}}),
+            ("resource_not_green", {"peak_overrides": {"_calibration_status": "RED"}}),
+            ("resource_not_green", {"settle_overrides": {"_calibration_status": "YELLOW"}}),
+        ]
+        for expected_code, kwargs in cases:
+            with self.subTest(expected_code=expected_code, kwargs=kwargs), tempfile.TemporaryDirectory() as tmp:
+                state_dir = Path(tmp)
+                status = run_live_calibration_cycle(state_dir, 1, **kwargs)
+
+                self.assertEqual(0, status["classes"]["normal"]["accepted_count"])
+                self.assertEqual(1, status["classes"]["normal"]["rejected_count"])
+                self.assertEqual(expected_code, status["classes"]["normal"]["last_rejection_code"])
+
+    def test_live_calibration_rejects_short_task_and_sleep_gap_separately(self):
+        with tempfile.TemporaryDirectory() as short_tmp:
+            state_dir = Path(short_tmp)
+            observer.calibration_hook_event("pretool_lease", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=0), now_epoch=1000, session_id="s", turn_id="t", request_id="r")
+            observer.calibration_hook_event("subagent_start", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1000.1, session_id="s", turn_id="t", agent_id="a")
+            observer.calibration_hook_event("subagent_stop_before_release", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1000.2, session_id="s", agent_id="a")
+            status = observer.calibration_hook_event("settle_snapshot", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=0), now_epoch=1003.0)
+            self.assertEqual("task_too_short", status["classes"]["normal"]["last_rejection_code"])
+
+        with tempfile.TemporaryDirectory() as gap_tmp:
+            state_dir = Path(gap_tmp)
+            observer.calibration_hook_event("pretool_lease", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=0), now_epoch=1000, session_id="s", turn_id="t", request_id="r")
+            observer.calibration_hook_event("subagent_start", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1001.1, session_id="s", turn_id="t", agent_id="a")
+            observer.calibration_hook_event("subagent_stop_before_release", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=1), now_epoch=1002.3, session_id="s", agent_id="a")
+            status = observer.calibration_hook_event("settle_snapshot", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=0), now_epoch=1130.0)
+            self.assertEqual("sleep_gap", status["classes"]["normal"]["last_rejection_code"])
+
+    def test_live_calibration_expired_is_distinct_from_sleep_gap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            observer.calibration_hook_event("pretool_lease", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=0), now_epoch=1000, session_id="s", turn_id="t", request_id="r")
+            status = observer.calibration_hook_event("pretool_lease", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=0), now_epoch=2000, session_id="other", turn_id="other", request_id="other")
+
+            self.assertEqual("expired", status["classes"]["normal"]["last_rejection_code"])
+
+    def test_synthetic_workload_delta_without_test_mode_does_not_calibrate(self):
+        os.environ.pop("CODEX_CAPACITY_OBSERVER_TEST_MODE", None)
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            for index in range(45):
+                result = observer.observe(
+                    snapshot=clean_snapshot(workload_delta={"memory_bytes": 512 * MIB, "processes": 9, "root_fds": 40, "system_fds": 220}),
+                    state_dir=state_dir,
+                    now_epoch=1000.0 + index,
+                )
+
+            self.assertEqual(0, result["accepted_calibrations"])
+            self.assertEqual("fixed_until_calibrated", result["capacity_mode"])
+            self.assertEqual(6, result["effective_capacity"])
+
+    def test_production_calibration_requires_confirmed_status_and_current_root_fd(self):
+        os.environ.pop("CODEX_CAPACITY_CALIBRATION_TEST_MODE", None)
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            no_status = calibration_snapshot(active_slots=0)
+            no_status.pop("_calibration_status")
+            no_fd = calibration_snapshot(active_slots=1)
+            no_fd.pop("current_root_fd_used")
+
+            observer.calibration_hook_event("pretool_lease", state_dir=state_dir, snapshot=no_status, now_epoch=1000, session_id="s", turn_id="t", request_id="r")
+            observer.calibration_hook_event("subagent_start", state_dir=state_dir, snapshot=no_fd, now_epoch=1001.1, session_id="s", turn_id="t", agent_id="a")
+            status = observer.calibration_hook_event("subagent_stop_before_release", state_dir=state_dir, snapshot=no_fd, now_epoch=1002.3, session_id="s", agent_id="a")
+
+            self.assertEqual("ARMED", status["phase"])
+
+        previous = os.environ.get("CODEX_CAPACITY_CALIBRATION_TEST_MODE")
+        os.environ["CODEX_CAPACITY_CALIBRATION_TEST_MODE"] = "1"
+        self.addCleanup(lambda: os.environ.pop("CODEX_CAPACITY_CALIBRATION_TEST_MODE", None) if previous is None else os.environ.__setitem__("CODEX_CAPACITY_CALIBRATION_TEST_MODE", previous))
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            no_fd = calibration_snapshot(active_slots=1)
+            no_fd.pop("current_root_fd_used")
+            observer.calibration_hook_event("pretool_lease", state_dir=state_dir, snapshot=calibration_snapshot(active_slots=0), now_epoch=1000, session_id="s", turn_id="t", request_id="r")
+            moved = observer.calibration_hook_event("subagent_start", state_dir=state_dir, snapshot=no_fd, now_epoch=1001.1, session_id="s", turn_id="t", agent_id="a")
+            self.assertEqual("MEASURING", moved["phase"])
+
+    def test_light_workload_normalizes_to_normal_without_calibration_test_mode(self):
+        os.environ.pop("CODEX_CAPACITY_CALIBRATION_TEST_MODE", None)
+        with tempfile.TemporaryDirectory() as tmp:
+            status = observer.calibration_hook_event(
+                "pretool_lease",
+                state_dir=Path(tmp),
+                snapshot=calibration_snapshot(active_slots=0),
+                now_epoch=1000,
+                workload_class="light",
+                session_id="s",
+                turn_id="t",
+                request_id="r",
+            )
+
+            self.assertEqual("normal", status["workload_class"])
+
     def test_missing_mandatory_measurement_fails_closed_with_machine_json_and_zero_admission(self):
         with tempfile.TemporaryDirectory() as tmp:
             snapshot = clean_snapshot()
@@ -713,6 +1171,7 @@ class CapacityObserverTests(unittest.TestCase):
             self.assertLessEqual(len(persisted["observations"]), 100)
 
     def test_capacity_steps_only_after_thirty_workload_delta_samples(self):
+        enable_observer_test_mode(self)
         with tempfile.TemporaryDirectory() as tmp:
             state_dir = Path(tmp)
             workload_delta = {"memory_bytes": 512 * MIB, "processes": 9, "root_fds": 40, "system_fds": 220}
@@ -750,6 +1209,7 @@ class CapacityObserverTests(unittest.TestCase):
             self.assertEqual(result["max_wave_size"], 8)
 
     def test_calibration_is_workload_delta_and_workload_class_specific(self):
+        enable_observer_test_mode(self)
         with tempfile.TemporaryDirectory() as tmp:
             state_dir = Path(tmp)
             normal_delta = {"memory_bytes": 512 * MIB, "processes": 9, "root_fds": 40, "system_fds": 220}
@@ -786,6 +1246,7 @@ class CapacityObserverTests(unittest.TestCase):
                 self.assertEqual(browser["capacity_mode"], "fixed_until_calibrated")
 
     def test_capacity_does_not_step_when_new_step_projection_lacks_resources(self):
+        enable_observer_test_mode(self)
         with tempfile.TemporaryDirectory() as tmp:
             state_dir = Path(tmp)
             constrained = clean_snapshot(available_memory_bytes=10 * GIB, active_slots=0)
@@ -807,6 +1268,7 @@ class CapacityObserverTests(unittest.TestCase):
             )
 
     def test_capacity_drops_immediately_to_last_proven_step_for_admission(self):
+        enable_observer_test_mode(self)
         with tempfile.TemporaryDirectory() as tmp:
             state_dir = Path(tmp)
             workload_delta = {"memory_bytes": 512 * MIB, "processes": 9, "root_fds": 40, "system_fds": 220}

@@ -23,7 +23,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 DEFAULT_CAPACITY = 6
 MAX_CAPACITY = 20
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MAX_OPERATION_SECONDS = 0.45
 OPERATION_BUDGET_ENV = "CODEX_CAPACITY_MAX_OPERATION_SECONDS"
 SQLITE_BUSY_TIMEOUT_MS = 1
@@ -103,8 +103,10 @@ INITIAL_SCHEMA_STATEMENTS = (
       session_id text primary key,
       root_pid integer not null,
       root_start_marker text not null,
+      root_state text not null default 'ACTIVE' check (root_state in ('ACTIVE', 'SUSPECT', 'RECOVERING')),
       created_at real not null,
-      updated_at real not null
+      updated_at real not null,
+      cleanup_after real
     )
     """,
     """
@@ -595,6 +597,7 @@ class CapacityStore:
                 for row in conn.execute(
                     """
                     select session_id, root_pid, root_start_marker, updated_at
+                         , root_state, cleanup_after
                     from managed_roots
                     order by session_id
                     """
@@ -613,6 +616,7 @@ class CapacityStore:
             missing_sessions = set(root_by_session) - present_sessions
 
             restored = self._restore_present_managed_roots(conn, now, proof, present_sessions)
+            restored_roots = self._restore_present_root_records(conn, now, proof, present_sessions)
             suspected = self._advance_missing_managed_roots(
                 conn,
                 now,
@@ -633,9 +637,36 @@ class CapacityStore:
                 require_due=True,
                 updated_before=now,
             )
-            released = self._release_recovering_missing_roots(conn, now, proof, missing_sessions, updated_before=now)
-            if released:
-                self._promote_pending(conn, now, limit=released)
+            suspected_roots = self._advance_missing_root_records(
+                conn,
+                now,
+                proof,
+                missing_sessions,
+                from_state="ACTIVE",
+                to_state="SUSPECT",
+                stage_seconds=stage,
+            )
+            recovering_roots = self._advance_missing_root_records(
+                conn,
+                now,
+                proof,
+                missing_sessions,
+                from_state="SUSPECT",
+                to_state="RECOVERING",
+                stage_seconds=stage,
+                require_due=True,
+                updated_before=now,
+            )
+            release_result = self._release_recovering_missing_roots(conn, now, proof, missing_sessions, updated_before=now)
+            released = int(release_result["released_leases"])
+            canceled_tickets = int(release_result["canceled_tickets"])
+            ready_canceled = int(release_result["ready_tickets_canceled"])
+            root_cancel_result = self._cancel_recovering_root_tickets(conn, now, proof, missing_sessions, updated_before=now)
+            canceled_tickets += int(root_cancel_result["canceled_tickets"])
+            ready_canceled += int(root_cancel_result["ready_tickets_canceled"])
+            promote_limit = released + ready_canceled
+            if promote_limit:
+                self._promote_pending(conn, now, limit=promote_limit)
             for session_id in sorted(missing_sessions):
                 self._unregister_managed_root_if_terminal(conn, session_id=session_id)
             active_count = self._active_lease_count(conn)
@@ -648,9 +679,13 @@ class CapacityStore:
                 present=len(present_sessions),
                 missing=len(missing_sessions),
                 restored=restored,
+                restored_roots=restored_roots,
                 suspected=suspected,
                 recovering=recovering,
+                suspected_roots=suspected_roots,
+                recovering_roots=recovering_roots,
                 released=released,
+                canceled_tickets=canceled_tickets,
             )
             return {
                 "state": "OK",
@@ -658,9 +693,13 @@ class CapacityStore:
                 "present_roots": len(present_sessions),
                 "missing_roots": len(missing_sessions),
                 "restored_leases": restored,
+                "restored_roots": restored_roots,
                 "suspect_leases": suspected,
                 "recovering_leases": recovering,
+                "suspect_roots": suspected_roots,
+                "recovering_roots": recovering_roots,
                 "released_leases": released,
+                "canceled_tickets": canceled_tickets,
                 "active_count": active_count,
                 "reserved_count": reserved_count,
             }
@@ -924,6 +963,8 @@ class CapacityStore:
         conn.execute("insert or ignore into meta (key, value) values ('fair_cursor', '')")
         self._ensure_column(conn, "leases", "cleanup_after", "real")
         self._ensure_column(conn, "tickets", "consumed_at", "real")
+        self._ensure_column(conn, "managed_roots", "root_state", "text not null default 'ACTIVE'")
+        self._ensure_column(conn, "managed_roots", "cleanup_after", "real")
         conn.execute(f"pragma user_version = {SCHEMA_VERSION}")
 
     def _register_managed_root(
@@ -942,6 +983,8 @@ class CapacityStore:
             on conflict(session_id) do update set
               root_pid = excluded.root_pid,
               root_start_marker = excluded.root_start_marker,
+              root_state = 'ACTIVE',
+              cleanup_after = null,
               updated_at = excluded.updated_at
             """,
             (session_id, root_pid, root_start_marker, now, now),
@@ -991,6 +1034,26 @@ class CapacityStore:
             (now, *sorted(present_sessions), proof),
         ).rowcount
 
+    def _restore_present_root_records(
+        self,
+        conn: sqlite3.Connection,
+        now: float,
+        proof: float,
+        present_sessions: set[str],
+    ) -> int:
+        if not present_sessions:
+            return 0
+        return conn.execute(
+            f"""
+            update managed_roots
+            set root_state = 'ACTIVE', cleanup_after = null, updated_at = ?
+            where session_id in ({placeholders(present_sessions)})
+              and root_state in ('SUSPECT', 'RECOVERING')
+              and updated_at <= ?
+            """,
+            (now, *sorted(present_sessions), proof),
+        ).rowcount
+
     def _advance_missing_managed_roots(
         self,
         conn: sqlite3.Connection,
@@ -1027,6 +1090,42 @@ class CapacityStore:
             params,
         ).rowcount
 
+    def _advance_missing_root_records(
+        self,
+        conn: sqlite3.Connection,
+        now: float,
+        proof: float,
+        missing_sessions: set[str],
+        *,
+        from_state: str,
+        to_state: str,
+        stage_seconds: float,
+        require_due: bool = False,
+        updated_before: Optional[float] = None,
+    ) -> int:
+        if not missing_sessions:
+            return 0
+        due_clause = "and cleanup_after is not null and cleanup_after <= ?" if require_due else ""
+        params: tuple[Any, ...] = (to_state, now + stage_seconds, now, *sorted(missing_sessions), from_state, proof)
+        if require_due:
+            params = (*params, now)
+        before_clause = ""
+        if updated_before is not None:
+            before_clause = "and updated_at < ?"
+            params = (*params, updated_before)
+        return conn.execute(
+            f"""
+            update managed_roots
+            set root_state = ?, cleanup_after = ?, updated_at = ?
+            where session_id in ({placeholders(missing_sessions)})
+              and root_state = ?
+              and updated_at <= ?
+              {due_clause}
+              {before_clause}
+            """,
+            params,
+        ).rowcount
+
     def _release_recovering_missing_roots(
         self,
         conn: sqlite3.Connection,
@@ -1035,9 +1134,9 @@ class CapacityStore:
         missing_sessions: set[str],
         *,
         updated_before: Optional[float] = None,
-    ) -> int:
+    ) -> dict[str, int]:
         if not missing_sessions:
-            return 0
+            return {"released_leases": 0, "canceled_tickets": 0, "ready_tickets_canceled": 0}
         before_clause = ""
         params: tuple[Any, ...] = (*sorted(missing_sessions), now, proof)
         if updated_before is not None:
@@ -1061,7 +1160,7 @@ class CapacityStore:
             )
         ]
         if not released_rows:
-            return 0
+            return {"released_leases": 0, "canceled_tickets": 0, "ready_tickets_canceled": 0}
         lease_ids = [str(row["lease_id"]) for row in released_rows]
         sessions = {str(row["session_id"]) for row in released_rows}
         conn.execute(
@@ -1073,7 +1172,8 @@ class CapacityStore:
             """,
             (now, now, *lease_ids),
         )
-        conn.execute(
+        ready_tickets = self._ready_ticket_count_for_sessions_before_proof(conn, sessions, proof)
+        canceled = conn.execute(
             f"""
             update tickets
             set state = 'CANCELED', updated_at = ?
@@ -1082,8 +1182,80 @@ class CapacityStore:
               and updated_at <= ?
             """,
             (now, *sorted(sessions), proof),
+        ).rowcount
+        return {
+            "released_leases": len(lease_ids),
+            "canceled_tickets": canceled,
+            "ready_tickets_canceled": ready_tickets,
+        }
+
+    def _cancel_recovering_root_tickets(
+        self,
+        conn: sqlite3.Connection,
+        now: float,
+        proof: float,
+        missing_sessions: set[str],
+        *,
+        updated_before: Optional[float] = None,
+    ) -> dict[str, int]:
+        if not missing_sessions:
+            return {"canceled_tickets": 0, "ready_tickets_canceled": 0}
+        before_clause = ""
+        params: tuple[Any, ...] = (*sorted(missing_sessions), now, proof)
+        if updated_before is not None:
+            before_clause = "and updated_at < ?"
+            params = (*params, updated_before)
+        sessions = {
+            str(row["session_id"])
+            for row in conn.execute(
+                f"""
+                select session_id
+                from managed_roots
+                where session_id in ({placeholders(missing_sessions)})
+                  and root_state = 'RECOVERING'
+                  and cleanup_after is not null
+                  and cleanup_after <= ?
+                  and updated_at <= ?
+                  {before_clause}
+                order by session_id
+                """,
+                params,
+            )
+        }
+        if not sessions:
+            return {"canceled_tickets": 0, "ready_tickets_canceled": 0}
+        ready_tickets = self._ready_ticket_count_for_sessions_before_proof(conn, sessions, proof)
+        canceled = conn.execute(
+            f"""
+            update tickets
+            set state = 'CANCELED', updated_at = ?
+            where session_id in ({placeholders(sessions)})
+              and state in ('PENDING', 'READY')
+              and updated_at <= ?
+            """,
+            (now, *sorted(sessions), proof),
+        ).rowcount
+        return {"canceled_tickets": canceled, "ready_tickets_canceled": ready_tickets}
+
+    def _ready_ticket_count_for_sessions_before_proof(
+        self,
+        conn: sqlite3.Connection,
+        sessions: set[str],
+        proof: float,
+    ) -> int:
+        if not sessions:
+            return 0
+        return self._count(
+            conn,
+            f"""
+            select count(*) from tickets
+            where session_id in ({placeholders(sessions)})
+              and state = 'READY'
+              and consumed_at is null
+              and updated_at <= ?
+            """,
+            (*sorted(sessions), proof),
         )
-        return len(lease_ids)
 
     def _ensure_column(self, conn: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
         columns = {row["name"] for row in conn.execute(f"pragma table_info({table})")}

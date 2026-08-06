@@ -317,7 +317,7 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
         original_collect = policy.capacity_observer.collect_snapshot
         try:
             policy.capacity_observer.collect_snapshot = lambda **kwargs: payload
-            _limit, _wave, reason, root_identity = policy.observed_capacity_limit(FakeStore(), {}, deadline=time.perf_counter() + 1.0)
+            _limit, _wave, reason, root_identity, _calibration = policy.observed_capacity_limit(FakeStore(), {}, deadline=time.perf_counter() + 1.0)
         finally:
             policy.capacity_observer.collect_snapshot = original_collect
 
@@ -349,7 +349,7 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
         original_collect = policy.capacity_observer.collect_snapshot
         try:
             policy.capacity_observer.collect_snapshot = lambda **kwargs: payload
-            _limit, _wave, reason, root_identity = policy.observed_capacity_limit(FakeStore(), {}, deadline=time.perf_counter() + 1.0)
+            _limit, _wave, reason, root_identity, _calibration = policy.observed_capacity_limit(FakeStore(), {}, deadline=time.perf_counter() + 1.0)
         finally:
             policy.capacity_observer.collect_snapshot = original_collect
 
@@ -457,6 +457,89 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
         self.run_policy("Stop", {"session_id": "session-1", "turn_id": "turn-1"})
         ended = self.run_policy("SessionEnd", {"session_id": "session-1", "reason": "shutdown"})
         self.assertEqual(0, ended.returncode, ended.stderr)
+
+    def test_policy_hook_lifecycle_records_live_calibration_without_raw_root_identity(self) -> None:
+        snapshot = self.write_observer_snapshot(
+            codex_root_count=1,
+            external_codex_roots=0,
+            current_codex_root_pid=700,
+            current_codex_root_start_marker="root-start-marker",
+            root_fd_state="measured",
+            root_fd_used=100,
+            current_root_fd_used=100,
+        )
+        env = dict(self.env, CODEX_CAPACITY_OBSERVER_SNAPSHOT=str(snapshot))
+        payload = self.spawn_payload("calibrated-life")
+
+        self.assertEqual(0, self.run_policy("PreToolUse", payload, env=env).returncode)
+        started = self.run_policy(
+            "SubagentStart",
+            {"session_id": "session-1", "turn_id": "turn-1", "agent_id": "agent-1", "agent_type": "worker"},
+            env=env,
+        )
+        self.assertEqual(0, started.returncode, started.stderr)
+        time.sleep(1.1)
+        stopped = self.run_policy("SubagentStop", {"session_id": "session-1", "agent_id": "agent-1"}, env=env)
+        self.assertEqual(0, stopped.returncode, stopped.stderr)
+        self.assertEqual(0, self.capacity_cli("snapshot")["active_count"])
+
+        time.sleep(2.05)
+        settled_snapshot = self.write_observer_snapshot(
+            codex_root_count=1,
+            external_codex_roots=0,
+            current_codex_root_pid=700,
+            current_codex_root_start_marker="root-start-marker",
+            root_fd_state="measured",
+            root_fd_used=100,
+            current_root_fd_used=100,
+        )
+        completed = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "codex_capacity_observer.py"), "--state-dir", str(self.home / ".local" / "state" / "codex-capacity-v1"), "--snapshot-json", str(settled_snapshot)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=ROOT,
+            env=env,
+        )
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        result = json.loads(completed.stdout)
+        self.assertEqual(1, result["accepted_calibrations"])
+
+        calibration_state = (self.home / ".local" / "state" / "codex-capacity-v1" / "calibration_state.json").read_text(encoding="utf-8")
+        audit = self.audit_text()
+        self.assertNotIn("root-start-marker", calibration_state)
+        self.assertNotIn("root-start-marker", audit)
+        self.assertNotIn('"700"', calibration_state)
+
+    def test_policy_release_succeeds_when_calibration_state_is_corrupted(self) -> None:
+        state_dir = self.home / ".local" / "state" / "codex-capacity-v1"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        (state_dir / "calibration_state.json").write_text("{broken", encoding="utf-8")
+
+        self.assertEqual(0, self.run_policy("PreToolUse", self.spawn_payload("corrupted-calibration")).returncode)
+        started = self.run_policy(
+            "SubagentStart",
+            {"session_id": "session-1", "turn_id": "turn-1", "agent_id": "agent-1", "agent_type": "worker"},
+        )
+        self.assertEqual(0, started.returncode, started.stderr)
+        stopped = self.run_policy("SubagentStop", {"session_id": "session-1", "agent_id": "agent-1"})
+
+        self.assertEqual(0, stopped.returncode, stopped.stderr)
+        self.assertEqual(0, self.capacity_cli("snapshot")["active_count"])
+
+    def test_lifecycle_snapshot_status_uses_browser_cost(self) -> None:
+        policy = load_policy_module()
+        snapshot = self.write_observer_snapshot(
+            available_memory_bytes=6 * 1024 * 1024 * 1024,
+            root_fd_state="measured",
+            current_codex_root_pid=700,
+            current_codex_root_start_marker="root-start-marker",
+            current_root_fd_used=100,
+        )
+        payload = json.loads(snapshot.read_text(encoding="utf-8"))
+
+        self.assertEqual("GREEN", policy.calibration_snapshot_status(payload, workload_class="normal"))
+        self.assertEqual("YELLOW", policy.calibration_snapshot_status(payload, workload_class="browser"))
 
     def test_enforcement_can_be_disabled(self) -> None:
         env = dict(self.env, CODEX_CAPACITY_ENFORCEMENT="0")

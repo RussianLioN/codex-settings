@@ -186,6 +186,33 @@ class CodexCapacityTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        (state_dir / "calibration_state.json").write_text(
+            json.dumps(
+                {
+                    "protocol_version": 1,
+                    "active": None,
+                    "classes": {
+                        "normal": {
+                            "samples": samples,
+                            "accepted_count": 30,
+                            "rejected_count": 0,
+                            "last_rejection_code": None,
+                            "saturated_clean_cycles": 10,
+                            "effective_capacity": effective_capacity,
+                            "proven_capacity": effective_capacity,
+                            "cost_estimate": {
+                                "memory_bytes": 384 * 1024 * 1024,
+                                "processes": 8.0,
+                                "root_fds": 32.0,
+                                "system_fds": 192.0,
+                            },
+                            "cost_updated_at": 100.0,
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
 
     def request(self, index: int, *, session: str = "s1", turn: str = "t1") -> dict[str, str]:
         return {"session_id": session, "turn_id": turn, "task_name": f"task-{index}"}
@@ -453,6 +480,136 @@ class CodexCapacityTests(unittest.TestCase):
         finally:
             self.capacity.current_time = original_time  # type: ignore[assignment]
 
+    def test_missing_root_with_only_old_tickets_is_canceled_and_unregistered_after_proof(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, capacity=1, provisional_ttl_seconds=999)
+        original_time = self.capacity.current_time
+        clock = {"now": 0.0}
+        self.capacity.current_time = lambda: clock["now"]  # type: ignore[assignment]
+        try:
+            lease = store.acquire_or_queue(
+                **self.request(1, session="dead-tab", turn="t1"),
+                root_pid=700,
+                root_start_marker="root-old",
+            )
+            store.activate_next(session_id="dead-tab", turn_id="t1", agent_id="agent-a")
+            ready = store.acquire_or_queue(**self.request(2, session="dead-tab", turn="t1"))
+            next_ticket = store.acquire_or_queue(**self.request(1, session="next-tab", turn="t1"))
+            self.assertEqual("PENDING", next_ticket["ticket_state"])
+            store.release(lease_id=str(lease["lease_id"]), fencing_epoch=int(lease["fencing_epoch"]))
+            self.assertEqual("READY", store.wait(str(ready["ticket_id"]))["ticket_state"])
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("update tickets set updated_at = 1 where ticket_id = ?", (ready["ticket_id"],))
+                conn.commit()
+            finally:
+                conn.close()
+
+            clock["now"] = 100.0
+            first = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=99.0)
+            self.assertEqual(1, first["suspect_roots"])
+            self.assertEqual(0, first["canceled_tickets"])
+            self.assertEqual("READY", store.wait(str(ready["ticket_id"]))["ticket_state"])
+
+            clock["now"] = 111.0
+            second = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=110.0)
+            self.assertEqual(1, second["recovering_roots"])
+            self.assertEqual(0, second["canceled_tickets"])
+            self.assertEqual("READY", store.wait(str(ready["ticket_id"]))["ticket_state"])
+
+            clock["now"] = 130.0
+            result = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=129.0)
+
+            self.assertEqual(0, result["released_leases"])
+            self.assertEqual(1, result["canceled_tickets"])
+            self.assertEqual("CANCELED", store.wait(str(ready["ticket_id"]))["ticket_state"])
+            self.assertEqual("READY", store.wait(str(next_ticket["ticket_id"]))["ticket_state"])
+            self.assertEqual(0, store.snapshot()["managed_root_count"])
+        finally:
+            self.capacity.current_time = original_time  # type: ignore[assignment]
+
+    def test_missing_root_does_not_cancel_new_or_live_session_tickets(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, capacity=2, provisional_ttl_seconds=999)
+        original_time = self.capacity.current_time
+        clock = {"now": 0.0}
+        self.capacity.current_time = lambda: clock["now"]  # type: ignore[assignment]
+        try:
+            dead_lease = store.acquire_or_queue(
+                **self.request(1, session="dead-tab", turn="t1"),
+                root_pid=700,
+                root_start_marker="root-old",
+            )
+            live_lease = store.acquire_or_queue(
+                **self.request(1, session="live-tab", turn="t1"),
+                root_pid=800,
+                root_start_marker="root-live",
+            )
+            store.activate_next(session_id="dead-tab", turn_id="t1", agent_id="agent-a")
+            store.activate_next(session_id="live-tab", turn_id="t1", agent_id="agent-b")
+            old_ticket = store.acquire_or_queue(**self.request(2, session="dead-tab", turn="t1"))
+            new_ticket = store.acquire_or_queue(**self.request(3, session="dead-tab", turn="t1"))
+            live_ticket = store.acquire_or_queue(**self.request(2, session="live-tab", turn="t1"))
+            store.release(lease_id=str(dead_lease["lease_id"]), fencing_epoch=int(dead_lease["fencing_epoch"]))
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute(
+                    "update managed_roots set root_state = 'RECOVERING', cleanup_after = 1, updated_at = 1 where session_id = 'dead-tab'"
+                )
+                conn.execute("update tickets set updated_at = 1 where ticket_id = ?", (old_ticket["ticket_id"],))
+                conn.execute("update tickets set updated_at = 200 where ticket_id = ?", (new_ticket["ticket_id"],))
+                conn.execute("update tickets set updated_at = 1 where ticket_id = ?", (live_ticket["ticket_id"],))
+                conn.commit()
+            finally:
+                conn.close()
+
+            clock["now"] = 20.0
+            result = store.reconcile_managed_roots(live_root_identities=[(800, "root-live")], proof_started_at=100.0)
+
+            self.assertEqual(1, result["canceled_tickets"])
+            self.assertEqual("CANCELED", store.wait(str(old_ticket["ticket_id"]))["ticket_state"])
+            self.assertIn(store.wait(str(new_ticket["ticket_id"]))["ticket_state"], {"PENDING", "READY"})
+            self.assertIn(store.wait(str(live_ticket["ticket_id"]))["ticket_state"], {"PENDING", "READY"})
+            self.assertEqual("ACTIVE", self.lease_states_by_session(store)["live-tab"])
+            self.assertEqual("LEASED", store.release(lease_id=str(live_lease["lease_id"]), fencing_epoch=int(live_lease["fencing_epoch"]))["state"])
+            self.assertEqual(2, store.snapshot()["managed_root_session_count"])
+        finally:
+            self.capacity.current_time = original_time  # type: ignore[assignment]
+
+    def test_present_root_between_ticket_recovery_stages_keeps_tickets_and_root_registration(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, capacity=1, provisional_ttl_seconds=999)
+        original_time = self.capacity.current_time
+        clock = {"now": 0.0}
+        self.capacity.current_time = lambda: clock["now"]  # type: ignore[assignment]
+        try:
+            lease = store.acquire_or_queue(
+                **self.request(1, session="tab-a", turn="t1"),
+                root_pid=700,
+                root_start_marker="root-a",
+            )
+            store.activate_next(session_id="tab-a", turn_id="t1", agent_id="agent-a")
+            ready = store.acquire_or_queue(**self.request(2, session="tab-a", turn="t1"))
+            store.release(lease_id=str(lease["lease_id"]), fencing_epoch=int(lease["fencing_epoch"]))
+            self.assertEqual("READY", store.wait(str(ready["ticket_id"]))["ticket_state"])
+
+            clock["now"] = 100.0
+            first = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=99.0)
+            self.assertEqual(1, first["suspect_roots"])
+
+            clock["now"] = 105.0
+            restored = store.reconcile_managed_roots(live_root_identities=[(700, "root-a")], proof_started_at=104.0)
+
+            self.assertEqual(1, restored["restored_roots"])
+            self.assertEqual(0, restored["canceled_tickets"])
+            self.assertEqual("READY", store.wait(str(ready["ticket_id"]))["ticket_state"])
+            self.assertEqual(1, store.snapshot()["managed_root_count"])
+
+            clock["now"] = 130.0
+            later_missing = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=129.0)
+            self.assertEqual(1, later_missing["suspect_roots"])
+            self.assertEqual(0, later_missing["canceled_tickets"])
+            self.assertEqual("READY", store.wait(str(ready["ticket_id"]))["ticket_state"])
+        finally:
+            self.capacity.current_time = original_time  # type: ignore[assignment]
+
     def test_recovery_returns_exact_counts_after_release_cancel_and_promote(self) -> None:
         store = self.capacity.CapacityStore(home=self.home, capacity=1, provisional_ttl_seconds=999)
         original_time = self.capacity.current_time
@@ -483,6 +640,7 @@ class CodexCapacityTests(unittest.TestCase):
             result = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=100.0)
 
             self.assertEqual(1, result["released_leases"])
+            self.assertEqual(1, result["canceled_tickets"])
             self.assertEqual(0, result["active_count"])
             self.assertEqual(1, result["reserved_count"])
             self.assertEqual("CANCELED", store.wait(str(same_session_ticket["ticket_id"]))["ticket_state"])
@@ -490,6 +648,55 @@ class CodexCapacityTests(unittest.TestCase):
             snapshot = store.snapshot()
             self.assertEqual(result["active_count"], snapshot["active_count"])
             self.assertEqual(result["reserved_count"], snapshot["reserved_count"])
+        finally:
+            self.capacity.current_time = original_time  # type: ignore[assignment]
+
+    def test_recovery_promotes_for_released_lease_and_canceled_ready_ticket_without_overfill(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, capacity=2, provisional_ttl_seconds=999)
+        original_time = self.capacity.current_time
+        clock = {"now": 0.0}
+        self.capacity.current_time = lambda: clock["now"]  # type: ignore[assignment]
+        try:
+            store.acquire_or_queue(
+                **self.request(1, session="dead-tab", turn="t1"),
+                root_pid=700,
+                root_start_marker="root-old",
+            )
+            holder = store.acquire_or_queue(**self.request(1, session="holder-tab", turn="t1"))
+            store.activate_next(session_id="dead-tab", turn_id="t1", agent_id="agent-a")
+            store.activate_next(session_id="holder-tab", turn_id="t1", agent_id="agent-b")
+            ready_same_session = store.acquire_or_queue(**self.request(2, session="dead-tab", turn="t1"))
+            store.release(lease_id=str(holder["lease_id"]), fencing_epoch=int(holder["fencing_epoch"]))
+            self.assertEqual("READY", store.wait(str(ready_same_session["ticket_id"]))["ticket_state"])
+            first_pending = store.acquire_or_queue(**self.request(1, session="next-a", turn="t1"))
+            second_pending = store.acquire_or_queue(**self.request(1, session="next-b", turn="t1"))
+            third_pending = store.acquire_or_queue(**self.request(1, session="next-c", turn="t1"))
+            conn = sqlite3.connect(self.db_path)
+            try:
+                conn.execute("update leases set state = 'RECOVERING', cleanup_after = 1, updated_at = 1 where session_id = 'dead-tab'")
+                conn.execute(
+                    "update tickets set state = 'READY', ready_at = 1, updated_at = 1 where ticket_id = ?",
+                    (ready_same_session["ticket_id"],),
+                )
+                conn.execute("update tickets set updated_at = 1 where ticket_id in (?, ?, ?)", (
+                    first_pending["ticket_id"],
+                    second_pending["ticket_id"],
+                    third_pending["ticket_id"],
+                ))
+                conn.commit()
+            finally:
+                conn.close()
+
+            clock["now"] = 20.0
+            result = store.reconcile_managed_roots(live_root_identities=[], proof_started_at=100.0)
+
+            self.assertEqual(1, result["released_leases"])
+            self.assertEqual(1, result["canceled_tickets"])
+            self.assertEqual("CANCELED", store.wait(str(ready_same_session["ticket_id"]))["ticket_state"])
+            self.assertEqual("READY", store.wait(str(first_pending["ticket_id"]))["ticket_state"])
+            self.assertEqual("READY", store.wait(str(second_pending["ticket_id"]))["ticket_state"])
+            self.assertEqual("PENDING", store.wait(str(third_pending["ticket_id"]))["ticket_state"])
+            self.assertEqual(2, result["reserved_count"])
         finally:
             self.capacity.current_time = original_time  # type: ignore[assignment]
 
@@ -581,7 +788,7 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertEqual(0, snapshot["managed_root_count"])
         conn = sqlite3.connect(self.db_path)
         try:
-            self.assertEqual(2, conn.execute("pragma user_version").fetchone()[0])
+            self.assertEqual(3, conn.execute("pragma user_version").fetchone()[0])
             self.assertIsNotNone(
                 conn.execute("select name from sqlite_master where type = 'table' and name = 'managed_roots'").fetchone()
             )

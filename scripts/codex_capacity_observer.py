@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -78,6 +79,18 @@ MIN_COSTS: dict[str, dict[str, float]] = {
     },
 }
 
+CALIBRATION_SETTLE_SECONDS = 2.0
+CALIBRATION_MAX_SECONDS = 900.0
+CALIBRATION_MAX_GAP_SECONDS = 120.0
+CALIBRATION_MIN_PEAK_SECONDS = 1.0
+CALIBRATION_MEMORY_DRIFT_BYTES = 256 * 1024 * 1024
+CALIBRATION_PROCESS_DRIFT = 4.0
+CALIBRATION_ROOT_FD_DRIFT = 8.0
+CALIBRATION_SYSTEM_FD_DRIFT = 128.0
+CALIBRATION_DOMAIN = "codex-capacity-calibration-v1"
+CALIBRATION_TEST_MODE_ENV = "CODEX_CAPACITY_CALIBRATION_TEST_MODE"
+VALID_CAPACITIES = {DEFAULT_CAPACITY, *CAPACITY_STEPS}
+
 
 class ObservationError(Exception):
     pass
@@ -104,6 +117,8 @@ def observe(
     caller_pid: int | None = None,
 ) -> dict[str, Any]:
     now = float(time.time() if now_epoch is None else now_epoch)
+    if workload_class == "light" and os.getenv(CALIBRATION_TEST_MODE_ENV) != "1":
+        workload_class = "normal"
     deadline = time.monotonic() + OBSERVE_TIMEOUT_SECONDS
     observed_state_dir = Path(state_dir or default_state_dir())
     try:
@@ -122,15 +137,34 @@ def observe(
             raw_snapshot = dict(raw_snapshot)
             raw_snapshot["active_slots"] = active_slots
         current_snapshot = normalize_snapshot(raw_snapshot)
+        evaluated_cost = expected_cost
+        if evaluated_cost is None:
+            try:
+                profile_deadline = None
+                if deadline is not None:
+                    profile_deadline = min(deadline, time.monotonic() + 0.02)
+                profile = calibration_status(state_dir=observed_state_dir, deadline=profile_deadline)["classes"].get(workload_class)
+                if profile and int(profile.get("accepted_count") or 0) >= MIN_SUCCESSFUL_OBSERVATIONS:
+                    evaluated_cost = normalize_cost(profile.get("cost_estimate") or {}, workload_class)
+            except Exception:
+                evaluated_cost = None
         store = ObserverStore(observed_state_dir)
-        return store.update(
+        result = store.update(
             lambda state: evaluate_snapshot(
                 current_snapshot,
                 state=state,
                 now_epoch=now,
                 workload_class=workload_class,
-                expected_cost=expected_cost,
+                expected_cost=evaluated_cost,
             ),
+            deadline=deadline,
+        )
+        return apply_calibration_to_output(
+            result,
+            current_snapshot,
+            state_dir=observed_state_dir,
+            now_epoch=now,
+            workload_class=workload_class,
             deadline=deadline,
         )
     except Exception as exc:  # Library API is intentionally fail-closed.
@@ -422,7 +456,7 @@ def evaluate_snapshot(
         successful_count += 1
         observations.append(observation_record(snapshot, now_epoch, status))
         observations = observations[-OBSERVATION_LIMIT:]
-        sample = snapshot.get("workload_delta")
+        sample = snapshot.get("workload_delta") if os.getenv("CODEX_CAPACITY_OBSERVER_TEST_MODE") == "1" else None
         if isinstance(sample, dict):
             class_samples = list(cost_samples.get(workload_class, []))
             class_samples.append(normalize_delta_sample(sample))
@@ -739,6 +773,709 @@ def normalize_cost(cost: dict[str, float], workload_class: str) -> dict[str, flo
 def normalize_delta_sample(sample: dict[str, Any]) -> dict[str, float]:
     keys = ("memory_bytes", "processes", "root_fds", "system_fds", "heavy_lanes")
     return {key: float(sample.get(key, 0.0)) for key in keys}
+
+
+def calibration_token(label: str, value: Any) -> str:
+    text = f"{CALIBRATION_DOMAIN}:{label}:{value}"
+    return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()[:24]
+
+
+def root_token_from_snapshot(snapshot: dict[str, Any]) -> str:
+    identity = snapshot.get("current_codex_root_identity")
+    if isinstance(identity, (list, tuple)) and len(identity) == 2:
+        return calibration_token("root", f"{identity[0]}:{identity[1]}")
+    pid = snapshot.get("current_codex_root_pid")
+    marker = snapshot.get("current_codex_root_start_marker")
+    if pid not in (None, "") and marker not in (None, ""):
+        return calibration_token("root", f"{pid}:{marker}")
+    return ""
+
+
+def calibration_snapshot_record(snapshot: dict[str, Any], now_epoch: float) -> dict[str, Any]:
+    status = str(snapshot.get("_calibration_status") or "").upper()
+    if status not in {"GREEN", "YELLOW", "RED"}:
+        status = "RED"
+    record: dict[str, Any] = {"observed_at": float(now_epoch), "status": status}
+    for key in (
+        "total_ram_bytes",
+        "available_memory_bytes",
+        "memory_pressure",
+        "swapouts_total_bytes",
+        "cpu_idle_percent",
+        "user_process_count",
+        "user_process_limit",
+        "root_fd_used",
+        "current_root_fd_used",
+        "root_fd_soft_limit",
+        "system_fd_used",
+        "system_fd_max",
+        "disk_free_bytes",
+        "disk_total_bytes",
+        "active_slots",
+        "external_codex_roots",
+        "codex_root_count",
+        "heavy_lanes_in_use",
+    ):
+        if key == "current_root_fd_used" and key not in snapshot and os.getenv(CALIBRATION_TEST_MODE_ENV) == "1":
+            record[key] = finite_number("root_fd_used", snapshot.get("root_fd_used"))
+            continue
+        if key not in snapshot:
+            raise ObservationError(f"calibration_missing:{key}")
+        if key == "memory_pressure":
+            pressure = str(snapshot[key]).lower()
+            if pressure == "warning":
+                pressure = "warn"
+            if pressure not in {"normal", "warn", "critical"}:
+                raise ObservationError("invalid_memory_pressure")
+            record[key] = pressure
+        else:
+            record[key] = finite_number(key, snapshot[key])
+    record["root_fd_state"] = str(snapshot.get("root_fd_state") or "measured")
+    record["root_token"] = root_token_from_snapshot(snapshot)
+    if not record["root_token"]:
+        raise ObservationError("calibration_missing:root_token")
+    return record
+
+
+def validate_calibration_snapshot_record(path: str, value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ObservationError(f"calibration_invalid_snapshot:{path}")
+    allowed = {
+        "observed_at", "status", "total_ram_bytes", "available_memory_bytes", "memory_pressure",
+        "swapouts_total_bytes", "cpu_idle_percent", "user_process_count", "user_process_limit",
+        "root_fd_used", "current_root_fd_used", "root_fd_soft_limit", "system_fd_used", "system_fd_max",
+        "disk_free_bytes", "disk_total_bytes", "active_slots", "external_codex_roots", "codex_root_count",
+        "heavy_lanes_in_use", "root_fd_state", "root_token",
+    }
+    if set(value) - allowed:
+        raise ObservationError(f"calibration_unknown_snapshot_keys:{path}")
+    missing = allowed - set(value)
+    if missing:
+        raise ObservationError(f"calibration_missing_snapshot_keys:{path}")
+    record: dict[str, Any] = {}
+    if value["status"] not in {"GREEN", "YELLOW", "RED"}:
+        raise ObservationError(f"calibration_invalid_snapshot_status:{path}")
+    if value["memory_pressure"] not in {"normal", "warn", "critical"}:
+        raise ObservationError(f"calibration_invalid_snapshot_memory_pressure:{path}")
+    if value["root_fd_state"] not in {"measured", "partial", "unavailable", "no_codex_root"}:
+        raise ObservationError(f"calibration_invalid_snapshot_root_fd_state:{path}")
+    root_value = str(value.get("root_token") or "")
+    if not re.fullmatch(r"[a-f0-9]{24}", root_value):
+        raise ObservationError(f"calibration_invalid_snapshot_root_token:{path}")
+    for key, item in value.items():
+        if key in {"status", "memory_pressure", "root_fd_state", "root_token"}:
+            record[key] = str(item)
+        else:
+            record[key] = finite_state_number(f"{path}.{key}", item, nonnegative=True)
+    return record
+
+
+def default_calibration_class(workload_class: str) -> dict[str, Any]:
+    return {
+        "samples": [],
+        "accepted_count": 0,
+        "rejected_count": 0,
+        "last_rejection_code": None,
+        "saturated_clean_cycles": 0,
+        "effective_capacity": DEFAULT_CAPACITY,
+        "proven_capacity": DEFAULT_CAPACITY,
+        "cost_estimate": dict(MIN_COSTS[workload_class]),
+        "cost_updated_at": None,
+    }
+
+
+def default_calibration_state() -> dict[str, Any]:
+    return {
+        "protocol_version": PROTOCOL_VERSION,
+        "active": None,
+        "classes": {name: default_calibration_class(name) for name in MIN_COSTS},
+    }
+
+
+def validate_calibration_state(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ObservationError("calibration_state_not_object")
+    if int(payload.get("protocol_version", PROTOCOL_VERSION)) != PROTOCOL_VERSION:
+        raise ObservationError("calibration_state_bad_version")
+    state = default_calibration_state()
+    classes = payload.get("classes") or {}
+    if not isinstance(classes, dict):
+        raise ObservationError("calibration_classes_not_object")
+    for workload_class in MIN_COSTS:
+        profile = default_calibration_class(workload_class)
+        existing = classes.get(workload_class) or {}
+        if not isinstance(existing, dict):
+            raise ObservationError(f"calibration_class_not_object:{workload_class}")
+        for key in profile:
+            if key in existing:
+                profile[key] = existing[key]
+        profile["samples"] = [normalize_delta_sample(sample) for sample in list(profile.get("samples") or [])[-OBSERVATION_LIMIT:]]
+        profile["accepted_count"] = state_int(f"calibration.{workload_class}.accepted_count", profile["accepted_count"], maximum=10_000_000)
+        profile["rejected_count"] = state_int(f"calibration.{workload_class}.rejected_count", profile["rejected_count"], maximum=10_000_000)
+        profile["saturated_clean_cycles"] = state_int(f"calibration.{workload_class}.saturated_clean_cycles", profile["saturated_clean_cycles"], maximum=10_000_000)
+        profile["effective_capacity"] = state_int(f"calibration.{workload_class}.effective_capacity", profile["effective_capacity"], minimum=0, maximum=MAX_CAPACITY)
+        profile["proven_capacity"] = state_int(f"calibration.{workload_class}.proven_capacity", profile["proven_capacity"], minimum=0, maximum=MAX_CAPACITY)
+        if profile["effective_capacity"] not in VALID_CAPACITIES or profile["proven_capacity"] not in VALID_CAPACITIES:
+            raise ObservationError(f"calibration_invalid_capacity:{workload_class}")
+        if profile["accepted_count"] < MIN_SUCCESSFUL_OBSERVATIONS:
+            if profile["effective_capacity"] != DEFAULT_CAPACITY or profile["proven_capacity"] != DEFAULT_CAPACITY or profile["saturated_clean_cycles"] != 0:
+                raise ObservationError(f"calibration_invalid_prethreshold_state:{workload_class}")
+        profile["cost_estimate"] = normalize_cost(profile.get("cost_estimate") or {}, workload_class)
+        profile["cost_updated_at"] = state_optional_time(f"calibration.{workload_class}.cost_updated_at", profile.get("cost_updated_at"))
+        last_code = profile.get("last_rejection_code")
+        profile["last_rejection_code"] = str(last_code) if last_code not in (None, "") else None
+        state["classes"][workload_class] = profile
+    active = payload.get("active")
+    if active is not None:
+        if not isinstance(active, dict):
+            raise ObservationError("calibration_active_not_object")
+        allowed = {
+            "phase", "workload_class", "session_token", "turn_token", "request_token", "agent_token", "armed_at",
+            "started_at", "stopped_at", "settle_after", "last_observed_at", "baseline", "peak_start", "peak_stop", "settle",
+        }
+        active_state = {key: active[key] for key in active if key in allowed}
+        if active_state.get("phase") not in {"ARMED", "MEASURING", "SETTLING"}:
+            raise ObservationError("calibration_invalid_phase")
+        if active_state.get("workload_class") not in MIN_COSTS:
+            raise ObservationError("calibration_invalid_workload_class")
+        for key in ("session_token", "turn_token", "request_token", "armed_at", "last_observed_at", "baseline"):
+            if active_state.get(key) in (None, ""):
+                raise ObservationError(f"calibration_missing_active:{key}")
+        if active_state.get("phase") in {"MEASURING", "SETTLING"} and active_state.get("agent_token") in (None, ""):
+            raise ObservationError("calibration_missing_active:agent_token")
+        for key in ("armed_at", "started_at", "stopped_at", "settle_after", "last_observed_at"):
+            if key in active_state:
+                active_state[key] = state_optional_time(f"calibration.active.{key}", active_state[key])
+        active_state["baseline"] = validate_calibration_snapshot_record("calibration.active.baseline", active_state["baseline"])
+        if active_state.get("peak_start") is not None:
+            active_state["peak_start"] = validate_calibration_snapshot_record("calibration.active.peak_start", active_state["peak_start"])
+        if active_state.get("peak_stop") is not None:
+            active_state["peak_stop"] = validate_calibration_snapshot_record("calibration.active.peak_stop", active_state["peak_stop"])
+        if active_state.get("settle") is not None:
+            active_state["settle"] = validate_calibration_snapshot_record("calibration.active.settle", active_state["settle"])
+        state["active"] = active_state
+    return state
+
+
+class CalibrationStore:
+    def __init__(self, state_dir: Path) -> None:
+        self.state_dir = Path(state_dir).expanduser()
+        self.state_path = self.state_dir / "calibration_state.json"
+        self.lock_path = self.state_dir / "calibration.lock"
+        self.expected_parent = self.state_dir.parent
+
+    def update(
+        self,
+        callback: Callable[[dict[str, Any]], dict[str, Any]],
+        *,
+        deadline: float | None = None,
+    ) -> dict[str, Any]:
+        check_deadline(deadline)
+        self._prepare_state_dir()
+        with self._locked(deadline=deadline):
+            state = self._load_unlocked()
+            result = callback(state)
+            self._save_unlocked(result["state"])
+            return result["output"]
+
+    def load(self, *, deadline: float | None = None) -> dict[str, Any]:
+        check_deadline(deadline)
+        self._prepare_state_dir()
+        with self._locked(deadline=deadline):
+            check_deadline(deadline)
+            return self._load_unlocked()
+
+    def _prepare_state_dir(self) -> None:
+        self._validate_parent_chain()
+        if not self.state_dir.exists() and not self.state_dir.is_symlink():
+            try:
+                self.state_dir.mkdir(parents=True, mode=STATE_DIR_MODE)
+            except FileExistsError:
+                pass
+        self._validate_dir(self.state_dir)
+        self._ensure_file(self.lock_path)
+        if self.state_path.exists() or self.state_path.is_symlink():
+            self._validate_regular_file(self.state_path)
+
+    def _validate_parent_chain(self) -> None:
+        candidates = [self.state_dir]
+        candidates.extend(self.state_dir.parents)
+        home = Path.home().expanduser()
+        stop_after: Path | None = None
+        try:
+            self.state_dir.relative_to(home)
+            stop_after = home.parent
+        except ValueError:
+            stop_after = self.state_dir.parent.parent
+        for parent in candidates:
+            if parent == stop_after:
+                break
+            if not parent.exists() and not parent.is_symlink():
+                continue
+            try:
+                stat_result = parent.lstat()
+            except OSError as exc:
+                raise StoreSecurityError(f"state_parent_error:{exc}") from exc
+            if os.path.islink(parent):
+                raise StoreSecurityError("state_parent_symlink")
+
+    def _locked(self, *, deadline: float | None):
+        class LockContext:
+            def __init__(inner_self, outer: CalibrationStore, deadline_value: float | None) -> None:
+                inner_self.outer = outer
+                inner_self.deadline_value = deadline_value
+                inner_self.handle = None
+
+            def __enter__(inner_self):
+                inner_self.outer._validate_regular_file(inner_self.outer.lock_path)
+                inner_self.handle = inner_self.outer.lock_path.open("r+", encoding="utf-8")
+                try:
+                    while True:
+                        check_deadline(inner_self.deadline_value)
+                        try:
+                            fcntl.flock(inner_self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            return inner_self.handle
+                        except BlockingIOError:
+                            time.sleep(min(0.01, max(0.001, remaining_seconds(inner_self.deadline_value))))
+                except Exception:
+                    inner_self.handle.close()
+                    inner_self.handle = None
+                    raise
+
+            def __exit__(inner_self, exc_type, exc, tb) -> None:
+                assert inner_self.handle is not None
+                try:
+                    fcntl.flock(inner_self.handle.fileno(), fcntl.LOCK_UN)
+                finally:
+                    inner_self.handle.close()
+
+        return LockContext(self, deadline)
+
+    def _ensure_file(self, path: Path) -> None:
+        if path.exists() or path.is_symlink():
+            self._validate_regular_file(path)
+            return
+        try:
+            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, STATE_FILE_MODE)
+        except FileExistsError:
+            self._validate_regular_file(path)
+            return
+        os.close(descriptor)
+        self._validate_regular_file(path)
+
+    def _validate_dir(self, path: Path) -> None:
+        try:
+            stat_result = path.lstat()
+        except OSError as exc:
+            raise StoreSecurityError(f"state_dir_error:{exc}") from exc
+        if not os.path.isdir(path) or os.path.islink(path):
+            raise StoreSecurityError("state_dir_unexpected_type")
+        if stat_result.st_uid != os.getuid():
+            raise StoreSecurityError("state_dir_foreign_owner")
+        if stat_result.st_mode & 0o077:
+            os.chmod(path, STATE_DIR_MODE)
+
+    def _validate_regular_file(self, path: Path) -> None:
+        try:
+            stat_result = path.lstat()
+        except OSError as exc:
+            raise StoreSecurityError(f"state_file_error:{exc}") from exc
+        if os.path.islink(path):
+            raise StoreSecurityError("state_file_symlink")
+        if not os.path.isfile(path):
+            raise StoreSecurityError("state_file_unexpected_type")
+        if stat_result.st_uid != os.getuid():
+            raise StoreSecurityError("state_file_foreign_owner")
+        if stat_result.st_nlink != 1:
+            raise StoreSecurityError("state_file_hardlink")
+        if stat_result.st_mode & 0o177:
+            os.chmod(path, STATE_FILE_MODE)
+
+    def _load_unlocked(self) -> dict[str, Any]:
+        if not self.state_path.exists():
+            return default_calibration_state()
+        self._validate_regular_file(self.state_path)
+        try:
+            payload = json_loads_strict(self.state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ObservationError(f"calibration_database_error:{exc}") from exc
+        return validate_calibration_state(payload)
+
+    def _save_unlocked(self, state: dict[str, Any]) -> None:
+        self._validate_dir(self.state_dir)
+        if self.state_path.exists() or self.state_path.is_symlink():
+            self._validate_regular_file(self.state_path)
+        tmp_path = self.state_dir / f".calibration_state.{os.getpid()}.{time.time_ns()}.tmp"
+        payload = json_dumps_strict(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        descriptor = os.open(tmp_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, STATE_FILE_MODE)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.write("\n")
+            self._validate_regular_file(tmp_path)
+            os.replace(tmp_path, self.state_path)
+            self._validate_regular_file(self.state_path)
+        finally:
+            if tmp_path.exists() and not tmp_path.is_symlink():
+                try:
+                    stat_result = tmp_path.lstat()
+                    if stat_result.st_uid == os.getuid() and stat_result.st_nlink == 1:
+                        tmp_path.unlink()
+                except OSError:
+                    pass
+
+
+def calibration_status(*, state_dir: Path | None = None, deadline: float | None = None) -> dict[str, Any]:
+    state = CalibrationStore(Path(state_dir or default_state_dir())).load(deadline=deadline)
+    return safe_calibration_status(state)
+
+
+def safe_calibration_status(state: dict[str, Any]) -> dict[str, Any]:
+    active = state.get("active") if isinstance(state.get("active"), dict) else None
+    classes: dict[str, Any] = {}
+    for workload_class, profile in (state.get("classes") or {}).items():
+        if workload_class not in MIN_COSTS:
+            continue
+        classes[workload_class] = {
+            "accepted_count": int(profile.get("accepted_count") or 0),
+            "rejected_count": int(profile.get("rejected_count") or 0),
+            "last_rejection_code": profile.get("last_rejection_code"),
+            "saturated_clean_cycles": int(profile.get("saturated_clean_cycles") or 0),
+            "effective_capacity": int(profile.get("effective_capacity") or DEFAULT_CAPACITY),
+            "proven_capacity": int(profile.get("proven_capacity") or DEFAULT_CAPACITY),
+            "cost_estimate": normalize_cost(profile.get("cost_estimate") or {}, workload_class),
+        }
+    return {
+        "protocol_version": PROTOCOL_VERSION,
+        "phase": str(active.get("phase")) if active else "IDLE",
+        "workload_class": str(active.get("workload_class")) if active else None,
+        "classes": classes,
+    }
+
+
+def calibration_hook_event(
+    event: str,
+    *,
+    state_dir: Path | None = None,
+    snapshot: dict[str, Any] | None = None,
+    now_epoch: float | None = None,
+    workload_class: str = "normal",
+    session_id: str = "",
+    turn_id: str = "",
+    request_id: str = "",
+    agent_id: str = "",
+    deadline: float | None = None,
+) -> dict[str, Any]:
+    now = float(time.time() if now_epoch is None else now_epoch)
+    event_deadline = deadline if deadline is not None else time.monotonic() + OBSERVE_TIMEOUT_SECONDS
+    selected_class = workload_class if workload_class in MIN_COSTS else "normal"
+    if selected_class == "light" and os.getenv(CALIBRATION_TEST_MODE_ENV) != "1":
+        selected_class = "normal"
+    tokens = {
+        "session_token": calibration_token("session", session_id) if session_id else "",
+        "turn_token": calibration_token("turn", turn_id) if turn_id else "",
+        "request_token": calibration_token("request", request_id) if request_id else "",
+        "agent_token": calibration_token("agent", agent_id) if agent_id else "",
+    }
+
+    def update(state: dict[str, Any]) -> dict[str, Any]:
+        new_state = validate_calibration_state(state)
+        apply_calibration_event(
+            new_state,
+            event,
+            snapshot=snapshot,
+            now_epoch=now,
+            workload_class=selected_class,
+            tokens=tokens,
+        )
+        return {"state": new_state, "output": safe_calibration_status(new_state) | {"event": event}}
+
+    return CalibrationStore(Path(state_dir or default_state_dir())).update(update, deadline=event_deadline)
+
+
+def apply_calibration_event(
+    state: dict[str, Any],
+    event: str,
+    *,
+    snapshot: dict[str, Any] | None,
+    now_epoch: float,
+    workload_class: str,
+    tokens: dict[str, str],
+) -> None:
+    active = state.get("active") if isinstance(state.get("active"), dict) else None
+    if active:
+        expiry = calibration_expiry_code(active, now_epoch)
+    else:
+        expiry = ""
+    if active and expiry:
+        reject_active_calibration(state, expiry)
+        active = None
+    if event in {"spawn_failed", "stop", "session_end"}:
+        require_turn = event in {"spawn_failed", "stop"}
+        if active and active.get("phase") in {"ARMED", "MEASURING"} and token_matches(active, tokens, require_agent=False, require_turn=require_turn):
+            reject_active_calibration(state, event)
+        return
+    if event == "pretool_lease":
+        if active is not None or snapshot is None:
+            return
+        try:
+            record = calibration_snapshot_record(snapshot, now_epoch)
+        except ObservationError:
+            return
+        state["active"] = {
+            "phase": "ARMED",
+            "workload_class": workload_class,
+            "session_token": tokens.get("session_token", ""),
+            "turn_token": tokens.get("turn_token", ""),
+            "request_token": tokens.get("request_token", ""),
+            "agent_token": "",
+            "armed_at": now_epoch,
+            "started_at": None,
+            "stopped_at": None,
+            "settle_after": None,
+            "last_observed_at": now_epoch,
+            "baseline": record,
+            "peak_start": None,
+            "peak_stop": None,
+            "settle": None,
+        }
+        return
+    if active is None:
+        return
+    if event == "subagent_start":
+        if snapshot is None or not token_matches(active, tokens, require_agent=False, require_turn=True):
+            return
+        try:
+            record = calibration_snapshot_record(snapshot, now_epoch)
+        except ObservationError:
+            return
+        active["phase"] = "MEASURING"
+        active["agent_token"] = tokens.get("agent_token", "")
+        active["started_at"] = now_epoch
+        active["last_observed_at"] = now_epoch
+        active["peak_start"] = record
+        return
+    if event == "subagent_stop_before_release":
+        if snapshot is None or not token_matches(active, tokens, require_agent=True, require_turn=False):
+            return
+        try:
+            record = calibration_snapshot_record(snapshot, now_epoch)
+        except ObservationError:
+            return
+        active["phase"] = "SETTLING"
+        active["stopped_at"] = now_epoch
+        active["settle_after"] = now_epoch + CALIBRATION_SETTLE_SECONDS
+        active["last_observed_at"] = now_epoch
+        active["peak_stop"] = record
+        return
+    if event == "settle_snapshot":
+        if snapshot is None or active.get("phase") != "SETTLING":
+            return
+        if now_epoch < float(active.get("settle_after") or 0.0):
+            return
+        try:
+            active["settle"] = calibration_snapshot_record(snapshot, now_epoch)
+        except ObservationError:
+            reject_active_calibration(state, "invalid_settle_snapshot")
+            return
+        accept_or_reject_calibration(state, now_epoch)
+
+
+def calibration_expiry_code(active: dict[str, Any], now_epoch: float) -> str:
+    armed_at = float(active.get("armed_at") or now_epoch)
+    last_observed = float(active.get("last_observed_at") or armed_at)
+    if now_epoch - armed_at > CALIBRATION_MAX_SECONDS:
+        return "expired"
+    if now_epoch - last_observed > CALIBRATION_MAX_GAP_SECONDS:
+        return "sleep_gap"
+    return ""
+
+
+def token_matches(active: dict[str, Any], tokens: dict[str, str], *, require_agent: bool, require_turn: bool) -> bool:
+    keys = ["session_token"]
+    if require_turn:
+        keys.append("turn_token")
+    if require_agent:
+        keys.append("agent_token")
+    for key in keys:
+        if active.get(key) in (None, "") or tokens.get(key) in (None, "") or active.get(key) != tokens.get(key):
+            return False
+    return True
+
+
+def reject_active_calibration(state: dict[str, Any], code: str) -> None:
+    active = state.get("active") if isinstance(state.get("active"), dict) else None
+    workload_class = str((active or {}).get("workload_class") or "normal")
+    profile = state["classes"].setdefault(workload_class, default_calibration_class(workload_class))
+    profile["rejected_count"] = int(profile.get("rejected_count") or 0) + 1
+    profile["last_rejection_code"] = code
+    profile["saturated_clean_cycles"] = 0
+    if code.startswith("resource_") and int(profile.get("effective_capacity") or DEFAULT_CAPACITY) > DEFAULT_CAPACITY:
+        profile["effective_capacity"] = previous_capacity_step(int(profile.get("effective_capacity") or DEFAULT_CAPACITY))
+    state["active"] = None
+
+
+def accept_or_reject_calibration(state: dict[str, Any], now_epoch: float) -> None:
+    active = state.get("active") if isinstance(state.get("active"), dict) else None
+    if not active:
+        return
+    code = calibration_rejection_code(active)
+    if code:
+        reject_active_calibration(state, code)
+        return
+    workload_class = str(active.get("workload_class") or "normal")
+    profile = state["classes"].setdefault(workload_class, default_calibration_class(workload_class))
+    samples = list(profile.get("samples") or [])
+    samples.append(calibration_delta(active))
+    profile["samples"] = samples[-OBSERVATION_LIMIT:]
+    previous_accepted = int(profile.get("accepted_count") or 0)
+    profile["accepted_count"] = previous_accepted + 1
+    profile["last_rejection_code"] = None
+    profile["cost_estimate"] = estimate_cost(
+        workload_class,
+        profile["samples"],
+        prior_cost=profile.get("cost_estimate"),
+        now_epoch=now_epoch,
+        prior_updated_epoch=float(profile.get("cost_updated_at") or now_epoch),
+    )
+    profile["cost_updated_at"] = now_epoch
+    effective = int(profile.get("effective_capacity") or DEFAULT_CAPACITY)
+    if previous_accepted >= MIN_SUCCESSFUL_OBSERVATIONS:
+        peak_slots = int(float(active["peak_stop"]["active_slots"]))
+        if peak_slots >= effective:
+            profile["saturated_clean_cycles"] = int(profile.get("saturated_clean_cycles") or 0) + 1
+        else:
+            profile["saturated_clean_cycles"] = 0
+        if int(profile.get("saturated_clean_cycles") or 0) >= CLEAN_CYCLES_PER_STEP:
+            next_step = next_capacity_step(effective)
+            projection = capacity_projection(active["settle"], normalize_cost(profile["cost_estimate"], workload_class), next_step)
+            if next_step > effective and projection["ok"]:
+                profile["effective_capacity"] = next_step
+                profile["proven_capacity"] = next_step
+            profile["saturated_clean_cycles"] = 0
+    else:
+        profile["effective_capacity"] = DEFAULT_CAPACITY
+        profile["proven_capacity"] = DEFAULT_CAPACITY
+        profile["saturated_clean_cycles"] = 0
+    state["active"] = None
+
+
+def calibration_rejection_code(active: dict[str, Any]) -> str:
+    names = ("baseline", "peak_start", "peak_stop", "settle")
+    if any(not isinstance(active.get(name), dict) for name in names):
+        return "missing_snapshot"
+    baseline = active["baseline"]
+    peak_start = active["peak_start"]
+    peak_stop = active["peak_stop"]
+    settle = active["settle"]
+    snapshots = (baseline, peak_start, peak_stop, settle)
+    if any(item.get("status") != "GREEN" for item in snapshots):
+        return "resource_not_green"
+    if any(item.get("root_fd_state") != "measured" for item in snapshots):
+        return "root_fd_unmeasured"
+    if float(active.get("stopped_at") or 0.0) - float(active.get("started_at") or 0.0) < CALIBRATION_MIN_PEAK_SECONDS:
+        return "task_too_short"
+    if float(active.get("stopped_at") or 0.0) - float(active.get("armed_at") or 0.0) > CALIBRATION_MAX_SECONDS:
+        return "expired"
+    observed = [float(item["observed_at"]) for item in snapshots]
+    if any(right - left > CALIBRATION_MAX_GAP_SECONDS for left, right in zip(observed, observed[1:])):
+        return "sleep_gap"
+    baseline_slots = float(baseline["active_slots"])
+    if float(peak_start["active_slots"]) != baseline_slots + 1 or float(peak_stop["active_slots"]) != baseline_slots + 1:
+        return "active_slots_changed"
+    if float(settle["active_slots"]) != baseline_slots:
+        return "active_slots_changed"
+    for key, code in (
+        ("external_codex_roots", "external_roots_changed"),
+        ("codex_root_count", "codex_roots_changed"),
+        ("root_token", "root_token_changed"),
+    ):
+        if any(item.get(key) != baseline.get(key) for item in snapshots[1:]):
+            return code
+    if float(settle["swapouts_total_bytes"]) > float(baseline["swapouts_total_bytes"]):
+        return "swap_growth"
+    memory_drift = max(float(CALIBRATION_MEMORY_DRIFT_BYTES), 0.02 * float(baseline["total_ram_bytes"]))
+    system_drift = max(float(CALIBRATION_SYSTEM_FD_DRIFT), 0.0025 * float(baseline["system_fd_max"]))
+    if float(baseline["available_memory_bytes"]) - float(settle["available_memory_bytes"]) > memory_drift:
+        return "settle_memory_drift"
+    if float(settle["user_process_count"]) - float(baseline["user_process_count"]) > CALIBRATION_PROCESS_DRIFT:
+        return "settle_process_drift"
+    if float(settle["current_root_fd_used"]) - float(baseline["current_root_fd_used"]) > CALIBRATION_ROOT_FD_DRIFT:
+        return "settle_root_fd_drift"
+    if float(settle["system_fd_used"]) - float(baseline["system_fd_used"]) > system_drift:
+        return "settle_system_fd_drift"
+    return ""
+
+
+def calibration_delta(active: dict[str, Any]) -> dict[str, float]:
+    baseline = active["baseline"]
+    peak_start = active["peak_start"]
+    peak_stop = active["peak_stop"]
+    settle = active["settle"]
+    peak_available = min(float(peak_start["available_memory_bytes"]), float(peak_stop["available_memory_bytes"]))
+    stable_available = max(float(baseline["available_memory_bytes"]), float(settle["available_memory_bytes"]))
+    return normalize_delta_sample(
+        {
+            "memory_bytes": max(0.0, stable_available - peak_available),
+            "processes": max(0.0, max(float(peak_start["user_process_count"]), float(peak_stop["user_process_count"])) - min(float(baseline["user_process_count"]), float(settle["user_process_count"]))),
+            "root_fds": max(0.0, max(float(peak_start["current_root_fd_used"]), float(peak_stop["current_root_fd_used"])) - min(float(baseline["current_root_fd_used"]), float(settle["current_root_fd_used"]))),
+            "system_fds": max(0.0, max(float(peak_start["system_fd_used"]), float(peak_stop["system_fd_used"])) - min(float(baseline["system_fd_used"]), float(settle["system_fd_used"]))),
+            "heavy_lanes": max(0.0, max(float(peak_start["heavy_lanes_in_use"]), float(peak_stop["heavy_lanes_in_use"])) - min(float(baseline["heavy_lanes_in_use"]), float(settle["heavy_lanes_in_use"]))),
+        }
+    )
+
+
+def apply_calibration_to_output(
+    output: dict[str, Any],
+    snapshot: dict[str, Any],
+    *,
+    state_dir: Path,
+    now_epoch: float,
+    workload_class: str,
+    deadline: float | None = None,
+) -> dict[str, Any]:
+    if os.getenv("CODEX_CAPACITY_OBSERVER_TEST_MODE") == "1" and isinstance(snapshot.get("workload_delta"), dict):
+        return output
+    patched = dict(output)
+    selected_class = workload_class if workload_class in MIN_COSTS else "normal"
+    try:
+        snapshot_for_settle = dict(snapshot)
+        snapshot_for_settle["_calibration_status"] = str(output.get("status") or "RED")
+        settle = calibration_hook_event(
+            "settle_snapshot",
+            state_dir=state_dir,
+            snapshot=snapshot_for_settle,
+            now_epoch=now_epoch,
+            workload_class=selected_class,
+            deadline=deadline,
+        )
+        profile = settle["classes"][selected_class]
+    except Exception:
+        status = str(patched.get("status") or "RED")
+        patched["effective_capacity"] = DEFAULT_CAPACITY
+        patched["admission_capacity"] = 0 if status == "RED" else DEFAULT_CAPACITY if status == "GREEN" else min(DEFAULT_CAPACITY, int(patched.get("admission_capacity") or DEFAULT_CAPACITY))
+        patched["max_wave_size"] = 0 if status == "RED" else DEFAULT_CAPACITY if status == "GREEN" else min(2, int(patched.get("max_wave_size") or 2))
+        patched["capacity_mode"] = "calibration_unavailable_fixed6"
+        patched["accepted_calibrations"] = 0
+        patched["calibration_error"] = "calibration_state_unavailable"
+        return patched
+    accepted = int(profile.get("accepted_count") or 0)
+    effective = int(profile.get("effective_capacity") or DEFAULT_CAPACITY)
+    if accepted < MIN_SUCCESSFUL_OBSERVATIONS:
+        effective = DEFAULT_CAPACITY
+    status = str(patched.get("status") or "RED")
+    admission = admission_protocol(status, effective)
+    patched["workload_class"] = selected_class
+    patched["accepted_calibrations"] = accepted
+    patched["rejected_calibrations"] = int(profile.get("rejected_count") or 0)
+    patched["last_calibration_rejection"] = profile.get("last_rejection_code")
+    patched["clean_cycles"] = int(profile.get("saturated_clean_cycles") or 0)
+    patched["capacity_mode"] = "dynamic" if accepted >= MIN_SUCCESSFUL_OBSERVATIONS else "fixed_until_calibrated"
+    patched["calibration_phase"] = settle.get("phase") or "IDLE"
+    patched["effective_capacity"] = effective
+    patched["admission_capacity"] = admission["admission_capacity"]
+    patched["max_wave_size"] = admission["max_wave_size"]
+    return patched
 
 
 def resource_deltas(
@@ -1123,10 +1860,15 @@ def collect_process_snapshot(
         managed_root_identities=managed_root_identities,
         caller_pid=caller_pid,
     )
+    current_identity = occupancy.get("current_codex_root_identity")
+    current_fd_used = 0.0
+    if isinstance(current_identity, tuple):
+        current_fd_used = float(fd_usage.get("root_fd_counts", {}).get(str(current_identity[0]), 0.0))
     return {
         "user_process_count": float(user_process_count),
         "cpu_idle_percent": cpu_idle,
         "root_fd_used": float(fd_usage["root_fd_used"]),
+        "current_root_fd_used": current_fd_used,
         "root_fd_state": fd_usage["root_fd_state"],
         "codex_root_count": occupancy["codex_root_count"],
         "external_codex_roots": occupancy["external_codex_roots"],
@@ -1465,7 +2207,7 @@ def root_fd_usage_for_codex_roots(
             counts[pid] += 1
     missing = [pid for pid, count in counts.items() if count == 0]
     state = "measured" if not missing else "partial"
-    return {"root_fd_used": max(counts.values(), default=0), "root_fd_state": state}
+    return {"root_fd_used": max(counts.values(), default=0), "root_fd_counts": counts, "root_fd_state": state}
 
 
 def collect_disk(*, state_dir: Path | None = None, deadline: float | None = None) -> dict[str, Any]:
@@ -1538,11 +2280,25 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--snapshot-json", type=Path)
     parser.add_argument("--now-epoch", type=float, default=None)
     parser.add_argument("--workload-class", choices=sorted(MIN_COSTS), default="normal")
+    parser.add_argument("--calibration-status", action="store_true")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.calibration_status:
+        try:
+            result = calibration_status(state_dir=args.state_dir)
+        except Exception:
+            result = {
+                "protocol_version": PROTOCOL_VERSION,
+                "phase": "UNAVAILABLE",
+                "classes": {name: default_calibration_class(name) for name in MIN_COSTS},
+                "error": "calibration_state_unavailable",
+            }
+        json.dump(result, sys.stdout, ensure_ascii=False, sort_keys=True, allow_nan=False)
+        sys.stdout.write("\n")
+        return 0
     snapshot = None
     if args.snapshot_json:
         try:
