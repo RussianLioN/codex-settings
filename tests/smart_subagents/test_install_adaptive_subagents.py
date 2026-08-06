@@ -2453,6 +2453,103 @@ class InstallerV2RepeatTests(_InstallerBase):
             extra_environment=None,
         )
 
+    def test_installer_receipt_blocks_pre_lineage_installers(self) -> None:
+        self.publish_fake_activation()
+
+        receipt = self.installer._build_installer_receipt(
+            self.layout,
+            source_digest="1" * 64,
+            identity={
+                "installationId": self.installation_id,
+                "activationId": self.activation_id,
+            },
+        )
+
+        lineage = receipt["extensions"]["sourceLineage"]
+        self.assertEqual(1, lineage["schemaVersion"])
+        self.assertGreaterEqual(lineage["generation"], 1)
+        self.assertRegex(lineage["implementationDigest"], r"^[0-9a-f]{64}$")
+        # Установщик до защиты от отката принимал только пустые extensions.
+        self.assertNotEqual({}, receipt["extensions"])
+
+    def test_repeat_rejects_older_source_generation_before_upgrade(self) -> None:
+        self.successful_first_apply()
+        receipt = self.installer._load_installer_receipt(
+            self.layout.installer_receipt_path
+        )
+        receipt["extensions"]["sourceLineage"]["generation"] += 1
+        self.layout.installer_receipt_path.write_text(
+            json.dumps(receipt, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        self.layout.installer_receipt_path.chmod(0o600)
+
+        with (
+            mock.patch.object(
+                self.installer,
+                "_source_digest",
+                return_value="e" * 64,
+            ),
+            mock.patch.object(
+                self.installer,
+                "_upgrade_install",
+                side_effect=AssertionError("older source must not upgrade"),
+            ),
+            self.assertRaises(self.installer.InstallError) as captured,
+        ):
+            self.installer.install(self.layout, apply=True)
+
+        self.assertEqual("SOURCE_DOWNGRADE_REJECTED", captured.exception.code)
+
+    def test_repeat_rejects_divergent_source_in_same_generation(self) -> None:
+        self.successful_first_apply()
+        receipt = self.installer._load_installer_receipt(
+            self.layout.installer_receipt_path
+        )
+        receipt["extensions"]["sourceLineage"]["implementationDigest"] = "f" * 64
+        self.layout.installer_receipt_path.write_text(
+            json.dumps(receipt, sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        self.layout.installer_receipt_path.chmod(0o600)
+
+        with (
+            mock.patch.object(
+                self.installer,
+                "_source_digest",
+                return_value="e" * 64,
+            ),
+            mock.patch.object(
+                self.installer,
+                "_upgrade_install",
+                side_effect=AssertionError("divergent source must not upgrade"),
+            ),
+            self.assertRaises(self.installer.InstallError) as captured,
+        ):
+            self.installer.install(self.layout, apply=True)
+
+        self.assertEqual("SOURCE_LINEAGE_CONFLICT", captured.exception.code)
+
+    def test_legacy_receipt_can_migrate_to_first_lineage_generation(self) -> None:
+        candidate = {
+            "schemaVersion": 1,
+            "generation": 1,
+            "implementationDigest": "a" * 64,
+        }
+
+        self.installer._require_monotonic_source_lineage_v2(
+            {"extensions": {}},
+            candidate,
+        )
+
+    def test_repository_source_lineage_matches_installable_inputs(self) -> None:
+        lineage = self.installer._source_lineage_v2(self.layout)
+
+        self.assertEqual(
+            lineage["implementationDigest"],
+            self.installer._source_implementation_digest_v2(self.layout),
+        )
+
     def test_lifecycle_without_installer_receipt_is_not_adopted(self) -> None:
         self.publish_fake_activation()
 
