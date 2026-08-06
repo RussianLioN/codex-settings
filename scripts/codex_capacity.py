@@ -223,12 +223,14 @@ class CapacityStore:
                 return self._lease_result_from_row(row, state="STALE", reason="lease_released")
             if row["state"] == "CLEANUP_REQUIRED":
                 return self._lease_result_from_row(row, state="STALE", reason="cleanup_required")
-            if row["state"] != "ACTIVE":
+            if row["state"] in {"SUSPECT", "RECOVERING"}:
+                return self._lease_result_from_row(row, state="STALE", reason="managed_root_recovery_required")
+            if row["state"] == "PROVISIONAL":
                 conn.execute(
                     """
                     update leases
                     set state = 'ACTIVE', agent_id = coalesce(?, agent_id), updated_at = ?
-                    where lease_id = ? and fencing_epoch = ? and state != 'RELEASED'
+                    where lease_id = ? and fencing_epoch = ? and state = 'PROVISIONAL'
                     """,
                     (agent_id, now, lease_id, fencing_epoch),
                 )
@@ -976,6 +978,36 @@ class CapacityStore:
         now: float,
     ) -> None:
         root_pid, root_start_marker = root_identity
+        existing = conn.execute(
+            """
+            select root_pid, root_start_marker
+            from managed_roots
+            where session_id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+        if existing is not None and (
+            int(existing["root_pid"]),
+            str(existing["root_start_marker"]),
+        ) != root_identity:
+            live_leases = self._count(
+                conn,
+                f"""
+                select count(*) from leases
+                where session_id = ? and state in ({placeholders(ACTIVE_LEASE_STATES)})
+                """,
+                (session_id, *sorted(ACTIVE_LEASE_STATES)),
+            )
+            live_tickets = self._count(
+                conn,
+                """
+                select count(*) from tickets
+                where session_id = ? and state in ('PENDING', 'READY')
+                """,
+                (session_id,),
+            )
+            if live_leases or live_tickets:
+                raise CapacityError("managed_root_generation_conflict")
         conn.execute(
             """
             insert into managed_roots (session_id, root_pid, root_start_marker, created_at, updated_at)

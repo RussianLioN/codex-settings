@@ -162,8 +162,9 @@ class CodexCapacityTests(unittest.TestCase):
 
     def write_dynamic_green_observer_state(self, state_dir: Path, *, effective_capacity: int = 20) -> None:
         state_dir.mkdir(parents=True, exist_ok=True)
+        sample = {"memory_bytes": 1, "processes": 1, "root_fds": 1, "system_fds": 1, "heavy_lanes": 0}
         samples = [
-            {"memory_bytes": 1, "processes": 1, "root_fds": 1, "system_fds": 1, "heavy_lanes": 0}
+            dict(sample)
             for _ in range(30)
         ]
         (state_dir / "observer_state.json").write_text(
@@ -186,6 +187,7 @@ class CodexCapacityTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
+        accepted_count = 30 + 10 * [8, 12, 16, 20].index(effective_capacity) + 10 if effective_capacity > 6 else 30
         (state_dir / "calibration_state.json").write_text(
             json.dumps(
                 {
@@ -193,27 +195,21 @@ class CodexCapacityTests(unittest.TestCase):
                     "active": None,
                     "classes": {
                         "normal": {
-                            "samples": samples,
-                            "accepted_count": 30,
+                            "samples": [dict(sample) for _ in range(accepted_count)],
+                            "accepted_count": accepted_count,
                             "rejected_count": 0,
                             "last_rejection_code": None,
-                            "saturated_clean_cycles": 10,
+                            "saturated_clean_cycles": 0,
                             "effective_capacity": effective_capacity,
                             "proven_capacity": effective_capacity,
-                            "cost_estimate": {
-                                "memory_bytes": 384 * 1024 * 1024,
-                                "processes": 8.0,
-                                "root_fds": 32.0,
-                                "system_fds": 192.0,
-                            },
-                            "cost_updated_at": 100.0,
+                            "cost_estimate": dict(sample),
+                            "cost_updated_at": 1000.0,
                         }
                     },
                 }
             ),
             encoding="utf-8",
         )
-
     def request(self, index: int, *, session: str = "s1", turn: str = "t1") -> dict[str, str]:
         return {"session_id": session, "turn_id": turn, "task_name": f"task-{index}"}
 
@@ -446,6 +442,63 @@ class CodexCapacityTests(unittest.TestCase):
 
         self.assertEqual(0, result["suspect_leases"])
         self.assertEqual("ACTIVE", self.lease_states_by_session(store)["tab-a"])
+
+    def test_late_activate_does_not_revive_root_recovery_states(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, capacity=2, provisional_ttl_seconds=999)
+        for index, recovery_state in enumerate(("SUSPECT", "RECOVERING"), start=1):
+            with self.subTest(recovery_state=recovery_state):
+                lease = store.acquire_or_queue(
+                    **self.request(index, session=f"tab-{index}", turn="t1"),
+                    root_pid=700 + index,
+                    root_start_marker=f"root-{index}",
+                )
+                store.activate_next(session_id=f"tab-{index}", turn_id="t1", agent_id=f"agent-{index}")
+                conn = sqlite3.connect(self.db_path)
+                try:
+                    conn.execute(
+                        "update leases set state = ?, cleanup_after = 1 where lease_id = ?",
+                        (recovery_state, lease["lease_id"]),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
+                result = store.activate(
+                    lease_id=str(lease["lease_id"]),
+                    fencing_epoch=int(lease["fencing_epoch"]),
+                    agent_id=f"late-agent-{index}",
+                )
+
+                self.assertEqual("STALE", result["state"])
+                self.assertEqual("managed_root_recovery_required", result["reason"])
+                self.assertEqual(recovery_state, self.lease_states_by_session(store)[f"tab-{index}"])
+
+    def test_live_session_cannot_replace_managed_root_generation(self) -> None:
+        store = self.capacity.CapacityStore(home=self.home, capacity=2, provisional_ttl_seconds=999)
+        lease = store.acquire_or_queue(
+            **self.request(1, session="tab-a", turn="t1"),
+            root_pid=700,
+            root_start_marker="root-old",
+        )
+
+        conflict = store.acquire_or_queue(
+            **self.request(2, session="tab-a", turn="t2"),
+            root_pid=701,
+            root_start_marker="root-new",
+        )
+
+        self.assertEqual("ERROR", conflict["state"])
+        self.assertEqual("managed_root_generation_conflict", conflict["reason"])
+        self.assertEqual([(700, "root-old")], store.managed_root_identities())
+
+        store.release(lease_id=str(lease["lease_id"]), fencing_epoch=int(lease["fencing_epoch"]))
+        replacement = store.acquire_or_queue(
+            **self.request(3, session="tab-a", turn="t3"),
+            root_pid=701,
+            root_start_marker="root-new",
+        )
+        self.assertEqual("LEASED", replacement["state"])
+        self.assertEqual([(701, "root-new")], store.managed_root_identities())
 
     def test_final_recovery_does_not_cancel_tickets_updated_after_proof_started(self) -> None:
         store = self.capacity.CapacityStore(home=self.home, capacity=1, provisional_ttl_seconds=999)
@@ -1350,7 +1403,7 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertEqual("BLOCK", missing["decision"])
         self.assertEqual(0, missing["allowed_wave_size"])
         self.assertEqual("wide_wave_requires_trust_manifest", missing["wide_wave_trust_reason"])
-        self.assertEqual("ALLOW", trusted["decision"])
+        self.assertEqual("ALLOW", trusted["decision"], trusted)
         self.assertEqual(8, trusted["allowed_wave_size"])
         self.assertEqual(True, trusted["wide_wave_trusted"])
 
