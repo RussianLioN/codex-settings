@@ -980,6 +980,9 @@ class OperationProcessGroupSupervisorV2Tests(unittest.TestCase):
     def test_accepted_process_is_no_longer_owned_or_signalable(self) -> None:
         module = _load_module()
         process = _FakeProcess()
+        process.stdin = _TrackedStream()
+        process.stdout = _TrackedStream()
+        process.stderr = _TrackedStream()
         signal_calls: list[int] = []
         supervisor = module.OperationProcessGroupSupervisorV2(
             popen_factory=lambda _argv, **_kwargs: process,
@@ -995,6 +998,9 @@ class OperationProcessGroupSupervisorV2Tests(unittest.TestCase):
 
         self.assertIs(process, accepted)
         self.assertEqual((), supervisor.owned_lease_ids())
+        self.assertFalse(process.stdin.closed)
+        self.assertFalse(process.stdout.closed)
+        self.assertFalse(process.stderr.closed)
         with self.assertRaises(module.TransientProcessOwnershipErrorV2):
             supervisor.terminate_transient(
                 lease,
@@ -1007,6 +1013,42 @@ class OperationProcessGroupSupervisorV2Tests(unittest.TestCase):
                 reason_code="SHOULD_NOT_SIGNAL",
             )
         self.assertEqual([], signal_calls)
+
+    def test_verified_exit_transfers_process_with_open_streams(self) -> None:
+        module = _load_module()
+        process = _FakeProcess()
+        process.returncode = 0
+        process.stdin = _TrackedStream()
+        process.stdout = _TrackedStream()
+        process.stderr = _TrackedStream()
+        supervisor = module.OperationProcessGroupSupervisorV2(
+            popen_factory=lambda _argv, **_kwargs: process,
+            killpg=lambda _pgid, _signum: self.fail(
+                "a completed process must not receive a signal"
+            ),
+            group_exists=lambda _pgid: False,
+            identity_reader=_matching_identity_reader(module),
+        )
+        lease = supervisor.spawn_transient(
+            label="completed-transfer",
+            argv=("/usr/bin/true",),
+        )
+
+        transferred = supervisor.release_after_verified_exit(
+            lease,
+            deadline=OperationDeadlineV2.start(
+                operation="apply",
+                timeout_seconds=1,
+                timeout_code="ROOT_EXPIRED",
+            ),
+            reason_code="GROUP_REMAINS_AFTER_EXIT",
+        )
+
+        self.assertIs(process, transferred)
+        self.assertEqual((), supervisor.owned_lease_ids())
+        self.assertFalse(process.stdin.closed)
+        self.assertFalse(process.stdout.closed)
+        self.assertFalse(process.stderr.closed)
 
     def test_completed_process_with_live_group_stays_owned_until_reconciled(
         self,
