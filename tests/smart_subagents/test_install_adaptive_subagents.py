@@ -1588,7 +1588,8 @@ class InstallerV2ApplyTests(_InstallerBase):
         bin_dir.mkdir(mode=0o700)
         state_home = root / "s"
         codex_locator = shutil.which("codex")
-        self.assertIsNotNone(codex_locator)
+        if codex_locator is None:
+            self.skipTest("real codex binary is unavailable")
         codex_binary = Path(str(codex_locator)).resolve(strict=True)
         layout = self.installer.InstallLayout(
             source_root=ROOT,

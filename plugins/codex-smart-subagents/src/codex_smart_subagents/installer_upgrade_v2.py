@@ -517,18 +517,23 @@ def _initial_callbacks_for_intent_v2(
                 _atomic_write_json(
                     stage / "activation.json", received.activation_document
                 )
-                seal_activation_tree_v2(stage)
-                if tree_content_sha256_v2(stage) != expected_activation_tree_sha256:
+                os.replace(stage, received.activation_dir)
+                published = True
+                seal_activation_tree_v2(received.activation_dir)
+                if (
+                    tree_content_sha256_v2(received.activation_dir)
+                    != expected_activation_tree_sha256
+                ):
                     raise ValueError(
                         "materialized initial activation differs from intent"
                     )
-                _fsync_materialized_tree_v2(stage)
-                os.replace(stage, received.activation_dir)
-                published = True
+                _fsync_materialized_tree_v2(received.activation_dir)
                 _fsync_directory(received.activation_dir.parent)
                 _remove_published_stage_owner_v2(received)
             except BaseException:
-                if not published:
+                if published:
+                    _remove_published_activation_tree_v2(received)
+                else:
                     _remove_incomplete_activation_stage_v2(received)
                 raise
         finally:
@@ -1461,11 +1466,13 @@ def _callbacks_for_intent(
                     stage / "activation.json",
                     received.activation_document,
                 )
-                seal_activation_tree_v2(stage)
+                os.replace(stage, received.activation_dir)
+                published = True
+                seal_activation_tree_v2(received.activation_dir)
                 if expected_source_digest is not None:
                     observed_source_digest = (
                         installer_source_digest_from_materialized_activation_v2(
-                            activation_dir=stage,
+                            activation_dir=received.activation_dir,
                             codex_binary=received.codex_binary,
                             source_locator=received.source_locator,
                             snapshot_locator=received.snapshot_locator,
@@ -1476,17 +1483,20 @@ def _callbacks_for_intent(
                         raise ValueError(
                             "sourceDigest differs from immutable candidate"
                         )
-                if tree_content_sha256_v2(stage) != expected_activation_tree_sha256:
+                if (
+                    tree_content_sha256_v2(received.activation_dir)
+                    != expected_activation_tree_sha256
+                ):
                     raise ValueError(
                         "materialized activation tree differs from preparation intent"
                     )
-                _fsync_materialized_tree_v2(stage)
-                os.replace(stage, received.activation_dir)
-                published = True
+                _fsync_materialized_tree_v2(received.activation_dir)
                 _fsync_directory(received.activation_dir.parent)
                 _remove_published_stage_owner_v2(received)
             except BaseException:
-                if not published:
+                if published:
+                    _remove_published_activation_tree_v2(received)
+                else:
                     _remove_incomplete_activation_stage_v2(received)
                 raise
         finally:
@@ -1746,6 +1756,19 @@ def _remove_published_stage_owner_v2(
     marker = _activation_tree_stage_owner_path_v2(intent)
     if os.path.lexists(stage):
         raise ValueError("published activation retained its preparation stage")
+    if os.path.lexists(marker):
+        _unlink_activation_stage_owner_v2(intent)
+
+
+def _remove_published_activation_tree_v2(
+    intent: ActivationPreparationIntentV2,
+) -> None:
+    activation_dir = intent.activation_dir
+    marker = _activation_tree_stage_owner_path_v2(intent)
+    if os.path.lexists(activation_dir):
+        _validate_owned_stage_tree_v2(activation_dir, normalized=False)
+        shutil.rmtree(activation_dir)
+        _fsync_directory(activation_dir.parent)
     if os.path.lexists(marker):
         _unlink_activation_stage_owner_v2(intent)
 

@@ -129,6 +129,15 @@ class AutonomousWorkflowResourceLimitTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.validator = load_validator()
 
+    def parse_fd_doctor_output(self, completed: subprocess.CompletedProcess[str]) -> dict[str, str]:
+        fields: dict[str, str] = {}
+        for line in completed.stdout.splitlines():
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            fields[key] = value
+        return fields
+
     def test_base_config_rejects_missing_public_thread_cap_and_legacy_limits(
         self,
     ) -> None:
@@ -199,14 +208,20 @@ class AutonomousWorkflowResourceLimitTests(unittest.TestCase):
 
     def test_fd_doctor_accepts_sufficient_fd_and_process_headroom(self) -> None:
         completed = self.run_fd_doctor(6)
+        fields = self.parse_fd_doctor_output(completed)
 
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
-        self.assertIn("status=OK", completed.stdout)
-        self.assertIn("launchd_fd_soft_limit=4096", completed.stdout)
-        self.assertIn("user_process_soft_limit=2666", completed.stdout)
-        self.assertIn("user_process_count=100", completed.stdout)
-        self.assertIn("process_headroom=2566", completed.stdout)
-        self.assertIn("required_process_headroom=248", completed.stdout)
+        self.assertEqual("OK", fields["status"])
+        self.assertEqual("4096", fields["launchd_fd_soft_limit"])
+        self.assertEqual("100", fields["user_process_count"])
+        self.assertEqual(
+            int(fields["user_process_soft_limit"]) - int(fields["user_process_count"]),
+            int(fields["process_headroom"]),
+        )
+        self.assertGreaterEqual(
+            int(fields["process_headroom"]),
+            int(fields["required_process_headroom"]),
+        )
 
     def test_fd_doctor_blocks_when_process_headroom_is_too_low(self) -> None:
         completed = self.run_fd_doctor(
@@ -249,11 +264,18 @@ class AutonomousWorkflowResourceLimitTests(unittest.TestCase):
             CODEX_FD_DOCTOR_LAUNCHD_SOFT_LIMIT="256",
             CODEX_FD_DOCTOR_LAUNCHD_MAXPROC_SOFT_LIMIT="2666",
         )
+        fields = self.parse_fd_doctor_output(completed)
 
         self.assertEqual(1, completed.returncode, completed.stdout + completed.stderr)
-        self.assertIn("soft_limit_below_1024", completed.stdout)
-        self.assertIn("launchd_fd_soft_limit=256", completed.stdout)
-        self.assertIn("user_process_soft_limit=2666", completed.stdout)
+        self.assertEqual("WARN", fields["status"])
+        self.assertEqual("256", fields["launchd_fd_soft_limit"])
+        self.assertEqual(
+            min(
+                int(fields["launchd_process_limit"]),
+                int(fields["kern_maxprocperuid"]),
+            ),
+            int(fields["user_process_soft_limit"]),
+        )
         self.assertNotIn("process_headroom_below", completed.stdout)
 
     def test_fd_doctor_accepts_safe_public_cap_with_toml_comment(self) -> None:

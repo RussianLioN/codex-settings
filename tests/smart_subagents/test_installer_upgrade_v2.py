@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import unittest
@@ -28,6 +29,7 @@ from codex_smart_subagents.activation_preparation_v2 import (  # noqa: E402
 from codex_smart_subagents.canonical_json import domain_fingerprint  # noqa: E402
 from codex_smart_subagents.installer_upgrade_v2 import (  # noqa: E402
     _installer_source_digest_from_activation_v2,
+    build_initial_activation_preparation_v2,
     build_persisted_upgrade_preparation_recovery_v2,
     build_upgrade_preparation_v2,
     execute_and_verify_upgrade_preparation_v2,
@@ -395,6 +397,144 @@ class InstallerUpgradePreparationV2Tests(unittest.TestCase):
         self.assertEqual(0, staged.database_path.stat().st_size)
         self.assertFalse(preparation.definition.journal_path.exists())
         self.assertTrue(preparation.definition.receipt_path.exists())
+
+    def test_upgrade_moves_writable_stage_before_sealing_activation(self) -> None:
+        proof = self.fixture.capture()
+        preparation = build_upgrade_preparation_v2(
+            proof=proof,
+            operation_id="op2_" + "8" * 32,
+            source_root=ROOT,
+            codex_binary=self.fixture.codex_binary,
+            policy_bundle=self.fixture.policy,
+            snapshotter=self.fixture.snapshotter,
+            interface_executor=self.fixture.interface_executor,
+        )
+        activation_dir = preparation.definition.activation_intent.activation_dir
+        original_replace = os.replace
+        writable_at_publication: list[bool] = []
+
+        def observe_replace(source: object, destination: object) -> None:
+            if Path(destination) == activation_dir:
+                source_mode = stat.S_IMODE(Path(source).stat().st_mode)
+                writable_at_publication.append(bool(source_mode & stat.S_IWUSR))
+            original_replace(source, destination)
+
+        with mock.patch.object(installer_upgrade_v2.os, "replace", observe_replace):
+            ActivationPreparationExecutorV2(
+                definition=preparation.definition,
+                callbacks=preparation.callbacks,
+            ).execute()
+
+        self.assertEqual([True], writable_at_publication)
+        self.assertEqual(0o500, stat.S_IMODE(activation_dir.stat().st_mode))
+
+    def test_upgrade_removes_published_activation_when_verification_fails(
+        self,
+    ) -> None:
+        proof = self.fixture.capture()
+        preparation = build_upgrade_preparation_v2(
+            proof=proof,
+            operation_id="op2_" + "9" * 32,
+            source_root=ROOT,
+            codex_binary=self.fixture.codex_binary,
+            policy_bundle=self.fixture.policy,
+            snapshotter=self.fixture.snapshotter,
+            interface_executor=self.fixture.interface_executor,
+        )
+        activation_dir = preparation.definition.activation_intent.activation_dir
+        marker = installer_upgrade_v2._activation_tree_stage_owner_path_v2(
+            preparation.definition.activation_intent
+        )
+
+        with mock.patch.object(
+            installer_upgrade_v2,
+            "tree_content_sha256_v2",
+            side_effect=RuntimeError("simulated verification failure"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "verification failure"):
+                ActivationPreparationExecutorV2(
+                    definition=preparation.definition,
+                    callbacks=preparation.callbacks,
+                ).execute()
+
+        self.assertFalse(activation_dir.exists())
+        self.assertFalse(marker.exists())
+
+    def test_initial_install_moves_writable_stage_before_sealing_activation(
+        self,
+    ) -> None:
+        codex_home = self.fixture.root / "initial-codex-home"
+        codex_home.mkdir(mode=0o700)
+        layout = type(self.fixture.layout).for_codex_home(codex_home)
+        preparation = build_initial_activation_preparation_v2(
+            source_root=ROOT,
+            codex_home=codex_home,
+            state_home=codex_home / "state" / "codex-smart-subagents-v2",
+            codex_binary=self.fixture.codex_binary,
+            policy_bundle=self.fixture.policy,
+            installation_id="ins2_" + "7" * 32,
+            operation_id="op2_" + "7" * 32,
+            snapshotter=type(self.fixture.snapshotter)(
+                layout.managed_root / "codex-snapshots"
+            ),
+            interface_executor=self.fixture.interface_executor,
+        )
+        activation_dir = preparation.definition.activation_intent.activation_dir
+        original_replace = os.replace
+        writable_at_publication: list[bool] = []
+
+        def observe_replace(source: object, destination: object) -> None:
+            if Path(destination) == activation_dir:
+                source_mode = stat.S_IMODE(Path(source).stat().st_mode)
+                writable_at_publication.append(bool(source_mode & stat.S_IWUSR))
+            original_replace(source, destination)
+
+        with mock.patch.object(installer_upgrade_v2.os, "replace", observe_replace):
+            ActivationPreparationExecutorV2(
+                definition=preparation.definition,
+                callbacks=preparation.callbacks,
+            ).execute()
+
+        self.assertEqual([True], writable_at_publication)
+        self.assertEqual(0o500, stat.S_IMODE(activation_dir.stat().st_mode))
+
+    def test_initial_install_removes_published_activation_when_verification_fails(
+        self,
+    ) -> None:
+        codex_home = self.fixture.root / "initial-codex-home"
+        codex_home.mkdir(mode=0o700)
+        layout = type(self.fixture.layout).for_codex_home(codex_home)
+        preparation = build_initial_activation_preparation_v2(
+            source_root=ROOT,
+            codex_home=codex_home,
+            state_home=codex_home / "state" / "codex-smart-subagents-v2",
+            codex_binary=self.fixture.codex_binary,
+            policy_bundle=self.fixture.policy,
+            installation_id="ins2_" + "8" * 32,
+            operation_id="op2_" + "8" * 32,
+            snapshotter=type(self.fixture.snapshotter)(
+                layout.managed_root / "codex-snapshots"
+            ),
+            interface_executor=self.fixture.interface_executor,
+        )
+        activation_dir = preparation.definition.activation_intent.activation_dir
+        marker = installer_upgrade_v2._activation_tree_stage_owner_path_v2(
+            preparation.definition.activation_intent
+        )
+
+        with mock.patch.object(
+            installer_upgrade_v2,
+            "tree_content_sha256_v2",
+            side_effect=RuntimeError("simulated verification failure"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "verification failure"):
+                ActivationPreparationExecutorV2(
+                    definition=preparation.definition,
+                    callbacks=preparation.callbacks,
+                ).execute()
+
+        self.assertFalse(activation_dir.exists())
+        self.assertFalse(marker.exists())
 
     def test_preparation_definition_and_receipt_freeze_transition_proof(self) -> None:
         proof = self.fixture.capture()
