@@ -124,7 +124,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
                     document.lower(),
                 )
 
-    def test_root_exposes_all_six_v2_flow_diagrams(self) -> None:
+    def test_root_exposes_all_seven_v2_flow_diagrams(self) -> None:
         root = (REPO / "README.md").read_text(encoding="utf-8")
         flow_path = REPO / "docs/analysis/adaptive-subagents-v2-flow.md"
         flow = self.validator.parse_markdown(
@@ -132,6 +132,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
         )
         anchors = (
             "полный-поток-запроса",
+            "готовность-и-автоматическое-восстановление",
             "поток-пишущего-результата",
             "возобновление-умного-маршрута",
             "обновление-откат-и-удаление-установки",
@@ -151,9 +152,10 @@ class DocsNavigationValidatorTests(unittest.TestCase):
         mermaid = tuple(
             fence for fence in flow.fences if fence.language == "mermaid"
         )
-        self.assertEqual(6, len(mermaid))
+        self.assertEqual(7, len(mermaid))
         self.assertEqual(
             [
+                "flowchart TD",
                 "flowchart TD",
                 "sequenceDiagram",
                 "flowchart TD",
@@ -202,7 +204,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
             "`gpt-5.6-terra`",
             "`medium`",
             "`codex-native`",
-            "кодом 69",
+            "`DEGRADED`",
         )
         for document_name, document in documents.items():
             for term in required_everywhere:
@@ -253,14 +255,14 @@ class DocsNavigationValidatorTests(unittest.TestCase):
         mermaid = tuple(
             fence for fence in flow.fences if fence.language == "mermaid"
         )
-        self.assertEqual(6, len(mermaid))
+        self.assertEqual(7, len(mermaid))
         first_diagram = mermaid[0].content
         for branch in (
             "model_reasoning_effort=ultra",
             "Нативный Codex без контроллера",
             "gpt-5.6-sol + medium",
             "gpt-5.6-terra + medium",
-            "Завершить запуск кодом 69",
+            "Основной Codex без умных значений по умолчанию",
             "Делегирование дочерних узлов",
         ):
             with self.subTest(branch=branch):
@@ -313,7 +315,44 @@ class DocsNavigationValidatorTests(unittest.TestCase):
             "smart_wait",
             "ровно один новый smart_plan",
         ):
-            self.assertIn(value, resume_diagrams[0])
+                self.assertIn(value, resume_diagrams[0])
+
+    def test_guides_explain_fail_open_readiness_and_catalog_recovery(self) -> None:
+        documents = {
+            "root": (REPO / "README.md").read_text(encoding="utf-8"),
+            "plugin": (
+                REPO / "plugins/codex-smart-subagents/README.md"
+            ).read_text(encoding="utf-8"),
+            "runbook": (
+                REPO / "docs/runbooks/adaptive-subagents-v2-operations.md"
+            ).read_text(encoding="utf-8"),
+            "flow": (
+                REPO / "docs/analysis/adaptive-subagents-v2-flow.md"
+            ).read_text(encoding="utf-8"),
+        }
+        required = (
+            "`READY`",
+            "`DEGRADED`",
+            "`coordinatorReasonCode`",
+            "`lastSuccessfulCheckAt`",
+            "`nextAttemptAt`",
+            "5, 30, 120 и 300 секунд",
+            "codex resume --last",
+        )
+        for name, document in documents.items():
+            for value in required:
+                with self.subTest(document=name, value=value):
+                    self.assertIn(value, document)
+
+        combined = "\n".join(documents.values())
+        for obsolete in (
+            "нет обеих пар, обязательный управляемый запуск завершается",
+            "без свежих сведений или при отсутствии обеих пар запуск завершается",
+            "MANAGED_RESUME_UNAVAILABLE` закрывает запуск",
+            "CODEX_SMART_REQUIRED=1",
+        ):
+            with self.subTest(obsolete=obsolete):
+                self.assertNotIn(obsolete, combined)
 
     def test_current_guides_explain_all_four_smart_turn_tools(self) -> None:
         for path in (
