@@ -251,6 +251,145 @@ class RootSessionLeaseStoreV2Tests(unittest.TestCase):
         self.assertEqual("RESUME_NO_ROUTE", repeated.status)
         self.assertIsNone(self.store.load("codex-session").attachment)
 
+    def test_bounded_route_can_handoff_binding_to_next_turn_once_pending(self) -> None:
+        original = self._root(101, "start-original")
+        self.store.register_startup(
+            session_id="codex-session",
+            shell_session_id="cas2_original",
+            root=original,
+            project=self.project,
+        )
+        self.observed[101] = None
+        resumed = self._root(202, "start-resumed")
+        candidate = self._candidate()
+        self.store.prepare_resume(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            root=resumed,
+            project=self.project,
+            candidate=candidate,
+        )
+        self.store.bind_resume(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            turn_id="turn-new",
+            root=resumed,
+            project=self.project,
+        )
+
+        with self.assertRaises(ResumeSessionV2Error) as still_bound:
+            self.store.bind_resume(
+                session_id="codex-session",
+                shell_session_id="cas2_resumed",
+                turn_id="turn-next",
+                root=resumed,
+                project=self.project,
+            )
+
+        self.assertEqual("RESUME_ATTACHMENT_CHANGED", still_bound.exception.code)
+        pending = self.store.defer_resume_to_next_turn(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            turn_id="turn-new",
+            root=resumed,
+            project=self.project,
+            route_id=candidate.route_id,
+        )
+        self.assertEqual("PENDING_NEXT_TURN", pending.attachment.state)
+        self.assertIsNone(pending.attachment.bound_turn_id)
+
+        rebound = self.store.bind_resume(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            turn_id="turn-next",
+            root=resumed,
+            project=self.project,
+        )
+
+        self.assertEqual("BOUND", rebound.attachment.state)
+        self.assertEqual("turn-next", rebound.attachment.bound_turn_id)
+        self.assertFalse(
+            self.store.authorize_route(
+                route_id=candidate.route_id,
+                session_id="codex-session",
+                shell_session_id="cas2_resumed",
+                turn_id="turn-new",
+                root=resumed,
+                project=self.project,
+            )
+        )
+        self.assertTrue(
+            self.store.authorize_route(
+                route_id=candidate.route_id,
+                session_id="codex-session",
+                shell_session_id="cas2_resumed",
+                turn_id="turn-next",
+                root=resumed,
+                project=self.project,
+            )
+        )
+        self.assertEqual(
+            rebound,
+            self.store.bind_resume(
+                session_id="codex-session",
+                shell_session_id="cas2_resumed",
+                turn_id="turn-next",
+                root=resumed,
+                project=self.project,
+            ),
+        )
+
+    def test_handoff_pending_rejects_different_bound_turn_or_route(self) -> None:
+        original = self._root(101, "start-original")
+        self.store.register_startup(
+            session_id="codex-session",
+            shell_session_id="cas2_original",
+            root=original,
+            project=self.project,
+        )
+        self.observed[101] = None
+        resumed = self._root(202, "start-resumed")
+        candidate = self._candidate()
+        self.store.prepare_resume(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            root=resumed,
+            project=self.project,
+            candidate=candidate,
+        )
+        self.store.bind_resume(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            turn_id="turn-new",
+            root=resumed,
+            project=self.project,
+        )
+
+        with self.assertRaises(ResumeSessionV2Error) as wrong_turn:
+            self.store.defer_resume_to_next_turn(
+                session_id="codex-session",
+                shell_session_id="cas2_resumed",
+                turn_id="turn-other",
+                root=resumed,
+                project=self.project,
+                route_id=candidate.route_id,
+            )
+        with self.assertRaises(ResumeSessionV2Error) as wrong_route:
+            self.store.defer_resume_to_next_turn(
+                session_id="codex-session",
+                shell_session_id="cas2_resumed",
+                turn_id="turn-new",
+                root=resumed,
+                project=self.project,
+                route_id="route2_" + "9" * 32,
+            )
+
+        self.assertEqual("RESUME_ATTACHMENT_CHANGED", wrong_turn.exception.code)
+        self.assertEqual("RESUME_ATTACHMENT_CHANGED", wrong_route.exception.code)
+        lease = self.store.load("codex-session")
+        self.assertEqual("BOUND", lease.attachment.state)
+        self.assertEqual("turn-new", lease.attachment.bound_turn_id)
+
     def test_symlinked_lease_directory_is_rejected(self) -> None:
         outside = self.state_home / "outside"
         outside.mkdir()

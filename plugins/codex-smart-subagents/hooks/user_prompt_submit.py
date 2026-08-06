@@ -29,7 +29,6 @@ from integration_runtime import (  # noqa: E402
     write_hook_output,
 )
 from integration_runtime_v2 import (  # noqa: E402
-    FreshActivationProviderV2,
     HOOK_TOTAL_BUDGET_SECONDS as HOOK_TOTAL_BUDGET_SECONDS_V2,
     IntegrationConfigV2,
     TurnContextStoreV2,
@@ -39,7 +38,6 @@ from integration_runtime_v2 import (  # noqa: E402
     require_mcp_contract_v2,
 )
 from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
-    ProjectIdentityV2,
     RootIdentityV2,
     RootSessionLeaseStoreV2,
     system_process_marker_reader_v2,
@@ -189,6 +187,7 @@ def _handle_v2(
     controller_checker: V2ControllerChecker,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + HOOK_TOTAL_BUDGET_SECONDS_V2
+    resume_launch = environ.get("CODEX_SMART_LAUNCH_KIND") == "resume"
     try:
         config = IntegrationConfigV2.from_environ(environ)
         # Codex запускает MCP лениво и может выполнить UserPromptSubmit раньше
@@ -198,6 +197,23 @@ def _handle_v2(
         require_current_user_mcp_policy_v2(config, environ)
         mcp_contract_checker(PLUGIN_ROOT)
         controller_checker(config, environ, deadline=deadline)
+    except Exception:
+        if resume_launch:
+            return {
+                "continue": False,
+                "stopReason": (
+                    "MANAGED_SMART_RUNTIME_UNAVAILABLE: среда умного "
+                    "маршрута не доказана"
+                ),
+            }
+        return {
+            "continue": True,
+            "systemMessage": (
+                "Умное делегирование версии 2 недоступно для этого хода; "
+                "запрос продолжается в обычном режиме Codex без субагентов."
+            ),
+        }
+    try:
         record = capture_hook_turn_context_v2(
             payload,
             config,
@@ -210,7 +226,7 @@ def _handle_v2(
             environ,
         )
     except Exception:
-        if environ.get("CODEX_SMART_LAUNCH_KIND") == "resume":
+        if resume_launch:
             return {
                 "continue": False,
                 "stopReason": (
@@ -252,17 +268,21 @@ def _bind_resume_instruction_v2(
         pid=int(environ.get("CODEX_SMART_ROOT_PID", "")),
         process_start_marker=environ.get("CODEX_SMART_ROOT_START_MARKER", ""),
     )
-    binding = FreshActivationProviderV2(config).runtime_binding()
-    project = ProjectIdentityV2(
-        repo_root=record.repo_root,
-        base_sha=record.base_sha,
-        worktree_fingerprint=record.worktree_fingerprint,
-        compatibility_fingerprint=binding.compatibility_fingerprint,
-    )
-    lease = RootSessionLeaseStoreV2(
+    store = RootSessionLeaseStoreV2(
         config.state_home,
         process_marker_reader=system_process_marker_reader_v2,
-    ).bind_resume(
+    )
+    current = store.load(record.session_id)
+    if current is None:
+        raise RuntimeError("аренда возобновления отсутствует")
+    project = current.project
+    if (
+        project.repo_root != record.repo_root
+        or project.base_sha != record.base_sha
+        or project.worktree_fingerprint != record.worktree_fingerprint
+    ):
+        raise RuntimeError("контекст аренды возобновления изменился")
+    lease = store.bind_resume(
         session_id=record.session_id,
         shell_session_id=record.shell_session_id,
         turn_id=record.turn_id,

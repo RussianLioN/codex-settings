@@ -125,6 +125,12 @@ def handle(
                     )
                 return None
             if outcome in {"bounded-plan", "bounded-route"}:
+                if outcome == "bounded-route":
+                    _defer_resume_to_next_turn_v2(
+                        config_v2,
+                        store_v2.load(),
+                        environ,
+                    )
                 message = (
                     "После двух попыток завершение разрешено, хотя "
                     "долговечная запись smart_plan не найдена."
@@ -268,6 +274,44 @@ def _acknowledge_resume_result_v2(
         shell_session_id=record.shell_session_id,
         turn_id=record.turn_id,
         root=root,
+        route_id=route_id,
+    )
+
+
+def _defer_resume_to_next_turn_v2(
+    config: IntegrationConfigV2,
+    record: HookTurnContextV2,
+    environ: Mapping[str, str],
+) -> None:
+    if environ.get("CODEX_SMART_LAUNCH_KIND") != "resume":
+        return
+    root = RootIdentityV2(
+        pid=int(environ.get("CODEX_SMART_ROOT_PID", "")),
+        process_start_marker=environ.get("CODEX_SMART_ROOT_START_MARKER", ""),
+    )
+    store = RootSessionLeaseStoreV2(
+        config.state_home,
+        process_marker_reader=system_process_marker_reader_v2,
+    )
+    lease = store.load(record.session_id)
+    if lease is None or lease.attachment is None:
+        return
+    project = lease.project
+    if (
+        project.repo_root != record.repo_root
+        or project.base_sha != record.base_sha
+        or project.worktree_fingerprint != record.worktree_fingerprint
+    ):
+        return
+    route_id = lease.attachment.candidate.route_id
+    if lease.attachment.state == "PENDING_NEXT_TURN":
+        return
+    store.defer_resume_to_next_turn(
+        session_id=record.session_id,
+        shell_session_id=record.shell_session_id,
+        turn_id=record.turn_id,
+        root=root,
+        project=project,
         route_id=route_id,
     )
 

@@ -60,6 +60,14 @@ _TERMINAL_ROUTE_STATES = frozenset(
         "SKIPPED",
     }
 )
+_ATTACHMENT_STATES = frozenset(
+    {
+        "PREPARED",
+        "BOUND",
+        "PENDING_NEXT_TURN",
+        "ACKNOWLEDGED",
+    }
+)
 
 
 class ResumeSessionV2Error(RuntimeError):
@@ -143,6 +151,15 @@ class ResumeAttachmentV2:
     candidate: ResumeCandidateV2
     state: str
     bound_turn_id: str | None
+
+    def __post_init__(self) -> None:
+        if self.state not in _ATTACHMENT_STATES:
+            raise ValueError("состояние присоединения неверно")
+        if self.state in {"PREPARED", "PENDING_NEXT_TURN"}:
+            if self.bound_turn_id is not None:
+                raise ValueError("ход присоединения неверен")
+            return
+        _require_text(self.bound_turn_id, "boundTurnId")
 
 
 @dataclass(frozen=True)
@@ -289,18 +306,62 @@ class RootSessionLeaseStoreV2:
             if lease.attachment is None:
                 return lease
             attachment = lease.attachment
-            if attachment.state == "PREPARED":
+            if attachment.state in {"PREPARED", "PENDING_NEXT_TURN"}:
                 attachment = replace(
                     attachment,
                     state="BOUND",
                     bound_turn_id=turn_id,
                 )
+            elif attachment.state == "ACKNOWLEDGED":
+                return lease
             elif attachment.bound_turn_id != turn_id:
                 raise ResumeSessionV2Error(
                     "RESUME_ATTACHMENT_CHANGED",
                     "присоединение уже связано с другим ходом",
                 )
             updated = replace(lease, attachment=attachment)
+            self._write_unlocked(updated)
+            return updated
+
+    def defer_resume_to_next_turn(
+        self,
+        *,
+        session_id: str,
+        shell_session_id: str,
+        turn_id: str,
+        root: RootIdentityV2,
+        project: ProjectIdentityV2,
+        route_id: str,
+    ) -> RootSessionLeaseV2:
+        _require_text(turn_id, "turnId")
+        _require_text(route_id, "routeId")
+        with self._locked(session_id):
+            lease = self._require_current_unlocked(
+                session_id, shell_session_id, root, project
+            )
+            attachment = lease.attachment
+            if attachment is None or attachment.state == "ACKNOWLEDGED":
+                return lease
+            if attachment.candidate.route_id != route_id:
+                raise ResumeSessionV2Error(
+                    "RESUME_ATTACHMENT_CHANGED",
+                    "присоединение относится к другому маршруту",
+                )
+            if attachment.state == "PENDING_NEXT_TURN":
+                return lease
+            if attachment.state != "BOUND" or attachment.bound_turn_id != turn_id:
+                raise ResumeSessionV2Error(
+                    "RESUME_ATTACHMENT_CHANGED",
+                    "присоединение связано с другим активным ходом",
+                )
+            updated = replace(
+                lease,
+                attachment=replace(
+                    attachment,
+                    state="PENDING_NEXT_TURN",
+                    bound_turn_id=None,
+                ),
+            )
             self._write_unlocked(updated)
             return updated
 
