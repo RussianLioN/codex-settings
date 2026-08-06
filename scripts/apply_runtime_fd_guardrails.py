@@ -19,6 +19,7 @@ PUBLIC_THREAD_CAP_KEY = "max_concurrent_threads_per_session"
 LEGACY_AGENT_THREAD_KEY = "max_threads"
 LEGACY_NATIVE_THREAD_KEY = "max_concurrent_threads_per_session"
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
+SOURCE_PROCESS_INVENTORY = SOURCE_ROOT / "scripts" / "codex_process_inventory.py"
 SOURCE_MANIFEST_VALIDATOR = SOURCE_ROOT / "scripts" / "validate_wide_wave_manifest.py"
 SOURCE_TRUSTED_WIDE_WAVE_REGISTRY = SOURCE_ROOT / "config" / "trusted-wide-wave-skills.json"
 POLICY_START = "<!-- codex-runtime-fd-guardrails:start -->"
@@ -54,6 +55,16 @@ def parse_args() -> argparse.Namespace:
         "--source-doctor",
         type=Path,
         default=Path(__file__).resolve().with_name("codex_fd_doctor.sh"),
+    )
+    parser.add_argument(
+        "--installed-process-inventory",
+        type=Path,
+        default=None,
+    )
+    parser.add_argument(
+        "--source-process-inventory",
+        type=Path,
+        default=SOURCE_PROCESS_INVENTORY,
     )
     parser.add_argument(
         "--installed-manifest-validator",
@@ -184,6 +195,8 @@ def state_issues(
     agents_path: Path,
     installed_doctor: Path,
     source_doctor: Path,
+    installed_process_inventory: Path,
+    source_process_inventory: Path,
     installed_manifest_validator: Path,
     source_manifest_validator: Path,
     installed_trusted_registry: Path,
@@ -208,6 +221,11 @@ def state_issues(
         issues.append("agents_resource_policy_missing_or_drifted")
     if not installed_doctor.is_file() or installed_doctor.read_bytes() != source_doctor.read_bytes():
         issues.append("installed_fd_doctor_drifted")
+    if (
+        not installed_process_inventory.is_file()
+        or installed_process_inventory.read_bytes() != source_process_inventory.read_bytes()
+    ):
+        issues.append("installed_process_inventory_drifted")
     if (
         not installed_manifest_validator.is_file()
         or installed_manifest_validator.read_bytes() != source_manifest_validator.read_bytes()
@@ -281,10 +299,16 @@ def main() -> int:
         if args.installed_manifest_validator is not None
         else args.installed_doctor.parent / "validate_wide_wave_manifest.py"
     )
+    installed_process_inventory = (
+        args.installed_process_inventory
+        if args.installed_process_inventory is not None
+        else args.installed_doctor.parent / "codex_process_inventory.py"
+    )
     for path in (
         config_path,
         agents_path,
         args.source_doctor,
+        args.source_process_inventory,
         args.source_manifest_validator,
         args.source_trusted_registry,
     ):
@@ -305,6 +329,8 @@ def main() -> int:
         agents_path=agents_path,
         installed_doctor=args.installed_doctor,
         source_doctor=args.source_doctor,
+        installed_process_inventory=installed_process_inventory,
+        source_process_inventory=args.source_process_inventory,
         installed_manifest_validator=installed_manifest_validator,
         source_manifest_validator=args.source_manifest_validator,
         installed_trusted_registry=installed_trusted_registry,
@@ -332,6 +358,8 @@ def main() -> int:
     shutil.copy2(agents_path, backup / "AGENTS.md")
     if args.installed_doctor.exists():
         shutil.copy2(args.installed_doctor, backup / "codex_fd_doctor.sh")
+    if installed_process_inventory.exists():
+        shutil.copy2(installed_process_inventory, backup / "codex_process_inventory.py")
     if installed_manifest_validator.exists():
         shutil.copy2(installed_manifest_validator, backup / "validate_wide_wave_manifest.py")
     if installed_trusted_registry.exists():
@@ -340,11 +368,13 @@ def main() -> int:
     config_bytes = desired_config(config_path.read_text(encoding="utf-8")).encode()
     agents_bytes = desired_agents(agents_path.read_text(encoding="utf-8")).encode()
     doctor_bytes = args.source_doctor.read_bytes()
+    process_inventory_bytes = args.source_process_inventory.read_bytes()
     manifest_validator_bytes = args.source_manifest_validator.read_bytes()
     trusted_registry_bytes = args.source_trusted_registry.read_bytes()
     atomic_write(config_path, config_bytes, file_mode(config_path, 0o600))
     atomic_write(agents_path, agents_bytes, file_mode(agents_path, 0o644))
     atomic_write(args.installed_doctor, doctor_bytes, 0o755)
+    atomic_write(installed_process_inventory, process_inventory_bytes, 0o755)
     atomic_write(installed_manifest_validator, manifest_validator_bytes, 0o755)
     atomic_write(installed_trusted_registry, trusted_registry_bytes, 0o600)
 
@@ -353,6 +383,8 @@ def main() -> int:
         agents_path=agents_path,
         installed_doctor=args.installed_doctor,
         source_doctor=args.source_doctor,
+        installed_process_inventory=installed_process_inventory,
+        source_process_inventory=args.source_process_inventory,
         installed_manifest_validator=installed_manifest_validator,
         source_manifest_validator=args.source_manifest_validator,
         installed_trusted_registry=installed_trusted_registry,

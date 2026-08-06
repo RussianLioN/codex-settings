@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "apply_runtime_fd_guardrails.py"
 SOURCE_DOCTOR = ROOT / "scripts" / "codex_fd_doctor.sh"
+SOURCE_INVENTORY = ROOT / "scripts" / "codex_process_inventory.py"
 ROLLBACK = ROOT / "scripts" / "codex_autonomous_rollback.py"
 
 
@@ -28,6 +29,7 @@ class RuntimeFdGuardrailInstallerTests(unittest.TestCase):
         self.config = self.codex_home / "config.toml"
         self.agents = self.codex_home / "AGENTS.md"
         self.installed_doctor = self.root / "libexec" / "codex_fd_doctor.sh"
+        self.installed_inventory = self.root / "libexec" / "codex_process_inventory.py"
         self.installed_doctor.parent.mkdir()
         self.config.write_text(
             """approval_policy = "on-request"
@@ -63,6 +65,10 @@ max_concurrent_threads_per_session = 1000
                 str(self.installed_doctor),
                 "--source-doctor",
                 str(SOURCE_DOCTOR),
+                "--installed-process-inventory",
+                str(self.installed_inventory),
+                "--source-process-inventory",
+                str(SOURCE_INVENTORY),
                 "--timestamp",
                 "20260804-212800",
                 *extra,
@@ -140,6 +146,11 @@ max_concurrent_threads_per_session = 1000
         self.assertIn("20 узлов умного графа маршрутизатора", agents)
         self.assertIn("один интегратор для общих или генерируемых файлов", agents)
         self.assertEqual(SOURCE_DOCTOR.read_bytes(), self.installed_doctor.read_bytes())
+        self.assertEqual(
+            SOURCE_INVENTORY.read_bytes(),
+            self.installed_inventory.read_bytes(),
+        )
+        self.assertEqual(0o755, stat.S_IMODE(self.installed_inventory.stat().st_mode))
         self.assertTrue((self.installed_doctor.parent / "validate_wide_wave_manifest.py").is_file())
         self.assertTrue((self.codex_home / "config" / "trusted-wide-wave-skills.json").is_file())
 
