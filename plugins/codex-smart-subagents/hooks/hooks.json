@@ -43,7 +43,7 @@
           {
             "type": "command",
             "command": "\"$PLUGIN_ROOT/bin/codex-smart-subagents-hook\" session-end",
-            "timeout": 5,
+            "timeout": 3,
             "statusMessage": "Освобождение умного сеанса проекта"
           }
         ]

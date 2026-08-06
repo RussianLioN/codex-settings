@@ -470,7 +470,7 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertIn("$PLUGIN_ROOT", stop["command"])
         self.assertEqual(5, stop["timeout"])
         self.assertIn("session-end", session_end["command"])
-        self.assertEqual(5, session_end["timeout"])
+        self.assertEqual(3, session_end["timeout"])
 
     def test_stop_launcher_overwrites_deadline_before_runpy(self) -> None:
         launcher_source = (
