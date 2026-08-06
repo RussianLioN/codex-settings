@@ -2486,6 +2486,103 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             runtime.HOOK_TOTAL_BUDGET_SECONDS,
         )
 
+    def test_v2_stop_direct_without_resume_attachment_skips_full_resolve(self) -> None:
+        TurnContextStoreV2(self.config).save(self.record)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        environment["CODEX_SMART_ROOT_PID"] = str(os.getpid())
+        environment["CODEX_SMART_ROOT_START_MARKER"] = "test-root-start"
+        path = PLUGIN / "hooks" / "stop.py"
+        spec = importlib.util.spec_from_file_location(
+            "smart_stop_direct_without_resume_test",
+            path,
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        with mock.patch.object(
+            module,
+            "FreshActivationProviderV2",
+            side_effect=AssertionError("Stop не должен запускать полный resolve"),
+        ):
+            response = module.handle(
+                {
+                    "session_id": self.record.session_id,
+                    "turn_id": self.record.turn_id,
+                    "hook_event_name": "Stop",
+                },
+                environment,
+                v2_plan_state_provider=(
+                    lambda _config, _record, *, environ, deadline: "DIRECT"
+                ),
+            )
+
+        self.assertIsNone(response)
+
+    def test_v2_stop_acknowledges_resume_through_pinned_deadline(self) -> None:
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        environment["CODEX_SMART_ROOT_PID"] = str(os.getpid())
+        environment["CODEX_SMART_ROOT_START_MARKER"] = "test-root-start"
+        path = PLUGIN / "hooks" / "stop.py"
+        spec = importlib.util.spec_from_file_location(
+            "smart_stop_pinned_acknowledgement_test",
+            path,
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        route_id = "route2_" + "1" * 32
+        lease = SimpleNamespace(
+            attachment=SimpleNamespace(
+                candidate=SimpleNamespace(route_id=route_id),
+            ),
+        )
+        lease_store = mock.Mock()
+        lease_store.load.return_value = lease
+        lease_store.authorize_route.return_value = True
+        binding = PinnedResumeBindingV2(
+            database_path=self.state_home / "smart-subagents.sqlite3",
+            compatibility_fingerprint=self.compatibility_fingerprint,
+        )
+        deadline = time.monotonic() + 1.0
+
+        with (
+            mock.patch.object(
+                module,
+                "FreshActivationProviderV2",
+                side_effect=AssertionError("Stop не должен запускать полный resolve"),
+            ),
+            mock.patch.object(
+                module,
+                "RootSessionLeaseStoreV2",
+                return_value=lease_store,
+            ),
+            mock.patch.object(module, "route_is_terminal_v2", return_value=True),
+            mock.patch.object(
+                module,
+                "pinned_resume_binding_v2",
+                return_value=binding,
+                create=True,
+            ) as pinned_binding,
+        ):
+            module._acknowledge_resume_result_v2(
+                self.config,
+                self.record,
+                environment,
+                deadline=deadline,
+            )
+
+        pinned_binding.assert_called_once_with(
+            self.config,
+            environment,
+            deadline=deadline,
+        )
+        lease_store.acknowledge_result.assert_called_once()
+
     def test_v2_stop_shares_one_absolute_deadline_with_plan_check(self) -> None:
         TurnContextStoreV2(self.config).save(self.record)
         environment, publisher = self._proven_environment()
