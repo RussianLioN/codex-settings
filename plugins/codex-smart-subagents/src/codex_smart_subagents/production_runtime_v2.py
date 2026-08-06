@@ -130,9 +130,15 @@ def build_production_runtime_v2(
     controller = accepting_controller_from_binding_v2(binding)
     resume_store: RootSessionLeaseStoreV2 | None = None
     resume_root: RootIdentityV2 | None = None
-    launch_kind = environment.get("CODEX_SMART_LAUNCH_KIND")
     try:
-        if launch_kind in {"startup", "resume"}:
+        root_identity_present = any(
+            name in environment
+            for name in (
+                "CODEX_SMART_ROOT_PID",
+                "CODEX_SMART_ROOT_START_MARKER",
+            )
+        )
+        if root_identity_present:
             resume_root = RootIdentityV2(
                 pid=int(environment["CODEX_SMART_ROOT_PID"]),
                 process_start_marker=environment["CODEX_SMART_ROOT_START_MARKER"],
@@ -161,10 +167,14 @@ def build_production_runtime_v2(
     ) -> bool:
         if resume_store is None or resume_root is None:
             return False
-        lease = resume_store.load(current.session_id)
+        try:
+            lease = resume_store.load(current.session_id)
+        except Exception:
+            return False
         attachment = None if lease is None else lease.attachment
         if (
             attachment is None
+            or attachment.state == "DETACHED"
             or attachment.candidate.original_shell_session_id
             != original.shell_session_id
             or attachment.candidate.original_session_id != original.session_id
@@ -229,24 +239,28 @@ def build_production_runtime_v2(
         def guard_resumed_plan(context: RequestContextV2) -> None:
             if resume_store is None or resume_root is None:
                 return
-            lease = resume_store.load(context.session_id)
+            try:
+                lease = resume_store.load(context.session_id)
+            except Exception as exc:
+                raise SmartServiceV2Error(
+                    "RESUME_LEASE_UNAVAILABLE",
+                    "аренда умного маршрута не доказана для этого хода",
+                ) from exc
             if lease is None or lease.attachment is None:
                 return
             attachment = lease.attachment
-            if attachment.state == "ACKNOWLEDGED":
+            if attachment.state in {"ACKNOWLEDGED", "DETACHED"}:
                 return
-            if not resume_store.authorize_route(
+            authorized = resume_store.authorize_route(
                 route_id=attachment.candidate.route_id,
                 session_id=context.session_id,
                 shell_session_id=context.shell_session_id,
                 turn_id=context.turn_id,
                 root=resume_root,
                 project=project_for_context(context),
-            ):
-                raise SmartServiceV2Error(
-                    "RESUME_ATTACHMENT_CHANGED",
-                    "присоединение умного маршрута изменилось",
-                )
+            )
+            if not authorized:
+                return
             if not route_is_terminal_v2(
                 binding.database_path,
                 attachment.candidate.route_id,

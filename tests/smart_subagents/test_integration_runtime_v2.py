@@ -69,6 +69,7 @@ from codex_smart_subagents.canonical_json import (  # noqa: E402
 from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
     ProjectIdentityV2,
     ResumeCandidateV2,
+    ResumeSessionV2Error,
     RootIdentityV2,
     RootSessionLeaseStoreV2,
 )
@@ -1508,6 +1509,37 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         self.assertIn("обычном режиме", response["systemMessage"].lower())
         self.assertFalse(TurnContextStoreV2(self.config).path.exists())
 
+    def test_thread_capacity_exhaustion_disables_smart_turn_not_root_request(self) -> None:
+        path = PLUGIN / "hooks" / "user_prompt_submit.py"
+        spec = importlib.util.spec_from_file_location(
+            "smart_prompt_thread_capacity_test",
+            path,
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+
+        response = module.handle(
+            {
+                "session_id": "session-from-hook",
+                "turn_id": "turn-capacity-exhausted",
+                "cwd": str(ROOT),
+                "hook_event_name": "UserPromptSubmit",
+            },
+            environment,
+            v2_mcp_contract_checker=lambda _plugin_root: None,
+            v2_controller_checker=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                IntegrationV2Error("MAX_THREADS_EXHAUSTED")
+            ),
+        )
+
+        self.assertTrue(response["continue"])
+        self.assertNotIn("stopReason", response)
+        self.assertNotIn("hookSpecificOutput", response)
+
     def test_resume_user_prompt_classifies_runtime_errors_without_exception_details(
         self,
     ) -> None:
@@ -1578,6 +1610,95 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             response["hookSpecificOutput"]["additionalContext"],
         )
         self.assertEqual("turn-second", TurnContextStoreV2(self.config).load().turn_id)
+
+    def test_resume_lease_lock_failure_is_fail_open_without_stop_reason(self) -> None:
+        path = PLUGIN / "hooks" / "user_prompt_submit.py"
+        spec = importlib.util.spec_from_file_location(
+            "smart_prompt_resume_lease_busy_test",
+            path,
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+
+        with mock.patch.object(
+            module.RootSessionLeaseStoreV2,
+            "load",
+            side_effect=RuntimeError("RESUME_LEASE_BUSY"),
+        ):
+            response = module.handle(
+                {
+                    "session_id": "session-from-hook",
+                    "turn_id": "turn-lock-busy",
+                    "cwd": str(ROOT),
+                    "hook_event_name": "UserPromptSubmit",
+                },
+                environment,
+                v2_mcp_contract_checker=lambda _plugin_root: None,
+                v2_controller_checker=lambda _config, _environ, *, deadline: None,
+            )
+
+        self.assertTrue(response["continue"])
+        self.assertNotIn("stopReason", response)
+        self.assertIn("обычном режиме", response["systemMessage"].lower())
+
+    def test_other_live_owner_keeps_old_lease_and_current_root_gets_fresh_turn(self) -> None:
+        path = PLUGIN / "hooks" / "user_prompt_submit.py"
+        spec = importlib.util.spec_from_file_location(
+            "smart_prompt_other_live_owner_test",
+            path,
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        environment["CODEX_SMART_ROOT_PID"] = str(os.getpid())
+        environment["CODEX_SMART_ROOT_START_MARKER"] = "current-root"
+        old_project = ProjectIdentityV2(
+            repo_root=str(ROOT),
+            base_sha="a" * 40,
+            worktree_fingerprint="b" * 64,
+            compatibility_fingerprint=self.compatibility_fingerprint,
+        )
+        fake_store = mock.Mock()
+        fake_store.load.return_value = SimpleNamespace(
+            project=old_project,
+            attachment=None,
+        )
+        fake_store.begin_resume_claim.side_effect = ResumeSessionV2Error(
+            "RESUME_ATTACHMENT_CHANGED",
+            "SESSION_OWNER_ACTIVE",
+        )
+
+        with mock.patch.object(
+            module,
+            "RootSessionLeaseStoreV2",
+            return_value=fake_store,
+        ):
+            response = module.handle(
+                {
+                    "session_id": "session-from-hook",
+                    "turn_id": "turn-current-root",
+                    "cwd": str(ROOT),
+                    "hook_event_name": "UserPromptSubmit",
+                },
+                environment,
+                v2_mcp_contract_checker=lambda _plugin_root: None,
+                v2_controller_checker=lambda _config, _environ, *, deadline: None,
+            )
+
+        self.assertIn("hookSpecificOutput", response)
+        self.assertIn(
+            "Умный режим версии 2 активен",
+            response["hookSpecificOutput"]["additionalContext"],
+        )
+        fake_store.begin_resume_claim.assert_called_once()
+        fake_store.finalize_resume_claim.assert_not_called()
 
     def test_user_prompt_requires_current_policy_before_mcp_attestation(
         self,
@@ -1931,9 +2052,117 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             "Возобновлён умный маршрут предыдущего хода",
             response["hookSpecificOutput"]["additionalContext"],
         )
+        self.assertIn(
+            "smart_wait",
+            response["hookSpecificOutput"]["additionalContext"],
+        )
         rebound = store.load(current.session_id)
         self.assertEqual("BOUND", rebound.attachment.state)
         self.assertEqual("turn-next", rebound.attachment.bound_turn_id)
+
+    def test_next_prompt_recovers_claim_after_context_write_before_finalize(self) -> None:
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        environment["CODEX_SMART_ROOT_PID"] = str(os.getpid())
+        environment["CODEX_SMART_ROOT_START_MARKER"] = "test-root-start"
+        repo_root, base_sha, worktree_fingerprint = _git_identity(
+            str(ROOT), deadline=time.monotonic() + 2
+        )
+        project = ProjectIdentityV2(
+            repo_root=repo_root,
+            base_sha=base_sha,
+            worktree_fingerprint=worktree_fingerprint,
+            compatibility_fingerprint=self.compatibility_fingerprint,
+        )
+        root = RootIdentityV2(os.getpid(), "test-root-start")
+        store = RootSessionLeaseStoreV2(
+            self.state_home,
+            process_marker_reader=(
+                lambda pid: "test-root-start" if pid == os.getpid() else None
+            ),
+        )
+        store.register_startup(
+            session_id="session-from-hook",
+            shell_session_id=self.config.shell_session_id,
+            root=RootIdentityV2(999999, "old-root-start"),
+            project=project,
+        )
+        candidate = ResumeCandidateV2(
+            route_id="route2_" + "1" * 32,
+            original_shell_session_id=self.config.shell_session_id,
+            original_session_id="session-from-hook",
+            original_turn_id="turn-original",
+            route_state="RUNNING",
+            start_request_id=None,
+            node_id="node2_" + "3" * 32,
+            terminal_result_unacknowledged=False,
+        )
+        store.prepare_resume(
+            session_id="session-from-hook",
+            shell_session_id=self.config.shell_session_id,
+            root=root,
+            project=project,
+            candidate=candidate,
+        )
+        interrupted = store.begin_resume_claim(
+            session_id="session-from-hook",
+            shell_session_id=self.config.shell_session_id,
+            turn_id="turn-interrupted",
+            root=root,
+            project=project,
+        )
+        TurnContextStoreV2(self.config).save(
+            HookTurnContextV2(
+                shell_session_id=self.config.shell_session_id,
+                session_id="session-from-hook",
+                turn_id="turn-interrupted",
+                codex_home=str(self.codex_home),
+                repo_root=repo_root,
+                base_sha=base_sha,
+                worktree_fingerprint=worktree_fingerprint,
+                resume_claim_nonce=interrupted.claim_nonce,
+            )
+        )
+        prompt_path = PLUGIN / "hooks" / "user_prompt_submit.py"
+        prompt_spec = importlib.util.spec_from_file_location(
+            "smart_prompt_claim_recovery_test",
+            prompt_path,
+        )
+        assert prompt_spec is not None and prompt_spec.loader is not None
+        prompt_module = importlib.util.module_from_spec(prompt_spec)
+        sys.modules[prompt_spec.name] = prompt_module
+        prompt_spec.loader.exec_module(prompt_module)
+
+        with mock.patch.object(
+            prompt_module,
+            "system_process_marker_reader_v2",
+            side_effect=lambda pid: (
+                "test-root-start" if pid == os.getpid() else None
+            ),
+        ):
+            response = prompt_module.handle(
+                {
+                    "session_id": "session-from-hook",
+                    "turn_id": "turn-after-recovery",
+                    "cwd": repo_root,
+                    "hook_event_name": "UserPromptSubmit",
+                },
+                environment,
+                v2_mcp_contract_checker=lambda _plugin_root: None,
+                v2_controller_checker=lambda _config, _environ, *, deadline: None,
+            )
+
+        self.assertIn("hookSpecificOutput", response)
+        self.assertIn(
+            "route_start",
+            response["hookSpecificOutput"]["additionalContext"],
+        )
+        recovered = store.load("session-from-hook")
+        self.assertEqual("BOUND", recovered.attachment.state)
+        self.assertEqual("turn-after-recovery", recovered.attachment.bound_turn_id)
+        current_context = TurnContextStoreV2(self.config).load()
+        self.assertEqual("turn-after-recovery", current_context.turn_id)
+        self.assertNotEqual(interrupted.claim_nonce, current_context.resume_claim_nonce)
 
     def test_user_prompt_hook_writes_v2_turn_and_names_only_v2_tools(self) -> None:
         path = PLUGIN / "hooks" / "user_prompt_submit.py"

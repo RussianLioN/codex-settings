@@ -15,6 +15,10 @@ PLUGIN_ROOT = REPO / "plugins" / "codex-smart-subagents"
 sys.path.insert(0, str(PLUGIN_ROOT / "src"))
 
 from codex_smart_subagents import finite_file_lock_v2  # noqa: E402
+from codex_smart_subagents.canonical_json import (  # noqa: E402
+    canonical_json_bytes,
+    domain_fingerprint,
+)
 from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
     ProjectIdentityV2,
     ResumeCandidateV2,
@@ -60,6 +64,34 @@ class RootSessionLeaseStoreV2Tests(unittest.TestCase):
             node_id="node2_" + "3" * 32,
             terminal_result_unacknowledged=False,
         )
+
+    def _write_v2_lease(
+        self,
+        *,
+        root: RootIdentityV2,
+        project: ProjectIdentityV2,
+        attachment: dict[str, object] | None,
+    ) -> None:
+        projection = {
+            "schemaVersion": 2,
+            "sessionId": "codex-session",
+            "shellSessionId": "cas2_original",
+            "generation": 1,
+            "root": root.value(),
+            "project": project.value(),
+            "attachment": attachment,
+            "active": True,
+        }
+        value = {
+            **projection,
+            "leaseFingerprint": domain_fingerprint(
+                "codex-smart/root-session-lease/v2", projection
+            ),
+        }
+        self.store._prepare_directory()
+        path = self.store._path("codex-session")
+        path.write_bytes(canonical_json_bytes(value))
+        path.chmod(0o600)
 
     def test_lease_lock_wait_is_finite_and_reports_busy_state(self) -> None:
         timeout = finite_file_lock_v2.FileLockTimeoutV2(
@@ -156,7 +188,47 @@ class RootSessionLeaseStoreV2Tests(unittest.TestCase):
         )
 
         self.assertEqual("RESUME_CONTEXT_MISMATCH", result.status)
-        self.assertIsNone(self.store.load("codex-session").attachment)
+        detached = self.store.load("codex-session").attachment
+        self.assertEqual("DETACHED", detached.state)
+        self.assertEqual(self._candidate().route_id, detached.candidate.route_id)
+
+    def test_compatibility_mismatch_is_detached_from_old_route(self) -> None:
+        original = self._root(101, "start-original")
+        self.store.register_startup(
+            session_id="codex-session",
+            shell_session_id="cas2_original",
+            root=original,
+            project=self.project,
+        )
+        self.observed[101] = None
+        incompatible = ProjectIdentityV2(
+            repo_root=self.project.repo_root,
+            base_sha=self.project.base_sha,
+            worktree_fingerprint=self.project.worktree_fingerprint,
+            compatibility_fingerprint="f" * 64,
+        )
+        candidate = self._candidate()
+
+        result = self.store.prepare_resume(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            root=self._root(202, "start-resumed"),
+            project=incompatible,
+            candidate=candidate,
+        )
+
+        self.assertEqual("RESUME_COMPATIBILITY_MISMATCH", result.status)
+        self.assertEqual("DETACHED", self.store.load("codex-session").attachment.state)
+        self.assertFalse(
+            self.store.authorize_route(
+                route_id=candidate.route_id,
+                session_id="codex-session",
+                shell_session_id="cas2_resumed",
+                turn_id="turn-new",
+                root=self._root(202, "start-resumed"),
+                project=incompatible,
+            )
+        )
 
     def test_bind_authorize_acknowledge_and_release_are_idempotent(self) -> None:
         original = self._root(101, "start-original")
@@ -278,27 +350,6 @@ class RootSessionLeaseStoreV2Tests(unittest.TestCase):
             root=resumed,
             project=self.project,
         )
-
-        with self.assertRaises(ResumeSessionV2Error) as still_bound:
-            self.store.bind_resume(
-                session_id="codex-session",
-                shell_session_id="cas2_resumed",
-                turn_id="turn-next",
-                root=resumed,
-                project=self.project,
-            )
-
-        self.assertEqual("RESUME_ATTACHMENT_CHANGED", still_bound.exception.code)
-        pending = self.store.defer_resume_to_next_turn(
-            session_id="codex-session",
-            shell_session_id="cas2_resumed",
-            turn_id="turn-new",
-            root=resumed,
-            project=self.project,
-            route_id=candidate.route_id,
-        )
-        self.assertEqual("PENDING_NEXT_TURN", pending.attachment.state)
-        self.assertIsNone(pending.attachment.bound_turn_id)
 
         rebound = self.store.bind_resume(
             session_id="codex-session",
@@ -638,6 +689,77 @@ class RootSessionLeaseStoreV2Tests(unittest.TestCase):
         )
         self.assertEqual("DETACHED", next_turn.status)
         self.assertEqual("DETACHED", self.store.load("codex-session").attachment.state)
+
+    def test_exact_v2_lease_migrates_lazily_to_v3(self) -> None:
+        original = self._root(101, "start-original")
+        candidate = self._candidate()
+        self._write_v2_lease(
+            root=original,
+            project=self.project,
+            attachment={
+                "routeId": candidate.route_id,
+                "originalShellSessionId": candidate.original_shell_session_id,
+                "originalSessionId": candidate.original_session_id,
+                "originalTurnId": candidate.original_turn_id,
+                "routeState": candidate.route_state,
+                "startRequestId": candidate.start_request_id,
+                "nodeId": candidate.node_id,
+                "terminalResultUnacknowledged": False,
+                "state": "PREPARED",
+                "boundTurnId": None,
+            },
+        )
+        self.observed[101] = None
+
+        prepared = self.store.prepare_resume(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            root=self._root(202, "start-resumed"),
+            project=self.project,
+            candidate=candidate,
+        )
+
+        self.assertEqual("RESUME_PREPARED", prepared.status)
+        value = json.loads(
+            self.store._path("codex-session").read_text(encoding="utf-8")
+        )
+        self.assertEqual(3, value["schemaVersion"])
+
+    def test_mismatched_or_corrupt_v2_becomes_safe_detached_v3(self) -> None:
+        original = self._root(101, "start-original")
+        candidate = self._candidate()
+        self._write_v2_lease(root=original, project=self.project, attachment=None)
+        self.observed[101] = None
+        changed = ProjectIdentityV2(
+            repo_root=self.project.repo_root,
+            base_sha="d" * 40,
+            worktree_fingerprint="e" * 64,
+            compatibility_fingerprint=self.project.compatibility_fingerprint,
+        )
+        mismatch = self.store.prepare_resume(
+            session_id="codex-session",
+            shell_session_id="cas2_resumed",
+            root=self._root(202, "start-resumed"),
+            project=changed,
+            candidate=candidate,
+        )
+        self.assertEqual("RESUME_SNAPSHOT_MISMATCH", mismatch.status)
+        self.assertEqual("DETACHED", self.store.load("codex-session").attachment.state)
+
+        path = self.store._path("codex-session")
+        path.write_text('{"schemaVersion":2,"leaseFingerprint":"damaged"}', encoding="utf-8")
+        path.chmod(0o600)
+        corrupt = self.store.prepare_resume(
+            session_id="codex-session",
+            shell_session_id="cas2_next",
+            root=self._root(303, "start-next"),
+            project=changed,
+            candidate=candidate,
+        )
+        self.assertEqual("RESUME_LEASE_INVALID", corrupt.status)
+        safe = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(3, safe["schemaVersion"])
+        self.assertEqual("DETACHED", safe["attachment"]["state"])
 
 
 if __name__ == "__main__":

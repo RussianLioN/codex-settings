@@ -63,9 +63,11 @@ _TERMINAL_ROUTE_STATES = frozenset(
 _ATTACHMENT_STATES = frozenset(
     {
         "PREPARED",
+        "CLAIMING",
         "BOUND",
         "PENDING_NEXT_TURN",
         "ACKNOWLEDGED",
+        "DETACHED",
     }
 )
 
@@ -121,6 +123,24 @@ class ProjectIdentityV2:
             "compatibilityFingerprint": self.compatibility_fingerprint,
         }
 
+    def stable_value(self) -> dict[str, str]:
+        return {
+            "repoRoot": self.repo_root,
+            "compatibilityFingerprint": self.compatibility_fingerprint,
+        }
+
+    def snapshot_value(self) -> dict[str, str]:
+        return {
+            "baseSha": self.base_sha,
+            "worktreeFingerprint": self.worktree_fingerprint,
+        }
+
+    def same_stable_identity(self, other: "ProjectIdentityV2") -> bool:
+        return self.stable_value() == other.stable_value()
+
+    def same_snapshot(self, other: "ProjectIdentityV2") -> bool:
+        return self.snapshot_value() == other.snapshot_value()
+
 
 @dataclass(frozen=True)
 class ResumeCandidateV2:
@@ -151,6 +171,8 @@ class ResumeAttachmentV2:
     candidate: ResumeCandidateV2
     state: str
     bound_turn_id: str | None
+    claim_nonce: str | None = None
+    detached_reason: str | None = None
 
     def __post_init__(self) -> None:
         if self.state not in _ATTACHMENT_STATES:
@@ -158,8 +180,18 @@ class ResumeAttachmentV2:
         if self.state in {"PREPARED", "PENDING_NEXT_TURN"}:
             if self.bound_turn_id is not None:
                 raise ValueError("ход присоединения неверен")
+            if self.claim_nonce is not None or self.detached_reason is not None:
+                raise ValueError("доказательство присоединения неверно")
+            return
+        if self.state == "DETACHED":
+            if self.bound_turn_id is not None or self.claim_nonce is not None:
+                raise ValueError("отсоединённое присоединение неверно")
+            _require_text(self.detached_reason, "detachedReason")
             return
         _require_text(self.bound_turn_id, "boundTurnId")
+        _require_text(self.claim_nonce, "claimNonce")
+        if self.detached_reason is not None:
+            raise ValueError("причина отсоединения неожиданна")
 
 
 @dataclass(frozen=True)
@@ -171,12 +203,20 @@ class RootSessionLeaseV2:
     project: ProjectIdentityV2
     attachment: ResumeAttachmentV2 | None
     active: bool = True
+    schema_version: int = 3
 
 
 @dataclass(frozen=True)
 class ResumePreparationV2:
     status: str
     lease_generation: int
+    route_id: str | None
+
+
+@dataclass(frozen=True)
+class ResumeClaimV2:
+    status: str
+    claim_nonce: str | None
     route_id: str | None
 
 
@@ -203,7 +243,10 @@ class RootSessionLeaseStoreV2:
         _require_text(session_id, "sessionId")
         _require_text(shell_session_id, "shellSessionId")
         with self._locked(session_id):
-            previous = self._read_unlocked(session_id)
+            try:
+                previous = self._read_unlocked(session_id)
+            except (OSError, ValueError, ResumeSessionV2Error):
+                previous = None
             if previous is not None and previous.active and self._root_is_live(previous.root):
                 if previous.root != root or previous.shell_session_id != shell_session_id:
                     raise ResumeSessionV2Error(
@@ -235,7 +278,12 @@ class RootSessionLeaseStoreV2:
         _require_text(session_id, "sessionId")
         _require_text(shell_session_id, "shellSessionId")
         with self._locked(session_id):
-            previous = self._read_unlocked(session_id)
+            damaged_previous = False
+            try:
+                previous = self._read_unlocked(session_id)
+            except (OSError, ValueError, ResumeSessionV2Error):
+                previous = None
+                damaged_previous = True
             if previous is not None and previous.active and self._root_is_live(previous.root):
                 if previous.root == root and previous.shell_session_id == shell_session_id:
                     route_id = (
@@ -253,8 +301,12 @@ class RootSessionLeaseStoreV2:
             generation = 1 if previous is None else previous.generation + 1
             status = "RESUME_NO_ROUTE"
             attachment: ResumeAttachmentV2 | None = None
-            if candidate is not None and candidate.original_session_id != session_id:
+            if damaged_previous:
+                status = "RESUME_LEASE_INVALID"
+                attachment = _detached_attachment(candidate, status)
+            elif candidate is not None and candidate.original_session_id != session_id:
                 status = "RESUME_ATTACHMENT_CHANGED"
+                attachment = _detached_attachment(candidate, status)
             elif (
                 candidate is not None
                 and previous is not None
@@ -265,11 +317,22 @@ class RootSessionLeaseStoreV2:
                 status = "RESUME_NO_ROUTE"
             elif candidate is not None and previous is None:
                 status = "RESUME_OWNER_UNPROVED"
+                attachment = _detached_attachment(candidate, status)
             elif candidate is not None and previous is not None:
-                if previous.project.compatibility_fingerprint != project.compatibility_fingerprint:
+                if not previous.project.same_stable_identity(project):
                     status = "RESUME_COMPATIBILITY_MISMATCH"
-                elif previous.project != project:
-                    status = "RESUME_CONTEXT_MISMATCH"
+                    if previous.project.repo_root != project.repo_root:
+                        status = "RESUME_CONTEXT_MISMATCH"
+                    attachment = _detached_attachment(candidate, status)
+                elif not previous.project.same_snapshot(project):
+                    status = "RESUME_SNAPSHOT_MISMATCH"
+                    attachment = _detached_attachment(candidate, status)
+                elif (
+                    previous.attachment is not None
+                    and previous.attachment.candidate.route_id != candidate.route_id
+                ):
+                    status = "RESUME_ATTACHMENT_CHANGED"
+                    attachment = _detached_attachment(candidate, status)
                 else:
                     status = "RESUME_PREPARED"
                     attachment = ResumeAttachmentV2(candidate, "PREPARED", None)
@@ -289,6 +352,107 @@ class RootSessionLeaseStoreV2:
                 None if attachment is None else attachment.candidate.route_id,
             )
 
+    def begin_resume_claim(
+        self,
+        *,
+        session_id: str,
+        shell_session_id: str,
+        turn_id: str,
+        root: RootIdentityV2,
+        project: ProjectIdentityV2,
+    ) -> ResumeClaimV2:
+        """Атомарно отзывает прежнюю привязку и выдаёт одноразовый claim."""
+
+        _require_text(turn_id, "turnId")
+        with self._locked(session_id):
+            lease = self._require_owner_unlocked(
+                session_id, shell_session_id, root
+            )
+            attachment = lease.attachment
+            if attachment is None or attachment.state in {"ACKNOWLEDGED", "DETACHED"}:
+                return ResumeClaimV2(
+                    "NO_ROUTE" if attachment is None else attachment.state,
+                    None,
+                    None if attachment is None else attachment.candidate.route_id,
+                )
+            if not lease.project.same_stable_identity(project):
+                return self._detach_unlocked(lease, project, "STABLE_IDENTITY_MISMATCH")
+            if not lease.project.same_snapshot(project):
+                return self._detach_unlocked(lease, project, "SNAPSHOT_MISMATCH")
+            if attachment.state == "CLAIMING":
+                if attachment.bound_turn_id == turn_id:
+                    return ResumeClaimV2(
+                        "CLAIMING",
+                        attachment.claim_nonce,
+                        attachment.candidate.route_id,
+                    )
+                return self._detach_unlocked(lease, project, "INCOMPLETE_CLAIM")
+            if attachment.state == "BOUND" and attachment.bound_turn_id == turn_id:
+                return ResumeClaimV2(
+                    "BOUND", attachment.claim_nonce, attachment.candidate.route_id
+                )
+            claim_nonce = "claim3_" + secrets.token_hex(16)
+            claiming = replace(
+                attachment,
+                state="CLAIMING",
+                bound_turn_id=turn_id,
+                claim_nonce=claim_nonce,
+                detached_reason=None,
+            )
+            self._write_unlocked(replace(lease, project=project, attachment=claiming))
+            return ResumeClaimV2(
+                "CLAIMING", claim_nonce, attachment.candidate.route_id
+            )
+
+    def finalize_resume_claim(
+        self,
+        *,
+        session_id: str,
+        shell_session_id: str,
+        turn_id: str,
+        root: RootIdentityV2,
+        project: ProjectIdentityV2,
+        claim_nonce: str,
+        context_claim_nonce: str,
+    ) -> RootSessionLeaseV2:
+        """Идемпотентно публикует BOUND только после записи того же nonce."""
+
+        _require_text(claim_nonce, "claimNonce")
+        _require_text(context_claim_nonce, "contextClaimNonce")
+        if claim_nonce != context_claim_nonce:
+            raise ResumeSessionV2Error(
+                "RESUME_CLAIM_MISMATCH", "контекст хода не доказал claim"
+            )
+        with self._locked(session_id):
+            lease = self._require_current_unlocked(
+                session_id, shell_session_id, root, project
+            )
+            attachment = lease.attachment
+            if attachment is None:
+                raise ResumeSessionV2Error(
+                    "RESUME_ATTACHMENT_CHANGED", "присоединение отсутствует"
+                )
+            if (
+                attachment.state == "BOUND"
+                and attachment.bound_turn_id == turn_id
+                and attachment.claim_nonce == claim_nonce
+            ):
+                return lease
+            if (
+                attachment.state != "CLAIMING"
+                or attachment.bound_turn_id != turn_id
+                or attachment.claim_nonce != claim_nonce
+            ):
+                raise ResumeSessionV2Error(
+                    "RESUME_CLAIM_MISMATCH", "claim аренды изменился"
+                )
+            updated = replace(
+                lease,
+                attachment=replace(attachment, state="BOUND"),
+            )
+            self._write_unlocked(updated)
+            return updated
+
     def bind_resume(
         self,
         *,
@@ -298,30 +462,29 @@ class RootSessionLeaseStoreV2:
         root: RootIdentityV2,
         project: ProjectIdentityV2,
     ) -> RootSessionLeaseV2:
-        _require_text(turn_id, "turnId")
-        with self._locked(session_id):
-            lease = self._require_current_unlocked(
-                session_id, shell_session_id, root, project
-            )
-            if lease.attachment is None:
-                return lease
-            attachment = lease.attachment
-            if attachment.state in {"PREPARED", "PENDING_NEXT_TURN"}:
-                attachment = replace(
-                    attachment,
-                    state="BOUND",
-                    bound_turn_id=turn_id,
-                )
-            elif attachment.state == "ACKNOWLEDGED":
-                return lease
-            elif attachment.bound_turn_id != turn_id:
+        claim = self.begin_resume_claim(
+            session_id=session_id,
+            shell_session_id=shell_session_id,
+            turn_id=turn_id,
+            root=root,
+            project=project,
+        )
+        if claim.claim_nonce is None:
+            lease = self.load(session_id)
+            if lease is None:
                 raise ResumeSessionV2Error(
-                    "RESUME_ATTACHMENT_CHANGED",
-                    "присоединение уже связано с другим ходом",
+                    "RESUME_ATTACHMENT_CHANGED", "аренда отсутствует"
                 )
-            updated = replace(lease, attachment=attachment)
-            self._write_unlocked(updated)
-            return updated
+            return lease
+        return self.finalize_resume_claim(
+            session_id=session_id,
+            shell_session_id=shell_session_id,
+            turn_id=turn_id,
+            root=root,
+            project=project,
+            claim_nonce=claim.claim_nonce,
+            context_claim_nonce=claim.claim_nonce,
+        )
 
     def defer_resume_to_next_turn(
         self,
@@ -360,6 +523,7 @@ class RootSessionLeaseStoreV2:
                     attachment,
                     state="PENDING_NEXT_TURN",
                     bound_turn_id=None,
+                    claim_nonce=None,
                 ),
             )
             self._write_unlocked(updated)
@@ -460,12 +624,28 @@ class RootSessionLeaseStoreV2:
         root: RootIdentityV2,
         project: ProjectIdentityV2,
     ) -> RootSessionLeaseV2:
+        lease = self._require_owner_unlocked(session_id, shell_session_id, root)
+        if (
+            not lease.project.same_stable_identity(project)
+            or not lease.project.same_snapshot(project)
+        ):
+            raise ResumeSessionV2Error(
+                "RESUME_ATTACHMENT_CHANGED",
+                "аренда корневого сеанса изменилась",
+            )
+        return lease
+
+    def _require_owner_unlocked(
+        self,
+        session_id: str,
+        shell_session_id: str,
+        root: RootIdentityV2,
+    ) -> RootSessionLeaseV2:
         lease = self._read_unlocked(session_id)
         if (
             lease is None
             or lease.shell_session_id != shell_session_id
             or lease.root != root
-            or lease.project != project
             or not lease.active
             or not self._root_is_live(root)
         ):
@@ -474,6 +654,25 @@ class RootSessionLeaseStoreV2:
                 "аренда корневого сеанса изменилась",
             )
         return lease
+
+    def _detach_unlocked(
+        self,
+        lease: RootSessionLeaseV2,
+        project: ProjectIdentityV2,
+        reason: str,
+    ) -> ResumeClaimV2:
+        attachment = lease.attachment
+        if attachment is None:
+            return ResumeClaimV2("NO_ROUTE", None, None)
+        detached = replace(
+            attachment,
+            state="DETACHED",
+            bound_turn_id=None,
+            claim_nonce=None,
+            detached_reason=reason,
+        )
+        self._write_unlocked(replace(lease, project=project, attachment=detached))
+        return ResumeClaimV2("DETACHED", None, attachment.candidate.route_id)
 
     def _root_is_live(self, root: RootIdentityV2) -> bool:
         try:
@@ -711,33 +910,41 @@ def _lease_value(lease: RootSessionLeaseV2) -> dict[str, object]:
             "terminalResultUnacknowledged": candidate.terminal_result_unacknowledged,
             "state": lease.attachment.state,
             "boundTurnId": lease.attachment.bound_turn_id,
+            "claimNonce": lease.attachment.claim_nonce,
+            "detachedReason": lease.attachment.detached_reason,
         }
     projection: dict[str, object] = {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "sessionId": lease.session_id,
         "shellSessionId": lease.shell_session_id,
         "generation": lease.generation,
         "root": lease.root.value(),
-        "project": lease.project.value(),
+        "stableProjectIdentity": lease.project.stable_value(),
+        "turnSnapshot": lease.project.snapshot_value(),
         "attachment": attachment,
         "active": lease.active,
     }
     return {
         **projection,
         "leaseFingerprint": domain_fingerprint(
-            "codex-smart/root-session-lease/v2", projection
+            "codex-smart/root-session-lease/v3", projection
         ),
     }
 
 
 def _lease_from_value(value: object) -> RootSessionLeaseV2:
+    if type(value) is not dict:
+        raise ResumeSessionV2Error("RESUME_LEASE_INVALID", "форма аренды неверна")
+    if value.get("schemaVersion") == 2:
+        return _lease_from_v2_value(value)
     if type(value) is not dict or set(value) != {
         "schemaVersion",
         "sessionId",
         "shellSessionId",
         "generation",
         "root",
-        "project",
+        "stableProjectIdentity",
+        "turnSnapshot",
         "attachment",
         "active",
         "leaseFingerprint",
@@ -745,28 +952,46 @@ def _lease_from_value(value: object) -> RootSessionLeaseV2:
         raise ResumeSessionV2Error("RESUME_LEASE_INVALID", "форма аренды неверна")
     projection = dict(value)
     fingerprint = projection.pop("leaseFingerprint")
-    if value["schemaVersion"] != 2 or fingerprint != domain_fingerprint(
-        "codex-smart/root-session-lease/v2", projection
+    if value["schemaVersion"] != 3 or fingerprint != domain_fingerprint(
+        "codex-smart/root-session-lease/v3", projection
     ):
         raise ResumeSessionV2Error("RESUME_LEASE_INVALID", "отпечаток аренды неверен")
     root_value = value["root"]
-    project_value = value["project"]
-    if type(root_value) is not dict or type(project_value) is not dict:
+    stable_value = value["stableProjectIdentity"]
+    snapshot_value = value["turnSnapshot"]
+    if (
+        type(root_value) is not dict
+        or type(stable_value) is not dict
+        or type(snapshot_value) is not dict
+    ):
         raise ResumeSessionV2Error("RESUME_LEASE_INVALID", "личность аренды неверна")
     root = RootIdentityV2(
         pid=root_value.get("pid"),
         process_start_marker=root_value.get("processStartMarker"),
     )
     project = ProjectIdentityV2(
-        repo_root=project_value.get("repoRoot"),
-        base_sha=project_value.get("baseSha"),
-        worktree_fingerprint=project_value.get("worktreeFingerprint"),
-        compatibility_fingerprint=project_value.get("compatibilityFingerprint"),
+        repo_root=stable_value.get("repoRoot"),
+        base_sha=snapshot_value.get("baseSha"),
+        worktree_fingerprint=snapshot_value.get("worktreeFingerprint"),
+        compatibility_fingerprint=stable_value.get("compatibilityFingerprint"),
     )
     attachment_value = value["attachment"]
     attachment = None
     if attachment_value is not None:
-        if type(attachment_value) is not dict:
+        if type(attachment_value) is not dict or set(attachment_value) != {
+            "routeId",
+            "originalShellSessionId",
+            "originalSessionId",
+            "originalTurnId",
+            "routeState",
+            "startRequestId",
+            "nodeId",
+            "terminalResultUnacknowledged",
+            "state",
+            "boundTurnId",
+            "claimNonce",
+            "detachedReason",
+        }:
             raise ResumeSessionV2Error("RESUME_LEASE_INVALID", "присоединение неверно")
         candidate = ResumeCandidateV2(
             route_id=attachment_value.get("routeId"),
@@ -784,6 +1009,8 @@ def _lease_from_value(value: object) -> RootSessionLeaseV2:
             candidate=candidate,
             state=attachment_value.get("state"),
             bound_turn_id=attachment_value.get("boundTurnId"),
+            claim_nonce=attachment_value.get("claimNonce"),
+            detached_reason=attachment_value.get("detachedReason"),
         )
     generation = value["generation"]
     if type(generation) is not int or generation < 1:
@@ -798,6 +1025,109 @@ def _lease_from_value(value: object) -> RootSessionLeaseV2:
         project=project,
         attachment=attachment,
         active=value["active"],
+        schema_version=3,
+    )
+
+
+def _lease_from_v2_value(value: dict[str, object]) -> RootSessionLeaseV2:
+    expected_fields = {
+        "schemaVersion",
+        "sessionId",
+        "shellSessionId",
+        "generation",
+        "root",
+        "project",
+        "attachment",
+        "active",
+        "leaseFingerprint",
+    }
+    if set(value) != expected_fields:
+        raise ResumeSessionV2Error("RESUME_LEASE_INVALID", "форма аренды v2 неверна")
+    projection = dict(value)
+    fingerprint = projection.pop("leaseFingerprint")
+    if fingerprint != domain_fingerprint(
+        "codex-smart/root-session-lease/v2", projection
+    ):
+        raise ResumeSessionV2Error("RESUME_LEASE_INVALID", "отпечаток аренды v2 неверен")
+    root_value = value["root"]
+    project_value = value["project"]
+    if type(root_value) is not dict or type(project_value) is not dict:
+        raise ResumeSessionV2Error("RESUME_LEASE_INVALID", "личность аренды v2 неверна")
+    root = RootIdentityV2(
+        pid=root_value.get("pid"),
+        process_start_marker=root_value.get("processStartMarker"),
+    )
+    project = ProjectIdentityV2(
+        repo_root=project_value.get("repoRoot"),
+        base_sha=project_value.get("baseSha"),
+        worktree_fingerprint=project_value.get("worktreeFingerprint"),
+        compatibility_fingerprint=project_value.get("compatibilityFingerprint"),
+    )
+    attachment_value = value["attachment"]
+    attachment: ResumeAttachmentV2 | None = None
+    if attachment_value is not None:
+        if type(attachment_value) is not dict or set(attachment_value) != {
+            "routeId",
+            "originalShellSessionId",
+            "originalSessionId",
+            "originalTurnId",
+            "routeState",
+            "startRequestId",
+            "nodeId",
+            "terminalResultUnacknowledged",
+            "state",
+            "boundTurnId",
+        }:
+            raise ResumeSessionV2Error("RESUME_LEASE_INVALID", "присоединение v2 неверно")
+        candidate = ResumeCandidateV2(
+            route_id=attachment_value.get("routeId"),
+            original_shell_session_id=attachment_value.get("originalShellSessionId"),
+            original_session_id=attachment_value.get("originalSessionId"),
+            original_turn_id=attachment_value.get("originalTurnId"),
+            route_state=attachment_value.get("routeState"),
+            start_request_id=attachment_value.get("startRequestId"),
+            node_id=attachment_value.get("nodeId"),
+            terminal_result_unacknowledged=attachment_value.get(
+                "terminalResultUnacknowledged"
+            ),
+        )
+        state = attachment_value.get("state")
+        bound_turn_id = attachment_value.get("boundTurnId")
+        claim_nonce = None
+        if state in {"BOUND", "ACKNOWLEDGED"}:
+            claim_nonce = "claim3_" + str(fingerprint)[:32]
+        attachment = ResumeAttachmentV2(
+            candidate=candidate,
+            state=state,
+            bound_turn_id=bound_turn_id,
+            claim_nonce=claim_nonce,
+        )
+    generation = value["generation"]
+    if type(generation) is not int or generation < 1 or type(value["active"]) is not bool:
+        raise ResumeSessionV2Error("RESUME_LEASE_INVALID", "поля аренды v2 неверны")
+    return RootSessionLeaseV2(
+        session_id=value["sessionId"],
+        shell_session_id=value["shellSessionId"],
+        generation=generation,
+        root=root,
+        project=project,
+        attachment=attachment,
+        active=value["active"],
+        schema_version=2,
+    )
+
+
+def _detached_attachment(
+    candidate: ResumeCandidateV2 | None,
+    reason: str,
+) -> ResumeAttachmentV2 | None:
+    if candidate is None:
+        return None
+    return ResumeAttachmentV2(
+        candidate=candidate,
+        state="DETACHED",
+        bound_turn_id=None,
+        detached_reason=reason,
     )
 
 
@@ -815,6 +1145,7 @@ __all__ = [
     "ProjectIdentityV2",
     "ResumeAttachmentV2",
     "ResumeCandidateV2",
+    "ResumeClaimV2",
     "ResumePreparationV2",
     "ResumeSessionV2Error",
     "RootIdentityV2",

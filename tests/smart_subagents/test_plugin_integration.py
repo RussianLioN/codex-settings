@@ -60,6 +60,51 @@ def environment(state_home: Path) -> dict[str, str]:
 
 
 class SessionStartHookTests(unittest.TestCase):
+    def test_git_timeout_is_fail_open_without_stop_reason(self) -> None:
+        module = load_module("session_start_git_timeout", "hooks/session_start.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            state_home = Path(tmp)
+            config = SimpleNamespace(
+                state_home=state_home,
+                shell_session_id="shell-session-1",
+            )
+            binding = SimpleNamespace(
+                database_path=state_home / "smart-subagents.sqlite3",
+                compatibility_fingerprint="a" * 64,
+            )
+            with (
+                mock.patch.object(module, "environment_is_active", return_value=True),
+                mock.patch.object(
+                    module.IntegrationConfigV2,
+                    "from_environ",
+                    return_value=config,
+                ),
+                mock.patch.object(module, "require_current_user_mcp_policy_v2"),
+                mock.patch.object(
+                    module, "pinned_resume_binding_v2", return_value=binding
+                ),
+                mock.patch.object(
+                    module,
+                    "_git_identity",
+                    side_effect=TimeoutError("git exceeded hook deadline"),
+                ),
+            ):
+                response = module.handle(
+                    {
+                        "session_id": "codex-session-1",
+                        "cwd": str(REPO),
+                        "hook_event_name": "SessionStart",
+                        "source": "startup",
+                    },
+                    {
+                        "CODEX_SMART_ROOT_PID": "1234",
+                        "CODEX_SMART_ROOT_START_MARKER": "darwin:1:2",
+                    },
+                )
+
+        self.assertTrue(response["continue"])
+        self.assertNotIn("stopReason", response)
+
     def test_session_start_failures_never_stop_the_root_request(self) -> None:
         module = load_module("session_start_fail_open", "hooks/session_start.py")
         payload = {
@@ -88,7 +133,8 @@ class SessionStartHookTests(unittest.TestCase):
         self.assertNotIn("stopReason", response)
 
         unknown = dict(payload, source="unknown")
-        response = module.handle(unknown, environ)
+        with mock.patch.object(module, "environment_is_active", return_value=True):
+            response = module.handle(unknown, environ)
         self.assertTrue(response["continue"])
         self.assertNotIn("stopReason", response)
 

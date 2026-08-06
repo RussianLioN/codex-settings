@@ -46,8 +46,11 @@ def handle(payload: dict[str, Any], environ: Mapping[str, str]) -> dict[str, Any
     source = payload.get("source")
     if source not in {"startup", "resume", "clear", "compact"}:
         return {
-            "continue": False,
-            "stopReason": "MANAGED_RESUME_UNAVAILABLE: источник SessionStart неизвестен",
+            "continue": True,
+            "systemMessage": (
+                "Источник SessionStart не распознан; основной запрос продолжится "
+                "без умного присоединения."
+            ),
         }
     # Первый запуск после сна или обновления может читать активацию, базу и
     # состояние Git с холодного диска. Короткий срок остальных хуков здесь
@@ -95,10 +98,10 @@ def handle(payload: dict[str, Any], environ: Mapping[str, str]) -> dict[str, Any
         return None
     except Exception:
         return {
-            "continue": False,
-            "stopReason": (
-                "MANAGED_RESUME_UNAVAILABLE: не удалось доказать аренду "
-                "умного сеанса"
+            "continue": True,
+            "systemMessage": (
+                "Не удалось доказать аренду умного сеанса; основной запрос "
+                "продолжится без старого маршрута."
             ),
         }
 
@@ -125,10 +128,10 @@ def _resume_output(status: str, route_id: str | None) -> dict[str, Any] | None:
         }
     if status == "RESUME_OWNER_ACTIVE":
         return {
-            "continue": False,
-            "stopReason": (
-                "RESUME_OWNER_ACTIVE: исходный умный сеанс ещё принадлежит "
-                "живому процессу"
+            "continue": True,
+            "systemMessage": (
+                "RESUME_OWNER_ACTIVE: старый маршрут принадлежит другому "
+                "живому процессу; текущий диалог продолжится как новый умный ход."
             ),
         }
     if status in {
@@ -136,6 +139,8 @@ def _resume_output(status: str, route_id: str | None) -> dict[str, Any] | None:
         "RESUME_COMPATIBILITY_MISMATCH",
         "RESUME_OWNER_UNPROVED",
         "RESUME_ATTACHMENT_CHANGED",
+        "RESUME_SNAPSHOT_MISMATCH",
+        "RESUME_LEASE_INVALID",
     }:
         return {
             "continue": True,

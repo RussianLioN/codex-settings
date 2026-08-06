@@ -237,7 +237,9 @@ def _acknowledge_resume_result_v2(
     record: HookTurnContextV2,
     environ: Mapping[str, str],
 ) -> None:
-    if environ.get("CODEX_SMART_LAUNCH_KIND") != "resume":
+    if not environ.get("CODEX_SMART_ROOT_PID") or not environ.get(
+        "CODEX_SMART_ROOT_START_MARKER"
+    ):
         return
     root = RootIdentityV2(
         pid=int(environ.get("CODEX_SMART_ROOT_PID", "")),
@@ -283,7 +285,9 @@ def _defer_resume_to_next_turn_v2(
     record: HookTurnContextV2,
     environ: Mapping[str, str],
 ) -> None:
-    if environ.get("CODEX_SMART_LAUNCH_KIND") != "resume":
+    if not environ.get("CODEX_SMART_ROOT_PID") or not environ.get(
+        "CODEX_SMART_ROOT_START_MARKER"
+    ):
         return
     root = RootIdentityV2(
         pid=int(environ.get("CODEX_SMART_ROOT_PID", "")),

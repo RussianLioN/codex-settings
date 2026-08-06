@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol
 
@@ -31,6 +32,7 @@ from integration_runtime import (  # noqa: E402
 from integration_runtime_v2 import (  # noqa: E402
     HOOK_TOTAL_BUDGET_SECONDS as HOOK_TOTAL_BUDGET_SECONDS_V2,
     IntegrationConfigV2,
+    IntegrationV2Error,
     TurnContextStoreV2,
     capture_hook_turn_context_v2,
     require_current_user_mcp_policy_v2,
@@ -38,6 +40,8 @@ from integration_runtime_v2 import (  # noqa: E402
     require_mcp_contract_v2,
 )
 from codex_smart_subagents.resume_session_v2 import (  # noqa: E402
+    ProjectIdentityV2,
+    ResumeSessionV2Error,
     RootIdentityV2,
     RootSessionLeaseStoreV2,
     system_process_marker_reader_v2,
@@ -187,7 +191,6 @@ def _handle_v2(
     controller_checker: V2ControllerChecker,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + HOOK_TOTAL_BUDGET_SECONDS_V2
-    resume_launch = environ.get("CODEX_SMART_LAUNCH_KIND") == "resume"
     try:
         config = IntegrationConfigV2.from_environ(environ)
         # Codex запускает MCP лениво и может выполнить UserPromptSubmit раньше
@@ -198,14 +201,6 @@ def _handle_v2(
         mcp_contract_checker(PLUGIN_ROOT)
         controller_checker(config, environ, deadline=deadline)
     except Exception:
-        if resume_launch:
-            return {
-                "continue": False,
-                "stopReason": (
-                    "MANAGED_SMART_RUNTIME_UNAVAILABLE: среда умного "
-                    "маршрута не доказана"
-                ),
-            }
         return {
             "continue": True,
             "systemMessage": (
@@ -219,21 +214,12 @@ def _handle_v2(
             config,
             deadline=deadline,
         )
-        TurnContextStoreV2(config).save(record)
         resume_instruction = _bind_resume_instruction_v2(
             config,
             record,
             environ,
         )
     except Exception:
-        if resume_launch:
-            return {
-                "continue": False,
-                "stopReason": (
-                    "MANAGED_RESUME_UNAVAILABLE: присоединение умного "
-                    "маршрута не доказано"
-                ),
-            }
         return {
             "continue": True,
             "systemMessage": (
@@ -262,35 +248,81 @@ def _bind_resume_instruction_v2(
     record: Any,
     environ: Mapping[str, str],
 ) -> str | None:
-    if environ.get("CODEX_SMART_LAUNCH_KIND") != "resume":
+    store = RootSessionLeaseStoreV2(
+        config.state_home,
+        process_marker_reader=system_process_marker_reader_v2,
+    )
+    turn_store = TurnContextStoreV2(config)
+    current = store.load(record.session_id)
+    if current is None:
+        turn_store.save(record)
         return None
     root = RootIdentityV2(
         pid=int(environ.get("CODEX_SMART_ROOT_PID", "")),
         process_start_marker=environ.get("CODEX_SMART_ROOT_START_MARKER", ""),
     )
-    store = RootSessionLeaseStoreV2(
-        config.state_home,
-        process_marker_reader=system_process_marker_reader_v2,
+    project = ProjectIdentityV2(
+        repo_root=record.repo_root,
+        base_sha=record.base_sha,
+        worktree_fingerprint=record.worktree_fingerprint,
+        compatibility_fingerprint=current.project.compatibility_fingerprint,
     )
-    current = store.load(record.session_id)
-    if current is None:
-        raise RuntimeError("аренда возобновления отсутствует")
-    project = current.project
-    if (
-        project.repo_root != record.repo_root
-        or project.base_sha != record.base_sha
-        or project.worktree_fingerprint != record.worktree_fingerprint
-    ):
-        raise RuntimeError("контекст аренды возобновления изменился")
-    lease = store.bind_resume(
+    attachment = current.attachment
+    if attachment is not None and attachment.state == "CLAIMING":
+        previous_record = None
+        try:
+            previous_record = turn_store.load()
+        except IntegrationV2Error as exc:
+            if "LOCK_TIMEOUT" in str(exc):
+                raise
+        except (FileNotFoundError, OSError, ValueError):
+            pass
+        if (
+            previous_record is not None
+            and previous_record.session_id == record.session_id
+            and previous_record.turn_id == attachment.bound_turn_id
+            and previous_record.resume_claim_nonce == attachment.claim_nonce
+        ):
+            store.finalize_resume_claim(
+                session_id=record.session_id,
+                shell_session_id=record.shell_session_id,
+                turn_id=previous_record.turn_id,
+                root=root,
+                project=current.project,
+                claim_nonce=attachment.claim_nonce,
+                context_claim_nonce=previous_record.resume_claim_nonce,
+            )
+    try:
+        claim = store.begin_resume_claim(
+            session_id=record.session_id,
+            shell_session_id=record.shell_session_id,
+            turn_id=record.turn_id,
+            root=root,
+            project=project,
+        )
+    except ResumeSessionV2Error as exc:
+        # Чужой живой владелец или недоказанная старая аренда не должны
+        # блокировать свежий умный ход текущего корня.
+        if exc.code != "RESUME_ATTACHMENT_CHANGED":
+            raise
+        turn_store.save(record)
+        return None
+    if claim.claim_nonce is None:
+        turn_store.save(record)
+        return None
+    claimed_record = replace(record, resume_claim_nonce=claim.claim_nonce)
+    turn_store.save(claimed_record)
+    lease = store.finalize_resume_claim(
         session_id=record.session_id,
         shell_session_id=record.shell_session_id,
         turn_id=record.turn_id,
         root=root,
         project=project,
+        claim_nonce=claim.claim_nonce,
+        context_claim_nonce=claimed_record.resume_claim_nonce,
     )
     attachment = lease.attachment
-    if attachment is None or attachment.state == "ACKNOWLEDGED":
+    if attachment is None or attachment.state in {"ACKNOWLEDGED", "DETACHED"}:
         return None
     candidate = attachment.candidate
     if candidate.start_request_id is None:

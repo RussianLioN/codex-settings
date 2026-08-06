@@ -95,9 +95,11 @@ _RECORD_FIELDS = {
     "baseSha",
     "worktreeFingerprint",
     "continuationCount",
+    "resumeClaimNonce",
     "recordFingerprint",
 }
-_LEGACY_RECORD_FIELDS = _RECORD_FIELDS - {"continuationCount"}
+_PRE_CLAIM_RECORD_FIELDS = _RECORD_FIELDS - {"resumeClaimNonce"}
+_LEGACY_RECORD_FIELDS = _PRE_CLAIM_RECORD_FIELDS - {"continuationCount"}
 _DELEGATE_TERMINAL_ROUTE_STATES = frozenset(
     {
         "SUCCEEDED",
@@ -206,6 +208,7 @@ class HookTurnContextV2:
     base_sha: str
     worktree_fingerprint: str
     continuation_count: int = 0
+    resume_claim_nonce: str | None = None
 
     def __post_init__(self) -> None:
         if SESSION_PATTERN.fullmatch(self.shell_session_id) is None:
@@ -233,6 +236,9 @@ class HookTurnContextV2:
             or not 0 <= self.continuation_count <= 2
         ):
             raise IntegrationV2Error("continuationCount неверен")
+        if self.resume_claim_nonce is not None:
+            if re.fullmatch(r"claim3_[0-9a-f]{32}", self.resume_claim_nonce) is None:
+                raise IntegrationV2Error("resumeClaimNonce неверен")
 
     def value_without_fingerprint(self) -> dict[str, Any]:
         return {
@@ -245,6 +251,7 @@ class HookTurnContextV2:
             "baseSha": self.base_sha,
             "worktreeFingerprint": self.worktree_fingerprint,
             "continuationCount": self.continuation_count,
+            "resumeClaimNonce": self.resume_claim_nonce,
         }
 
     def value(self) -> dict[str, Any]:
@@ -264,6 +271,7 @@ class HookTurnContextV2:
         fields = frozenset(value)
         if fields not in {
             frozenset(_RECORD_FIELDS),
+            frozenset(_PRE_CLAIM_RECORD_FIELDS),
             frozenset(_LEGACY_RECORD_FIELDS),
         }:
             raise IntegrationV2Error("запись контекста хода имеет неверную форму")
@@ -278,12 +286,15 @@ class HookTurnContextV2:
             base_sha=value["baseSha"],
             worktree_fingerprint=value["worktreeFingerprint"],
             continuation_count=value.get("continuationCount", 0),
+            resume_claim_nonce=value.get("resumeClaimNonce"),
         )
-        if "continuationCount" in value:
+        if "resumeClaimNonce" in value:
             expected_fingerprint = record.value()["recordFingerprint"]
         else:
             projection = record.value_without_fingerprint()
-            projection.pop("continuationCount")
+            projection.pop("resumeClaimNonce")
+            if "continuationCount" not in value:
+                projection.pop("continuationCount")
             expected_fingerprint = domain_fingerprint(
                 "codex-smart/hook-turn-context/v2",
                 projection,
