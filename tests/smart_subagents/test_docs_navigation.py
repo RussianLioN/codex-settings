@@ -315,7 +315,7 @@ class DocsNavigationValidatorTests(unittest.TestCase):
             "smart_wait",
             "ровно один новый smart_plan",
         ):
-                self.assertIn(value, resume_diagrams[0])
+            self.assertIn(value, resume_diagrams[0])
 
     def test_guides_explain_fail_open_readiness_and_catalog_recovery(self) -> None:
         documents = {
