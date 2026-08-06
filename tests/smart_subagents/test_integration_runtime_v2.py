@@ -2585,6 +2585,38 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         )
         lease_store.acknowledge_result.assert_called_once()
 
+    def test_v2_stop_expired_deadline_skips_resume_lease_operations(self) -> None:
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        environment["CODEX_SMART_ROOT_PID"] = str(os.getpid())
+        environment["CODEX_SMART_ROOT_START_MARKER"] = "test-root-start"
+        path = PLUGIN / "hooks" / "stop.py"
+        spec = importlib.util.spec_from_file_location(
+            "smart_stop_expired_resume_deadline_test",
+            path,
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        expired = time.monotonic() - 1.0
+
+        with mock.patch.object(module, "RootSessionLeaseStoreV2") as lease_store:
+            module._acknowledge_resume_result_v2(
+                self.config,
+                self.record,
+                environment,
+                deadline=expired,
+            )
+            module._defer_resume_to_next_turn_v2(
+                self.config,
+                self.record,
+                environment,
+                deadline=expired,
+            )
+
+        lease_store.assert_not_called()
+
     def test_v2_stop_shares_one_absolute_deadline_with_plan_check(self) -> None:
         TurnContextStoreV2(self.config).save(self.record)
         environment, publisher = self._proven_environment()
