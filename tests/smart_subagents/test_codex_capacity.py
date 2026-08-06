@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
+import multiprocessing
 import os
 import sqlite3
 import stat
@@ -28,6 +30,24 @@ def load_capacity() -> ModuleType:
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def process_acquire_worker(home: str, index: int, start_event, queue) -> None:
+    capacity = load_capacity()
+    store = capacity.CapacityStore(home=Path(home), capacity=20)
+    start_event.wait(10)
+    started = time.monotonic()
+    result = store.acquire_or_queue(session_id=f"proc-{index}", turn_id="t1", task_name=f"task-{index}")
+    elapsed = time.monotonic() - started
+    reason = str(result.get("reason", ""))
+    queue.put(
+        {
+            "elapsed": elapsed,
+            "state": result.get("state"),
+            "reason": reason,
+            "locked_or_busy": "locked" in reason.lower() or "busy" in reason.lower(),
+        }
+    )
 
 
 class CodexCapacityTests(unittest.TestCase):
@@ -69,6 +89,30 @@ class CodexCapacityTests(unittest.TestCase):
         payload = json.loads(completed.stdout)
         self.assertIsInstance(payload, dict)
         return payload
+
+    def write_observer_snapshot(self, **overrides: object) -> Path:
+        snapshot = {
+            "total_ram_bytes": 32 * 1024 * 1024 * 1024,
+            "available_memory_bytes": 16 * 1024 * 1024 * 1024,
+            "memory_pressure": "normal",
+            "swapouts_total_bytes": 0,
+            "cpu_idle_percent": 55.0,
+            "user_process_limit": 4096,
+            "user_process_count": 300,
+            "root_fd_soft_limit": 8192,
+            "root_fd_used": 900,
+            "system_fd_max": 65536,
+            "system_fd_used": 6000,
+            "disk_free_bytes": 250 * 1024 * 1024 * 1024,
+            "disk_total_bytes": 1000 * 1024 * 1024 * 1024,
+            "heavy_lanes_in_use": 0,
+            "active_slots": 0,
+            "codex_root_count": 0,
+        }
+        snapshot.update(overrides)
+        path = self.root / "observer-snapshot.json"
+        path.write_text(json.dumps(snapshot), encoding="utf-8")
+        return path
 
     def request(self, index: int, *, session: str = "s1", turn: str = "t1") -> dict[str, str]:
         return {"session_id": session, "turn_id": turn, "task_name": f"task-{index}"}
@@ -475,6 +519,32 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertLessEqual(durations[-1], 0.5)
         self.assertLessEqual(store.snapshot()["active_count"], 20)
 
+    def test_process_clients_share_start_and_report_lock_busy_and_p99(self) -> None:
+        client_count = 12
+        context = multiprocessing.get_context("spawn")
+        start_event = context.Event()
+        queue = context.Queue()
+        processes = [
+            context.Process(target=process_acquire_worker, args=(str(self.home), index, start_event, queue))
+            for index in range(client_count)
+        ]
+        for process in processes:
+            process.start()
+        start_event.set()
+        records = [queue.get(timeout=20) for _ in range(client_count)]
+        for process in processes:
+            process.join(timeout=10)
+            self.assertEqual(0, process.exitcode)
+
+        durations = sorted(float(record["elapsed"]) for record in records)
+        p99 = durations[min(len(durations) - 1, math.ceil(len(durations) * 0.99) - 1)]
+        locked_busy = sum(1 for record in records if record["locked_or_busy"])
+
+        self.assertEqual(0, locked_busy, records)
+        self.assertTrue(all(record["state"] in {"LEASED", "CAPACITY_QUEUED"} for record in records), records)
+        self.assertLess(p99, 0.75, records)
+        self.assertLessEqual(self.manager(limit=20).snapshot()["active_count"], 20)
+
     def test_recreated_database_same_path_is_migrated_again(self) -> None:
         store = self.manager(limit=1)
         first = store.acquire_or_queue(**self.request(1))
@@ -526,6 +596,21 @@ class CodexCapacityTests(unittest.TestCase):
         )
         self.assertEqual("CAPACITY_QUEUED", global_acquire["state"])
         self.assertEqual("CAPACITY_QUEUED", local_acquire["state"])
+
+    def test_prepare_wave_clamps_yellow_status_to_two_slots(self) -> None:
+        snapshot = self.write_observer_snapshot(cpu_idle_percent=10.0)
+
+        result = self.read_cli_json(
+            "prepare-wave",
+            "--wave-size",
+            "8",
+            "--observer-snapshot-json",
+            str(snapshot),
+        )
+
+        self.assertEqual("YELLOW", result["observer_status"])
+        self.assertEqual(2, result["allowed_wave_size"])
+        self.assertEqual("DEGRADED", result["decision"])
 
     def test_cancel_turn_session_reconcile_and_wait_exit_codes(self) -> None:
         store = self.manager(limit=0)
@@ -676,6 +761,43 @@ class CodexCapacityTests(unittest.TestCase):
         combined = self.db_path.read_text(encoding="utf-8", errors="ignore")
         combined += (self.state_dir / "events.jsonl").read_text(encoding="utf-8", errors="ignore")
         self.assertNotIn(phrase, combined)
+
+    def test_unbound_provisional_lease_expires_before_next_acquire(self) -> None:
+        store = self.capacity.CapacityStore(
+            home=self.home,
+            capacity=1,
+            provisional_ttl_seconds=0.01,
+        )
+        first = store.acquire_or_queue(**self.request(1))
+        self.assertEqual("LEASED", first["state"])
+        time.sleep(0.02)
+
+        second = store.acquire_or_queue(**self.request(2))
+
+        self.assertEqual("LEASED", second["state"])
+        snapshot = store.snapshot()
+        self.assertEqual(1, snapshot["active_count"])
+        self.assertEqual("RELEASED", snapshot["leases"][0]["state"])
+        self.assertEqual("PROVISIONAL", snapshot["leases"][1]["state"])
+
+    def test_same_request_reacquires_after_unbound_provisional_ttl(self) -> None:
+        store = self.capacity.CapacityStore(
+            home=self.home,
+            capacity=1,
+            provisional_ttl_seconds=0.01,
+        )
+        first = store.acquire_or_queue(**self.request(1))
+        time.sleep(0.02)
+
+        repeated = store.acquire_or_queue(**self.request(1))
+
+        self.assertEqual("LEASED", repeated["state"])
+        self.assertEqual(first["request_id"], repeated["request_id"])
+        self.assertNotEqual(first["lease_id"], repeated["lease_id"])
+        self.assertGreater(int(repeated["fencing_epoch"]), int(first["fencing_epoch"]))
+        snapshot = store.snapshot()
+        self.assertEqual(1, snapshot["active_count"])
+        self.assertEqual(["RELEASED", "PROVISIONAL"], [lease["state"] for lease in snapshot["leases"]])
 
 
 if __name__ == "__main__":

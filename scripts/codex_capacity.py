@@ -25,6 +25,7 @@ MAX_OPERATION_SECONDS = 0.45
 SQLITE_BUSY_TIMEOUT_MS = 20
 DEFAULT_RETRY_DELAY_MS = 250
 CLEANUP_TTL_SECONDS = 30
+PROVISIONAL_TTL_SECONDS = 30
 MAX_PENDING_PER_SESSION = 20
 MAX_PENDING_PER_USER = 512
 ACTIVE_LEASE_STATES = {"PROVISIONAL", "ACTIVE", "SUSPECT", "RECOVERING", "CLEANUP_REQUIRED"}
@@ -49,6 +50,7 @@ class CapacityStore:
         state_dir: Optional[Path] = None,
         capacity: int = DEFAULT_CAPACITY,
         cleanup_ttl_seconds: float = CLEANUP_TTL_SECONDS,
+        provisional_ttl_seconds: float = PROVISIONAL_TTL_SECONDS,
     ) -> None:
         self.home = Path(home or Path.home()).expanduser()
         self.state_dir = Path(state_dir or self.home / ".local" / "state" / "codex-capacity-v1").expanduser()
@@ -57,21 +59,29 @@ class CapacityStore:
         self.log_path = self.state_dir / "events.jsonl"
         self.capacity = int(capacity)
         self.cleanup_ttl_seconds = max(0.0, float(cleanup_ttl_seconds))
+        self.provisional_ttl_seconds = max(0.0, float(provisional_ttl_seconds))
         self.invalid_reason = None
         if self.capacity < 0 or self.capacity > MAX_CAPACITY:
             self.invalid_reason = f"invalid_capacity: capacity must be between 0 and {MAX_CAPACITY}"
 
-    def acquire_or_queue(self, *, session_id: str, turn_id: str, task_name: str) -> dict[str, Any]:
+    def acquire_or_queue(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        task_name: str,
+        wave_limit: Optional[int] = None,
+    ) -> dict[str, Any]:
         request_id = request_hash(session_id, turn_id, task_name)
         now = current_time()
 
         def work(conn: sqlite3.Connection) -> dict[str, Any]:
-            released = self._expire_cleanup_leases(conn, now)
+            released = self._expire_stale_leases(conn, now)
             if released:
                 self._promote_pending(conn, now, limit=released)
             existing = self._request_row(conn, request_id)
             if existing:
-                return self._existing_request_result(conn, existing, now)
+                return self._existing_request_result(conn, existing, now, wave_limit=wave_limit)
             pending_session = self._count(
                 conn,
                 "select count(*) from tickets where session_id = ? and state = 'PENDING'",
@@ -90,7 +100,11 @@ class CapacityStore:
                 """,
                 (request_id, session_id, turn_id, now, now),
             )
-            if self._reserved_count(conn) < self.capacity and self._waiting_ticket_count(conn) == 0:
+            if (
+                self._reserved_count(conn) < self.capacity
+                and self._waiting_ticket_count(conn) == 0
+                and self._wave_reserved_count(conn, session_id=session_id, turn_id=turn_id) < self._normalized_wave_limit(wave_limit)
+            ):
                 lease_id, epoch = self._create_lease(conn, request_id, session_id, turn_id, now, ticket_id=None)
                 self._log(conn, now, "acquire", request_id=request_id, lease_id=lease_id)
                 return lease_result(request_id, lease_id, epoch, "PROVISIONAL")
@@ -105,6 +119,9 @@ class CapacityStore:
         now = current_time()
 
         def work(conn: sqlite3.Connection) -> dict[str, Any]:
+            released = self._expire_stale_leases(conn, now)
+            if released:
+                self._promote_pending(conn, now, limit=released)
             row = self._lease_by_id(conn, lease_id)
             if row is None:
                 return {"state": "STALE", "reason": "lease_not_found", "lease_id": lease_id}
@@ -132,6 +149,9 @@ class CapacityStore:
         now = current_time()
 
         def work(conn: sqlite3.Connection) -> dict[str, Any]:
+            released = self._expire_stale_leases(conn, now)
+            if released:
+                self._promote_pending(conn, now, limit=released)
             existing = conn.execute(
                 """
                 select * from leases
@@ -171,6 +191,9 @@ class CapacityStore:
         now = current_time()
 
         def work(conn: sqlite3.Connection) -> dict[str, Any]:
+            released = self._expire_stale_leases(conn, now)
+            if released:
+                self._promote_pending(conn, now, limit=released)
             row = conn.execute(
                 """
                 select * from leases
@@ -204,6 +227,9 @@ class CapacityStore:
         now = current_time()
 
         def work(conn: sqlite3.Connection) -> dict[str, Any]:
+            released = self._expire_stale_leases(conn, now)
+            if released:
+                self._promote_pending(conn, now, limit=released)
             row = self._lease_by_id(conn, lease_id)
             if row is None:
                 return {"state": "STALE", "reason": "lease_not_found", "lease_id": lease_id}
@@ -229,6 +255,9 @@ class CapacityStore:
         now = current_time()
 
         def work(conn: sqlite3.Connection) -> dict[str, Any]:
+            released = self._expire_stale_leases(conn, now)
+            if released:
+                self._promote_pending(conn, now, limit=released)
             row = conn.execute(
                 """
                 select * from leases
@@ -380,7 +409,7 @@ class CapacityStore:
             else:
                 tickets = 0
                 leases = 0
-            ttl_released = self._expire_cleanup_leases(conn, now)
+            ttl_released = self._expire_stale_leases(conn, now)
             self._log(
                 conn,
                 now,
@@ -726,6 +755,8 @@ class CapacityStore:
         conn: sqlite3.Connection,
         row: sqlite3.Row,
         now: float,
+        *,
+        wave_limit: Optional[int],
     ) -> dict[str, Any]:
         if row["lease_id"]:
             lease = self._lease_by_id(conn, row["lease_id"])
@@ -764,7 +795,24 @@ class CapacityStore:
                 return lease_result(row["request_id"], lease_id, epoch, "PROVISIONAL")
             if ticket:
                 return self._ticket_result_from_row(conn, ticket)
-        return {"state": "ERROR", "reason": "request_without_ticket_or_lease", "request_id": row["request_id"]}
+        if (
+            self._reserved_count(conn) < self.capacity
+            and self._waiting_ticket_count(conn) == 0
+            and self._wave_reserved_count(conn, session_id=row["session_id"], turn_id=row["turn_id"]) < self._normalized_wave_limit(wave_limit)
+        ):
+            lease_id, epoch = self._create_lease(
+                conn,
+                row["request_id"],
+                row["session_id"],
+                row["turn_id"],
+                now,
+                ticket_id=None,
+            )
+            self._log(conn, now, "reacquire", request_id=row["request_id"], lease_id=lease_id)
+            return lease_result(row["request_id"], lease_id, epoch, "PROVISIONAL")
+        ticket_id = self._create_ticket(conn, row["request_id"], row["session_id"], row["turn_id"], now, "PENDING")
+        self._log(conn, now, "requeue-released", request_id=row["request_id"], ticket_id=ticket_id)
+        return self._ticket_result_from_row(conn, self._ticket_by_id(conn, ticket_id))
 
     def _promote_pending(self, conn: sqlite3.Connection, now: float, *, limit: Optional[int] = None) -> None:
         available = max(0, self.capacity - self._reserved_count(conn))
@@ -876,6 +924,30 @@ class CapacityStore:
             """,
         )
 
+    def _wave_reserved_count(self, conn: sqlite3.Connection, *, session_id: str, turn_id: str) -> int:
+        leases = self._count(
+            conn,
+            f"""
+            select count(*) from leases
+            where session_id = ? and turn_id = ? and state in ({placeholders(ACTIVE_LEASE_STATES)})
+            """,
+            (session_id, turn_id, *sorted(ACTIVE_LEASE_STATES)),
+        )
+        ready = self._count(
+            conn,
+            """
+            select count(*) from tickets
+            where session_id = ? and turn_id = ? and state = 'READY' and consumed_at is null
+            """,
+            (session_id, turn_id),
+        )
+        return leases + ready
+
+    def _normalized_wave_limit(self, wave_limit: Optional[int]) -> int:
+        if wave_limit is None:
+            return MAX_CAPACITY
+        return max(0, min(MAX_CAPACITY, int(wave_limit)))
+
     def _active_lease_count(self, conn: sqlite3.Connection) -> int:
         return self._count(
             conn,
@@ -966,6 +1038,20 @@ class CapacityStore:
             (now, now, now),
         ).rowcount
 
+    def _expire_unbound_provisional_leases(self, conn: sqlite3.Connection, now: float) -> int:
+        cutoff = now - self.provisional_ttl_seconds
+        return conn.execute(
+            """
+            update leases
+            set state = 'RELEASED', released_at = ?, updated_at = ?
+            where state = 'PROVISIONAL' and agent_id is null and created_at <= ?
+            """,
+            (now, now, cutoff),
+        ).rowcount
+
+    def _expire_stale_leases(self, conn: sqlite3.Connection, now: float) -> int:
+        return self._expire_cleanup_leases(conn, now) + self._expire_unbound_provisional_leases(conn, now)
+
     def _lease_result_from_row(
         self,
         row: Optional[sqlite3.Row],
@@ -1046,6 +1132,67 @@ def print_json(payload: dict[str, Any]) -> None:
     print(json.dumps(payload, sort_keys=True, separators=(",", ":")))
 
 
+def load_json_object(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if not isinstance(payload, dict):
+        raise CapacityError("snapshot_json_must_be_object")
+    return payload
+
+
+def prepare_wave(
+    store: CapacityStore,
+    *,
+    requested_wave_size: int,
+    observer_snapshot_json: Optional[Path] = None,
+    observer_state_dir: Optional[Path] = None,
+    workload_class: str = "normal",
+) -> dict[str, Any]:
+    if requested_wave_size < 0 or requested_wave_size > MAX_CAPACITY:
+        return {"state": "ERROR", "reason": f"invalid_wave_size: must be in 0..{MAX_CAPACITY}"}
+
+    from codex_capacity_observer import observe  # Imported lazily to keep the hot queue path small.
+
+    snapshot_result = store.snapshot()
+    if snapshot_result.get("state") == "ERROR":
+        return snapshot_result
+    managed_active = int(snapshot_result.get("active_count") or 0)
+    managed_reserved = int(snapshot_result.get("reserved_count") or managed_active)
+    managed_slots = max(managed_active, managed_reserved)
+    snapshot = load_json_object(observer_snapshot_json) if observer_snapshot_json else None
+    if snapshot is not None:
+        snapshot["active_slots"] = managed_slots
+    observation = observe(
+        snapshot=snapshot,
+        state_dir=observer_state_dir or store.state_dir,
+        workload_class=workload_class,
+        active_slots=managed_slots,
+    )
+    measurements = observation.get("measurements") if isinstance(observation.get("measurements"), dict) else {}
+    external_roots = max(0, int(float(measurements.get("external_codex_roots") or 0)))
+    admission_capacity = int(observation.get("admission_capacity") or 0)
+    mode = str(observation.get("capacity_mode") or "")
+    max_wave_size = min(int(observation.get("max_wave_size") or 0), DEFAULT_CAPACITY)
+    available_capacity = max(0, min(admission_capacity, DEFAULT_CAPACITY) - external_roots)
+    allowed = max(0, min(requested_wave_size, max_wave_size, available_capacity))
+    status = str(observation.get("status") or "RED")
+    decision = "ALLOW" if allowed == requested_wave_size and status == "GREEN" else "DEGRADED" if allowed > 0 else "BLOCK"
+    return {
+        "state": "OK",
+        "decision": decision,
+        "requested_wave_size": requested_wave_size,
+        "allowed_wave_size": allowed,
+        "observer_status": status,
+        "observer_reasons": observation.get("reasons") or [],
+        "capacity_mode": mode,
+        "admission_capacity": admission_capacity,
+        "max_wave_size": max_wave_size,
+        "external_codex_roots": external_roots,
+        "managed_active_count": managed_active,
+        "managed_reserved_count": managed_reserved,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state-dir", type=Path)
@@ -1109,6 +1256,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     snapshot = sub.add_parser("snapshot")
     add_capacity_argument(snapshot)
+
+    prepare = sub.add_parser("prepare-wave")
+    prepare.add_argument("--wave-size", "--requested-size", required=True, type=int)
+    prepare.add_argument("--observer-snapshot-json", type=Path)
+    prepare.add_argument("--observer-state-dir", type=Path)
+    prepare.add_argument("--workload-class", default="normal")
+    add_capacity_argument(prepare)
     return parser
 
 
@@ -1188,6 +1342,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 1
         if args.command == "snapshot":
             result = store.snapshot()
+            print_json(result)
+            return exit_for_result(result)
+        if args.command == "prepare-wave":
+            result = prepare_wave(
+                store,
+                requested_wave_size=args.wave_size,
+                observer_snapshot_json=args.observer_snapshot_json,
+                observer_state_dir=args.observer_state_dir,
+                workload_class=args.workload_class,
+            )
             print_json(result)
             return exit_for_result(result)
     except CapacityError as exc:

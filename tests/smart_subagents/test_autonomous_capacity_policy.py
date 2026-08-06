@@ -25,6 +25,7 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
         self.codex_home = self.root / "codex-home"
         self.home.mkdir()
         self.codex_home.mkdir()
+        self.observer_snapshot_path = self.write_observer_snapshot()
         self.env = os.environ.copy()
         self.env.update(
             {
@@ -32,6 +33,7 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
                 "CODEX_HOME": str(self.codex_home),
                 "PYTHONPATH": str(ROOT / "scripts"),
                 "PYTHONDONTWRITEBYTECODE": "1",
+                "CODEX_CAPACITY_OBSERVER_SNAPSHOT": str(self.observer_snapshot_path),
             }
         )
 
@@ -108,6 +110,30 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
                 combined += path.read_text(encoding="utf-8", errors="ignore")
         return combined
 
+    def write_observer_snapshot(self, **overrides: object) -> Path:
+        snapshot = {
+            "total_ram_bytes": 32 * 1024 * 1024 * 1024,
+            "available_memory_bytes": 16 * 1024 * 1024 * 1024,
+            "memory_pressure": "normal",
+            "swapouts_total_bytes": 0,
+            "cpu_idle_percent": 55.0,
+            "user_process_limit": 4096,
+            "user_process_count": 300,
+            "root_fd_soft_limit": 8192,
+            "root_fd_used": 900,
+            "system_fd_max": 65536,
+            "system_fd_used": 6000,
+            "disk_free_bytes": 250 * 1024 * 1024 * 1024,
+            "disk_total_bytes": 1000 * 1024 * 1024 * 1024,
+            "heavy_lanes_in_use": 0,
+            "active_slots": 0,
+            "codex_root_count": 0,
+        }
+        snapshot.update(overrides)
+        path = getattr(self, "observer_snapshot_path", self.root / "observer-snapshot.json")
+        path.write_text(json.dumps(snapshot), encoding="utf-8")
+        return path
+
     def test_spawn_pretool_leases_and_aliases_are_recognized(self) -> None:
         first = self.run_policy("PreToolUse", self.spawn_payload("first", tool_name="spawn_agent"))
         second = self.run_policy("PreToolUse", self.spawn_payload("second", tool_name="Agent"))
@@ -131,6 +157,67 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
         self.assertEqual("CAPACITY_QUEUED", denial["code"])
         self.assertGreaterEqual(denial["retry_delay_ms"], 1)
         self.assertIn("wait", denial["wait_command"])
+
+    def test_observer_red_blocks_new_spawn_before_lease(self) -> None:
+        snapshot = self.write_observer_snapshot(memory_pressure="critical")
+        env = dict(self.env, CODEX_CAPACITY_OBSERVER_SNAPSHOT=str(snapshot))
+
+        blocked = self.run_policy("PreToolUse", self.spawn_payload("red"), env=env)
+
+        self.assertEqual(2, blocked.returncode)
+        denial = json.loads(blocked.stderr)
+        self.assertEqual("CAPACITY_OBSERVER_RED", denial["code"])
+        self.assertEqual("RED", denial["status"])
+        self.assertEqual(0, self.capacity_cli("snapshot")["active_count"])
+        audit = [json.loads(line) for line in self.audit_text().splitlines()]
+        self.assertEqual("RED", audit[-1]["details"]["capacity_observer"]["status"])
+
+    def test_external_codex_roots_input_reduces_managed_capacity(self) -> None:
+        snapshot = self.write_observer_snapshot(codex_root_count=6, external_codex_roots=6)
+        env = dict(self.env, CODEX_CAPACITY_OBSERVER_SNAPSHOT=str(snapshot))
+
+        blocked = self.run_policy("PreToolUse", self.spawn_payload("external-roots"), env=env)
+
+        self.assertEqual(2, blocked.returncode)
+        self.assertIn("CAPACITY_QUEUED", blocked.stderr)
+        self.assertEqual(0, self.capacity_cli("snapshot")["active_count"])
+
+    def test_codex_root_count_without_external_roots_does_not_reduce_capacity(self) -> None:
+        snapshot = self.write_observer_snapshot(codex_root_count=6)
+        env = dict(self.env, CODEX_CAPACITY_OBSERVER_SNAPSHOT=str(snapshot))
+
+        allowed = self.run_policy("PreToolUse", self.spawn_payload("managed-root-count"), env=env)
+
+        self.assertEqual(0, allowed.returncode, allowed.stderr)
+        self.assertEqual(1, self.capacity_cli("snapshot")["active_count"])
+
+    def test_yellow_limits_new_wave_to_two_slots(self) -> None:
+        snapshot = self.write_observer_snapshot(cpu_idle_percent=10.0)
+        env = dict(self.env, CODEX_CAPACITY_OBSERVER_SNAPSHOT=str(snapshot))
+
+        first = self.run_policy("PreToolUse", self.spawn_payload("yellow-1"), env=env)
+        second = self.run_policy("PreToolUse", self.spawn_payload("yellow-2"), env=env)
+        third = self.run_policy("PreToolUse", self.spawn_payload("yellow-3"), env=env)
+
+        self.assertEqual(0, first.returncode, first.stderr)
+        self.assertEqual(0, second.returncode, second.stderr)
+        self.assertEqual(2, third.returncode)
+        self.assertEqual("CAPACITY_QUEUED", json.loads(third.stderr)["code"])
+        self.assertEqual(2, self.capacity_cli("snapshot")["active_count"])
+
+    def test_reserved_slots_are_passed_to_observer(self) -> None:
+        first = self.run_policy("PreToolUse", self.spawn_payload("reserved-1"))
+        second = self.run_policy("PreToolUse", self.spawn_payload("reserved-2"))
+
+        self.assertEqual(0, first.returncode, first.stderr)
+        self.assertEqual(0, second.returncode, second.stderr)
+        audit = [json.loads(line) for line in self.audit_text().splitlines()]
+        observed_slots = [
+            record["details"]["capacity_observer"]["measurements"]["active_slots"]
+            for record in audit
+            if record["event"] == "PreToolUse" and record["details"].get("request_id")
+        ]
+        self.assertEqual([0.0, 1.0], observed_slots)
 
     def test_failed_spawn_releases_provisional_but_success_does_not(self) -> None:
         payload = self.spawn_payload("will-fail")
@@ -185,6 +272,8 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
         self.assertNotIn(secret, completed.stdout + completed.stderr)
         self.assertNotIn(secret, self.audit_text())
         self.assertNotIn(secret, self.database_text())
+        self.assertNotIn("tool_input", self.audit_text())
+        self.assertNotIn("message", self.audit_text())
 
     def test_lifecycle_identity_fail_open_but_pretool_fails_closed(self) -> None:
         self.assertEqual(0, self.run_policy("SubagentStart", {"session_id": "s"}).returncode)
@@ -196,16 +285,20 @@ class AutonomousCapacityPolicyTests(unittest.TestCase):
         self.assertIn("session_id", missing.stderr)
 
     def test_usr_bin_python_black_box_hook_latency_uses_internal_hook_metric(self) -> None:
+        env = dict(
+            self.env,
+            CODEX_CAPACITY_OBSERVER_SNAPSHOT=str(self.write_observer_snapshot()),
+        )
         warmup_payload = self.spawn_payload("warmup")
         warmup_payload["session_id"] = "latency-warmup"
-        warmup, _ = self.run_policy_with_python(PYTHON_39, "PreToolUse", warmup_payload)
+        warmup, _ = self.run_policy_with_python(PYTHON_39, "PreToolUse", warmup_payload, env=env)
         self.assertEqual(0, warmup.returncode, warmup.stderr)
 
         def run_one(index: int) -> float:
             payload = self.spawn_payload(f"latency-{index}")
             payload["session_id"] = f"latency-{index}"
             payload["turn_id"] = f"turn-{index}"
-            completed, elapsed_ms = self.run_policy_with_python(PYTHON_39, "PreToolUse", payload)
+            completed, elapsed_ms = self.run_policy_with_python(PYTHON_39, "PreToolUse", payload, env=env)
             self.assertIn(completed.returncode, (0, 2), completed.stderr)
             if completed.returncode == 2:
                 self.assertEqual("CAPACITY_QUEUED", json.loads(completed.stderr)["code"])

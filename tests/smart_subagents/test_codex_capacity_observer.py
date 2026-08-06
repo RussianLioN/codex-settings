@@ -417,45 +417,88 @@ class CapacityObserverTests(unittest.TestCase):
             self.assertIn("hysteresis_red", second_normal["reasons"])
             self.assertEqual(third_normal["status"], "GREEN")
 
-    def test_capacity_stays_six_until_thirty_successes_then_steps_after_projection(self):
+    def test_capacity_stays_six_without_workload_delta_calibration(self):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir = Path(tmp)
-            for index in range(29):
+            for index in range(45):
                 result = observer.observe(snapshot=clean_snapshot(), state_dir=state_dir, now_epoch=1000.0 + index)
                 self.assertEqual(result["effective_capacity"], 6)
-            thirtieth = observer.observe(snapshot=clean_snapshot(), state_dir=state_dir, now_epoch=1030.0)
-            self.assertEqual(thirtieth["successful_observations"], 30)
-            self.assertEqual(thirtieth["effective_capacity"], 6)
 
-            for index in range(9):
-                result = observer.observe(snapshot=clean_snapshot(), state_dir=state_dir, now_epoch=1040.0 + index)
-                self.assertEqual(result["effective_capacity"], 6)
-            result = observer.observe(snapshot=clean_snapshot(), state_dir=state_dir, now_epoch=1050.0)
-            self.assertEqual(result["effective_capacity"], 8)
-            self.assertEqual(result["admission_capacity"], 8)
-            self.assertEqual(result["max_wave_size"], 8)
+            self.assertEqual(result["successful_observations"], 45)
+            self.assertEqual(result["capacity_mode"], "fixed_until_calibrated")
+            self.assertNotIn("capacity_step_projection", result)
 
             persisted = json.loads((state_dir / "observer_state.json").read_text(encoding="utf-8"))
             self.assertLessEqual(len(persisted["observations"]), 100)
 
+    def test_capacity_steps_only_after_thirty_workload_delta_samples(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            workload_delta = {"memory_bytes": 512 * MIB, "processes": 9, "root_fds": 40, "system_fds": 220}
+            for index in range(29):
+                result = observer.observe(
+                    snapshot=clean_snapshot(workload_delta=workload_delta),
+                    state_dir=state_dir,
+                    now_epoch=1000.0 + index,
+                )
+                self.assertEqual(result["effective_capacity"], 6)
+
+            thirtieth = observer.observe(
+                snapshot=clean_snapshot(workload_delta=workload_delta),
+                state_dir=state_dir,
+                now_epoch=1030.0,
+            )
+            self.assertEqual(thirtieth["successful_observations"], 30)
+            self.assertEqual(thirtieth["effective_capacity"], 6)
+            self.assertEqual(thirtieth["capacity_mode"], "dynamic")
+
+            for index in range(9):
+                result = observer.observe(
+                    snapshot=clean_snapshot(workload_delta=workload_delta),
+                    state_dir=state_dir,
+                    now_epoch=1040.0 + index,
+                )
+                self.assertEqual(result["effective_capacity"], 6)
+            result = observer.observe(
+                snapshot=clean_snapshot(workload_delta=workload_delta),
+                state_dir=state_dir,
+                now_epoch=1050.0,
+            )
+            self.assertEqual(result["effective_capacity"], 8)
+            self.assertEqual(result["admission_capacity"], 8)
+            self.assertEqual(result["max_wave_size"], 8)
+
     def test_capacity_does_not_step_when_new_step_projection_lacks_resources(self):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir = Path(tmp)
-            constrained = clean_snapshot(available_memory_bytes=7 * GIB, active_slots=0)
+            constrained = clean_snapshot(available_memory_bytes=10 * GIB, active_slots=0)
+            workload_delta = {"memory_bytes": 512 * MIB, "processes": 9, "root_fds": 40, "system_fds": 220}
 
             for index in range(40):
-                result = observer.observe(snapshot=constrained, state_dir=state_dir, now_epoch=1000.0 + index)
+                result = observer.observe(
+                    snapshot=dict(constrained, workload_delta=workload_delta),
+                    state_dir=state_dir,
+                    now_epoch=1000.0 + index,
+                )
 
             self.assertEqual(result["status"], "GREEN")
             self.assertEqual(result["effective_capacity"], 6)
             self.assertFalse(result["capacity_step_projection"]["ok"])
-            self.assertIn("memory_reserve_warning", result["capacity_step_projection"]["reasons"])
+            self.assertTrue(
+                any(reason.startswith("memory_reserve_") for reason in result["capacity_step_projection"]["reasons"]),
+                result["capacity_step_projection"]["reasons"],
+            )
 
     def test_capacity_drops_immediately_to_last_proven_step_for_admission(self):
         with tempfile.TemporaryDirectory() as tmp:
             state_dir = Path(tmp)
+            workload_delta = {"memory_bytes": 512 * MIB, "processes": 9, "root_fds": 40, "system_fds": 220}
             for index in range(40):
-                result = observer.observe(snapshot=clean_snapshot(), state_dir=state_dir, now_epoch=1000.0 + index)
+                result = observer.observe(
+                    snapshot=clean_snapshot(workload_delta=workload_delta),
+                    state_dir=state_dir,
+                    now_epoch=1000.0 + index,
+                )
             self.assertEqual(result["effective_capacity"], 8)
 
             yellow = observer.observe(snapshot=clean_snapshot(cpu_idle_percent=10.0), state_dir=state_dir, now_epoch=1100.0)
@@ -464,6 +507,19 @@ class CapacityObserverTests(unittest.TestCase):
             self.assertEqual(yellow["effective_capacity"], 6)
             self.assertEqual(yellow["admission_capacity"], 6)
             self.assertEqual(yellow["max_wave_size"], 2)
+
+    def test_long_gap_does_not_count_as_yellow_recovery_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+
+            yellow = observer.observe(snapshot=clean_snapshot(cpu_idle_percent=10.0), state_dir=state_dir, now_epoch=1000.0)
+            after_gap = observer.observe(snapshot=clean_snapshot(), state_dir=state_dir, now_epoch=1300.0)
+            recovered = observer.observe(snapshot=clean_snapshot(), state_dir=state_dir, now_epoch=1360.0)
+
+            self.assertEqual("YELLOW", yellow["status"])
+            self.assertEqual("YELLOW", after_gap["status"])
+            self.assertIn("hysteresis_yellow", after_gap["reasons"])
+            self.assertEqual("GREEN", recovered["status"])
 
     def test_cost_uses_minimum_p95_and_maximum_and_decreases_by_ten_percent_per_day(self):
         prior = {"memory_bytes": 1000 * MIB, "processes": 30.0, "root_fds": 120.0, "system_fds": 900.0}

@@ -25,6 +25,7 @@ MIN_SUCCESSFUL_OBSERVATIONS = 30
 YELLOW_RECOVERY_SECONDS = 60.0
 RED_RECOVERY_SNAPSHOTS = 3
 RED_RECOVERY_INTERVAL_SECONDS = 10.0
+RECOVERY_GAP_RESET_SECONDS = 120.0
 CLEAN_CYCLES_PER_STEP = 10
 CAPACITY_STEPS = [8, 12, 16, 20]
 SWAPOUT_RED_BYTES_PER_MINUTE = 256 * 1024 * 1024
@@ -96,11 +97,16 @@ def observe(
     now_epoch: float | None = None,
     workload_class: str = "normal",
     expected_cost: dict[str, float] | None = None,
+    active_slots: float | int | None = None,
 ) -> dict[str, Any]:
     now = float(time.time() if now_epoch is None else now_epoch)
     deadline = time.monotonic() + OBSERVE_TIMEOUT_SECONDS
     try:
-        current_snapshot = normalize_snapshot(snapshot if snapshot is not None else collect_snapshot(deadline=deadline))
+        raw_snapshot = snapshot if snapshot is not None else collect_snapshot(deadline=deadline)
+        if active_slots is not None:
+            raw_snapshot = dict(raw_snapshot)
+            raw_snapshot["active_slots"] = active_slots
+        current_snapshot = normalize_snapshot(raw_snapshot)
         store = ObserverStore(state_dir or default_state_dir())
         return store.update(
             lambda state: evaluate_snapshot(
@@ -150,6 +156,12 @@ def normalize_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             normalized[key] = pressure
         else:
             normalized[key] = finite_number(key, normalized[key])
+    for key in ("codex_root_count", "external_codex_roots"):
+        if key in normalized:
+            number = finite_number(key, normalized[key])
+            if number < 0:
+                raise ObservationError(f"invalid_measurement:{key}")
+            normalized[key] = number
     return normalized
 
 
@@ -251,7 +263,13 @@ def validate_optional_snapshot(path: str, value: Any) -> dict[str, Any] | None:
         return None
     if not isinstance(value, dict):
         raise ObservationError(f"state_invalid_type:{path}")
-    allowed = set(MANDATORY_MEASUREMENTS) | {"root_fd_state", "codex_root_count", "memory_free_percent", "swapout_bytes_per_minute"}
+    allowed = set(MANDATORY_MEASUREMENTS) | {
+        "root_fd_state",
+        "codex_root_count",
+        "external_codex_roots",
+        "memory_free_percent",
+        "swapout_bytes_per_minute",
+    }
     if set(value) - allowed:
         raise ObservationError(f"state_unknown_keys:{path}")
     validated: dict[str, Any] = {}
@@ -279,7 +297,15 @@ def validate_observations(value: Any) -> list[dict[str, Any]]:
     for index, item in enumerate(value):
         if not isinstance(item, dict):
             raise ObservationError(f"state_invalid_type:observations.{index}")
-        allowed = set(MANDATORY_MEASUREMENTS) | {"root_fd_state", "codex_root_count", "memory_free_percent", "swapout_bytes_per_minute", "observed_at", "status"}
+        allowed = set(MANDATORY_MEASUREMENTS) | {
+            "root_fd_state",
+            "codex_root_count",
+            "external_codex_roots",
+            "memory_free_percent",
+            "swapout_bytes_per_minute",
+            "observed_at",
+            "status",
+        }
         if set(item) - allowed:
             raise ObservationError(f"state_unknown_keys:observations.{index}")
         validated = validate_optional_snapshot(f"observations.{index}", {key: val for key, val in item.items() if key not in {"observed_at", "status"}}) or {}
@@ -358,6 +384,7 @@ def evaluate_snapshot(
         raw_status,
         previous_status=str(old_state.get("last_status", "GREEN")),
         previous_recovery=dict(old_state.get("recovery") or {}),
+        previous_observed_at=old_state.get("last_observed_at"),
         now_epoch=now_epoch,
     )
     reasons.extend(hysteresis_reasons)
@@ -374,6 +401,7 @@ def evaluate_snapshot(
     cost_samples = dict(old_state.get("cost_samples") or {})
     cost_estimates = dict(old_state.get("cost_estimates") or {})
     cost_updated_at = dict(old_state.get("cost_updated_at") or {})
+    previous_calibrated = len(list(cost_samples.get(workload_class, []))) >= MIN_SUCCESSFUL_OBSERVATIONS
 
     if not missing:
         successful_count += 1
@@ -397,12 +425,14 @@ def evaluate_snapshot(
                 cost_estimates[workload_class] = estimated
                 cost_updated_at[workload_class] = now_epoch
 
+    calibrated = len(list(cost_samples.get(workload_class, []))) >= MIN_SUCCESSFUL_OBSERVATIONS
+
     clean_cycles = int(old_state.get("clean_cycles", 0))
     effective_capacity = int(old_state.get("effective_capacity", DEFAULT_CAPACITY))
     proven_capacity = int(old_state.get("proven_capacity", DEFAULT_CAPACITY))
     step_projection: dict[str, Any] | None = None
-    if status == "GREEN" and successful_count >= MIN_SUCCESSFUL_OBSERVATIONS:
-        if previous_successful_count < MIN_SUCCESSFUL_OBSERVATIONS:
+    if status == "GREEN" and calibrated:
+        if not previous_calibrated:
             clean_cycles = 0
         else:
             clean_cycles += 1
@@ -428,7 +458,7 @@ def evaluate_snapshot(
         else:
             effective_capacity = DEFAULT_CAPACITY
 
-    if successful_count < MIN_SUCCESSFUL_OBSERVATIONS:
+    if not calibrated:
         effective_capacity = DEFAULT_CAPACITY
         proven_capacity = DEFAULT_CAPACITY
 
@@ -463,7 +493,7 @@ def evaluate_snapshot(
         "successful_observations": successful_count,
         "clean_cycles": clean_cycles,
         "workload_class": workload_class,
-        "capacity_mode": "fixed_until_calibrated" if successful_count < MIN_SUCCESSFUL_OBSERVATIONS else "dynamic",
+        "capacity_mode": "dynamic" if calibrated else "fixed_until_calibrated",
         "measurements": measurement_summary(snapshot, deltas),
         "reserves": reserve_summary(snapshot, costs, target_capacity=effective_capacity),
     }
@@ -593,9 +623,12 @@ def apply_hysteresis(
     *,
     previous_status: str,
     previous_recovery: dict[str, Any],
+    previous_observed_at: float | None,
     now_epoch: float,
 ) -> tuple[str, list[str], dict[str, Any]]:
     recovery = dict(previous_recovery)
+    if previous_observed_at is not None and now_epoch - float(previous_observed_at) > RECOVERY_GAP_RESET_SECONDS:
+        recovery = empty_recovery()
     if raw_status != "GREEN":
         recovery = {"from_status": raw_status, "started_at": None, "normal_count": 0, "last_normal_at": None}
         return raw_status, [], recovery
@@ -717,7 +750,7 @@ def observation_record(snapshot: dict[str, Any], now_epoch: float, status: str) 
 
 
 def sanitized_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
-    allowed = set(MANDATORY_MEASUREMENTS) | {"root_fd_state", "codex_root_count", "memory_free_percent"}
+    allowed = set(MANDATORY_MEASUREMENTS) | {"root_fd_state", "codex_root_count", "external_codex_roots", "memory_free_percent"}
     return {key: snapshot[key] for key in allowed if key in snapshot}
 
 
@@ -728,6 +761,8 @@ def measurement_summary(snapshot: dict[str, Any], deltas: dict[str, float | None
         summary["root_fd_state"] = snapshot["root_fd_state"]
     if "codex_root_count" in snapshot:
         summary["codex_root_count"] = snapshot["codex_root_count"]
+    if "external_codex_roots" in snapshot:
+        summary["external_codex_roots"] = snapshot["external_codex_roots"]
     if "memory_free_percent" in snapshot:
         summary["memory_free_percent"] = snapshot["memory_free_percent"]
     return summary

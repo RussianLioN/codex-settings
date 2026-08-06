@@ -13,9 +13,10 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
-from codex_capacity import DEFAULT_CAPACITY, CapacityStore, request_hash
+from codex_capacity import DEFAULT_CAPACITY, MAX_CAPACITY, CapacityStore, request_hash
+from codex_capacity_observer import observe as observe_capacity
 
 
 HOME = Path.home().resolve()
@@ -32,7 +33,9 @@ KNOWN_EVENTS = {
     "SessionEnd",
 }
 CAPACITY_ENFORCEMENT_ENV = "CODEX_CAPACITY_ENFORCEMENT"
+CAPACITY_OBSERVER_SNAPSHOT_ENV = "CODEX_CAPACITY_OBSERVER_SNAPSHOT"
 CAPACITY_QUEUED = "CAPACITY_QUEUED"
+SENSITIVE_PAYLOAD_KEYS = {"message", "messages", "task", "task_name", "taskName", "tool_input", "toolInput"}
 KNOWN_AGENTS = {
     "default",
     "worker",
@@ -183,10 +186,16 @@ def handle_spawn_capacity(payload: dict[str, Any], details: dict[str, Any]) -> t
         details["capacity_enforcement"] = "disabled"
         return "allow", "capacity enforcement bypass", details
 
-    result = CapacityStore(capacity=DEFAULT_CAPACITY).acquire_or_queue(
+    base_store = CapacityStore(capacity=DEFAULT_CAPACITY)
+    capacity_limit, wave_limit, observer_reason = observed_capacity_limit(base_store, details)
+    if observer_reason:
+        return "block", observer_reason, details
+
+    result = CapacityStore(capacity=capacity_limit).acquire_or_queue(
         session_id=request.session_id,
         turn_id=request.turn_id,
         task_name=request.task_name,
+        wave_limit=wave_limit,
     )
     details["capacity"] = sanitize_capacity_result(result)
     state = str(result.get("state") or "")
@@ -198,6 +207,87 @@ def handle_spawn_capacity(payload: dict[str, Any], details: dict[str, Any]) -> t
         reason = str(result.get("reason") or "unknown_capacity_error")
         return "block", f"capacity error: {reason}", details
     return "block", f"unexpected capacity state: {state or 'missing'}", details
+
+
+def observed_capacity_limit(store: CapacityStore, details: dict[str, Any]) -> tuple[int, Optional[int], str]:
+    snapshot_result = store.snapshot()
+    if snapshot_result.get("state") == "ERROR":
+        details["capacity_snapshot"] = sanitize_capacity_result(snapshot_result)
+        return 0, 0, f"capacity error: {snapshot_result.get('reason') or 'snapshot_failed'}"
+    managed_active = int(snapshot_result.get("active_count") or 0)
+    managed_reserved = int(snapshot_result.get("reserved_count") or managed_active)
+    managed_slots = max(managed_active, managed_reserved)
+    details["capacity_snapshot"] = {"active_count": managed_active, "reserved_count": managed_reserved}
+    snapshot = observer_snapshot_from_env()
+    if snapshot is not None:
+        snapshot["active_slots"] = managed_slots
+    observation = observe_capacity(snapshot=snapshot, state_dir=store.state_dir, active_slots=managed_slots)
+    details["capacity_observer"] = sanitize_observer_result(observation)
+    status = str(observation.get("status") or "RED")
+    if status == "RED":
+        return 0, 0, capacity_observer_deny_json(observation)
+    measurements = observation.get("measurements") if isinstance(observation.get("measurements"), dict) else {}
+    external_roots = max(0, int(float(measurements.get("external_codex_roots") or 0)))
+    admission = max(0, min(MAX_CAPACITY, int(observation.get("admission_capacity") or 0)))
+    max_wave = max(0, min(MAX_CAPACITY, int(observation.get("max_wave_size") or 0)))
+    if status == "YELLOW":
+        capacity_limit = max(0, min(DEFAULT_CAPACITY, admission) - external_roots)
+        wave_limit: Optional[int] = max(0, min(2, max_wave, capacity_limit))
+    else:
+        capacity_limit = max(0, admission - external_roots)
+        wave_limit = None
+    details["capacity_external_codex_roots"] = external_roots
+    details["capacity_limit"] = capacity_limit
+    if wave_limit is not None:
+        details["capacity_wave_limit"] = wave_limit
+    return capacity_limit, wave_limit, ""
+
+
+def capacity_observer_deny_json(observation: dict[str, Any]) -> str:
+    payload = {
+        "decision": "deny",
+        "permissionDecision": "deny",
+        "reason": "CAPACITY_OBSERVER_RED",
+        "code": "CAPACITY_OBSERVER_RED",
+        "status": observation.get("status") or "RED",
+        "reasons": observation.get("reasons") or [],
+        "admission_capacity": observation.get("admission_capacity") or 0,
+        "max_wave_size": observation.get("max_wave_size") or 0,
+    }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def observer_snapshot_from_env() -> Optional[dict[str, Any]]:
+    path = os.getenv(CAPACITY_OBSERVER_SNAPSHOT_ENV)
+    if not path:
+        return None
+    with Path(path).open("r", encoding="utf-8") as handle:
+        snapshot = json.load(handle)
+    if not isinstance(snapshot, dict):
+        raise ValueError("capacity observer snapshot must be a JSON object")
+    return snapshot
+
+
+def sanitize_observer_result(result: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "status",
+        "reasons",
+        "effective_capacity",
+        "admission_capacity",
+        "max_wave_size",
+        "capacity_mode",
+        "successful_observations",
+        "clean_cycles",
+    }
+    sanitized = {key: result[key] for key in sorted(allowed) if key in result}
+    measurements = result.get("measurements")
+    if isinstance(measurements, dict):
+        sanitized["measurements"] = {
+            key: measurements[key]
+            for key in ("active_slots", "codex_root_count", "external_codex_roots", "root_fd_state", "memory_pressure", "memory_free_percent")
+            if key in measurements
+        }
+    return sanitized
 
 
 def handle_post_tool_use(
@@ -782,7 +872,7 @@ def write_audit(event: str, decision: str, reason: str, payload: dict[str, Any],
         "reason": reason,
         "cwd": str(Path.cwd()),
         "details": details,
-        "payload_keys": sorted(payload.keys()),
+        "payload_keys": [key for key in sorted(payload.keys()) if key not in SENSITIVE_PAYLOAD_KEYS],
     }
     with AUDIT_LOG.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
