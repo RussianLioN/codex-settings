@@ -465,6 +465,15 @@ os._exit(0)
                 "coordinatorSelection"
             ],
         )
+        assert runtime._server is not None
+        refresh = runtime._server.coordinator_refresh_diagnostics
+        self.assertEqual("UNAVAILABLE", refresh["status"])
+        self.assertEqual(
+            "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            refresh["reasonCode"],
+        )
+        self.assertIsNone(refresh["lastSuccessfulCheckAt"])
+        self.assertIsNotNone(refresh["nextAttemptAt"])
 
     def test_temporary_catalog_failure_recovers_in_one_joined_background_loop(
         self,
@@ -498,6 +507,14 @@ os._exit(0)
             "SELECTED",
             runtime._server.coordinator_selection["status"],
         )
+        refresh = runtime._server.coordinator_refresh_diagnostics
+        self.assertEqual("SELECTED", refresh["status"])
+        self.assertEqual(
+            "COORDINATOR_PAIR_SELECTED",
+            refresh["reasonCode"],
+        )
+        self.assertIsNotNone(refresh["lastSuccessfulCheckAt"])
+        self.assertIsNotNone(refresh["nextAttemptAt"])
         self.assertEqual([1.0, 20.0], probe_timeouts)
 
         runtime.close()

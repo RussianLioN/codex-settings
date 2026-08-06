@@ -52,6 +52,7 @@ from codex_smart_subagents.lifecycle_controller_client_v2 import (  # noqa: E402
     LifecycleControllerClientV2,
     LifecycleControllerClientV2Error,
 )
+from codex_smart_subagents.model_catalog import ModelCatalogError  # noqa: E402
 from codex_smart_subagents.state_store_v2 import (  # noqa: E402
     AcceptingControllerV2,
     DatabaseIdentityV2,
@@ -323,6 +324,62 @@ class ControllerHealthServerV2Tests(unittest.TestCase):
             recovered.to_document(),
             response["payload"]["coordinatorSelection"],
         )
+
+    def test_catalog_refresh_diagnostics_share_one_atomic_health_snapshot(self) -> None:
+        self._start_server()
+        unavailable = collect_coordinator_selection_v2(
+            selection="first-verified-available",
+            candidates=(
+                {"model": "gpt-5.6-sol", "reasoningEffort": "medium"},
+            ),
+            inspector=type(
+                "_UnavailableInspector",
+                (),
+                {
+                    "inspect": lambda _self: (_ for _ in ()).throw(
+                        ModelCatalogError("MODEL_LIST_UNAVAILABLE", "temporary")
+                    )
+                },
+            )(),
+            active_context_fingerprint=self.database_identity.activation_fingerprint,
+        )
+        diagnostics = {
+            "status": "UNAVAILABLE",
+            "reasonCode": "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            "lastSuccessfulCheckAt": None,
+            "nextAttemptAt": "2026-08-06T09:00:05.000000Z",
+        }
+
+        assert self.server is not None
+        self.server.publish_coordinator_refresh(unavailable, diagnostics)
+        request = self._health_request()
+        response = _unix_controller_probe(self.socket_path, request)
+        _validate_health_response(response, request=request)
+
+        self.assertEqual(
+            unavailable.to_document(),
+            response["payload"]["coordinatorSelection"],
+        )
+        self.assertEqual(
+            {"coordinatorRefresh": diagnostics},
+            response["extensions"],
+        )
+
+    def test_gateway_rejects_unproven_catalog_refresh_extension(self) -> None:
+        self._start_server()
+        request = self._health_request()
+        response = _unix_controller_probe(self.socket_path, request)
+        response["extensions"] = {
+            "coordinatorRefresh": {
+                "status": "SELECTED",
+                "reasonCode": "/private/tmp/catalog-error",
+                "lastSuccessfulCheckAt": "not-a-time",
+                "nextAttemptAt": None,
+            }
+        }
+
+        with self.assertRaisesRegex(ValueError, "refresh diagnostics"):
+            _validate_health_response(response, request=request)
 
     def test_owned_codex_home_mode_0755_is_accepted(self) -> None:
         self.codex_home.chmod(0o755)

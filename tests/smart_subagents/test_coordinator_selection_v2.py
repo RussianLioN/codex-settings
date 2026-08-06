@@ -4,6 +4,7 @@ import sys
 import threading
 import unittest
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -17,6 +18,7 @@ from codex_smart_subagents.coordinator_selection_v2 import (  # noqa: E402
     collect_coordinator_selection_v2,
     coordinator_selection_from_health_v2,
     inspect_coordinator_selection_v2,
+    validate_coordinator_refresh_diagnostics_v2,
 )
 from codex_smart_subagents.model_catalog import ModelCatalogError  # noqa: E402
 from codex_smart_subagents.operation_deadline_v2 import (  # noqa: E402
@@ -320,7 +322,7 @@ class CoordinatorSelectionV2Tests(unittest.TestCase):
         recovered, _ = self.collect(
             {"gpt-5.6-sol": frozenset({"medium"})}
         )
-        published: list[CoordinatorSelectionV2] = []
+        published: list[tuple[CoordinatorSelectionV2 | None, dict[str, object]]] = []
         timeouts: list[float] = []
         waits: list[float] = []
         recovered_event = threading.Event()
@@ -330,9 +332,13 @@ class CoordinatorSelectionV2Tests(unittest.TestCase):
             timeouts.append(timeout_seconds)
             return recovered
 
-        def publish(selection: CoordinatorSelectionV2) -> None:
-            published.append(selection)
-            recovered_event.set()
+        def publish(
+            selection: CoordinatorSelectionV2 | None,
+            diagnostics: dict[str, object],
+        ) -> None:
+            published.append((selection, diagnostics))
+            if selection is recovered:
+                recovered_event.set()
 
         def wait(delay: float) -> bool:
             waits.append(delay)
@@ -352,7 +358,14 @@ class CoordinatorSelectionV2Tests(unittest.TestCase):
         loop.close()
 
         self.assertEqual([20.0], timeouts)
-        self.assertEqual([recovered], published)
+        self.assertIs(recovered, published[-1][0])
+        self.assertEqual("SELECTED", published[-1][1]["status"])
+        self.assertEqual(
+            "COORDINATOR_PAIR_SELECTED",
+            published[-1][1]["reasonCode"],
+        )
+        self.assertIsNotNone(published[-1][1]["lastSuccessfulCheckAt"])
+        self.assertIsNotNone(published[-1][1]["nextAttemptAt"])
         self.assertEqual([300.0], waits)
         self.assertFalse(loop.thread_alive)
 
@@ -377,7 +390,9 @@ class CoordinatorSelectionV2Tests(unittest.TestCase):
         loop = CoordinatorSelectionRefreshLoopV2(
             initial_selection=unavailable,
             probe=lambda _timeout: next(results),
-            publish=lambda _selection: published.set(),
+            publish=lambda selection, _diagnostics: (
+                published.set() if selection is recovered else None
+            ),
             wait=wait,
         )
         loop.start()
@@ -390,6 +405,126 @@ class CoordinatorSelectionV2Tests(unittest.TestCase):
         self.assertEqual([5.0, 30.0], waits[:2])
         self.assertLessEqual(max(waits), 300.0)
         self.assertFalse(loop.thread_alive)
+
+    def test_refresh_loop_publishes_bounded_failure_schedule_atomically(self) -> None:
+        unavailable, _ = self.collect(
+            ModelCatalogError("MODEL_LIST_UNAVAILABLE", "temporary")
+        )
+        now = [datetime(2026, 8, 6, 9, 0, 0, tzinfo=timezone.utc)]
+        waits: list[float] = []
+        publications: list[
+            tuple[CoordinatorSelectionV2 | None, dict[str, object]]
+        ] = []
+
+        def wait(delay: float) -> bool:
+            waits.append(delay)
+            now[0] += timedelta(seconds=delay)
+            return len(waits) == 4
+
+        loop = CoordinatorSelectionRefreshLoopV2(
+            initial_selection=unavailable,
+            probe=lambda _timeout: unavailable,
+            publish=lambda selection, diagnostics: publications.append(
+                (selection, diagnostics)
+            ),
+            wait=wait,
+            clock=lambda: now[0],
+        )
+        loop.start()
+        deadline = threading.Event()
+        for _ in range(100):
+            if not loop.thread_alive:
+                break
+            deadline.wait(0.01)
+        loop.close()
+
+        self.assertEqual([5.0, 30.0, 120.0, 300.0], waits)
+        self.assertGreaterEqual(len(publications), 5)
+        self.assertIsNone(publications[-1][0])
+        self.assertEqual(
+            {
+                "status": "UNAVAILABLE",
+                "reasonCode": "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+                "lastSuccessfulCheckAt": None,
+                "nextAttemptAt": "2026-08-06T09:07:35.000000Z",
+            },
+            publications[-1][1],
+        )
+        self.assertEqual(
+            {
+                **publications[-1][1],
+                "nextAttemptAt": None,
+            },
+            loop.diagnostic_snapshot(),
+        )
+
+    def test_refresh_diagnostics_reject_noncanonical_or_unsafe_values(self) -> None:
+        valid = {
+            "status": "SELECTED",
+            "reasonCode": "COORDINATOR_PAIR_SELECTED",
+            "lastSuccessfulCheckAt": "2026-08-06T09:00:00.000000Z",
+            "nextAttemptAt": "2026-08-06T09:05:00.000000Z",
+        }
+        self.assertEqual(valid, validate_coordinator_refresh_diagnostics_v2(valid))
+
+        for mutation in (
+            {**valid, "reasonCode": "/private/tmp/catalog-error"},
+            {**valid, "nextAttemptAt": "2026-08-06T12:05:00+03:00"},
+            {**valid, "internalError": "catalog failed"},
+        ):
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(ValueError):
+                    validate_coordinator_refresh_diagnostics_v2(mutation)
+
+    def test_successful_catalog_check_updates_timestamp_without_selected_pair(
+        self,
+    ) -> None:
+        catalog_without_pair, _ = self.collect(
+            {"gpt-5.6-sol": frozenset({"high"})}
+        )
+        catalog_timeout, _ = self.collect(
+            ModelCatalogError("MODEL_LIST_UNAVAILABLE", "temporary")
+        )
+        now = [datetime(2026, 8, 6, 10, 0, 0, tzinfo=timezone.utc)]
+        results = iter((catalog_without_pair, catalog_timeout))
+        publications: list[dict[str, object]] = []
+        waits: list[float] = []
+
+        def wait(delay: float) -> bool:
+            waits.append(delay)
+            now[0] += timedelta(seconds=delay)
+            return len(waits) == 2
+
+        loop = CoordinatorSelectionRefreshLoopV2(
+            initial_selection=catalog_timeout,
+            probe=lambda _timeout: next(results),
+            publish=lambda _selection, diagnostics: publications.append(
+                diagnostics
+            ),
+            wait=wait,
+            clock=lambda: now[0],
+        )
+        loop.start()
+        deadline = threading.Event()
+        for _ in range(100):
+            if not loop.thread_alive:
+                break
+            deadline.wait(0.01)
+        loop.close()
+
+        self.assertEqual([5.0, 30.0], waits)
+        self.assertEqual(
+            "2026-08-06T10:00:00.000000Z",
+            publications[-2]["lastSuccessfulCheckAt"],
+        )
+        self.assertEqual(
+            publications[-2]["lastSuccessfulCheckAt"],
+            publications[-1]["lastSuccessfulCheckAt"],
+        )
+        self.assertEqual(
+            "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            publications[-1]["reasonCode"],
+        )
 
         selected, _inspector = self.collect(
             {

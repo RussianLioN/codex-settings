@@ -2538,10 +2538,44 @@ class InstallerV2DoctorTests(_InstallerBase):
         super().setUp()
         self.successful_first_apply()
 
-    def test_doctor_distinguishes_ordinary_health_only_and_full_ready(self) -> None:
+    def coordinator_decision(
+        self,
+        observed,
+        *,
+        refresh: object,
+    ) -> SimpleNamespace:
+        from codex_smart_subagents.activation_gateway_v2 import GatewayState
+        from codex_smart_subagents.coordinator_selection_v2 import (
+            collect_coordinator_selection_v2,
+        )
+
+        class Inspector:
+            def inspect(_self):
+                if isinstance(observed, BaseException):
+                    raise observed
+                return observed
+
+        selection = collect_coordinator_selection_v2(
+            selection="first-verified-available",
+            candidates=(
+                {"model": "gpt-5.6-sol", "reasoningEffort": "medium"},
+            ),
+            inspector=Inspector(),
+            active_context_fingerprint="d" * 64,
+        )
+        return SimpleNamespace(
+            state=GatewayState.READY,
+            reason_code="READY",
+            executable=self.fake_codex,
+            coordinator_selection=selection.to_document(),
+            coordinator_refresh=refresh,
+            catalog_schema_version=2,
+        )
+
+    def test_doctor_distinguishes_ordinary_degraded_and_full_ready(self) -> None:
         cases = (
             (self.ordinary_decision(), False, "ORDINARY", False),
-            (self.ready_decision(), False, "HEALTH_ONLY", False),
+            (self.ready_decision(), False, "DEGRADED", False),
             (self.ready_decision(), True, "FULL_READY", True),
         )
         for decision, command_ready, status, ok in cases:
@@ -2561,6 +2595,122 @@ class InstallerV2DoctorTests(_InstallerBase):
                     result = self.installer.doctor(self.layout)
                 self.assertEqual(status, result["status"])
                 self.assertIs(ok, result["ok"])
+
+    def test_doctor_requires_selected_refresh_and_live_command_socket(self) -> None:
+        refresh = {
+            "status": "SELECTED",
+            "reasonCode": "COORDINATOR_PAIR_SELECTED",
+            "lastSuccessfulCheckAt": "2026-08-06T09:00:00.000000Z",
+            "nextAttemptAt": "2026-08-06T09:05:00.000000Z",
+        }
+        decision = self.coordinator_decision(
+            {"gpt-5.6-sol": frozenset({"medium"})},
+            refresh=refresh,
+        )
+        with (
+            mock.patch.object(
+                self.installer,
+                "_resolve_activation",
+                return_value=decision,
+            ),
+            mock.patch.object(
+                self.installer,
+                "_probe_command_socket",
+                return_value=True,
+            ),
+        ):
+            diagnosis = self.installer.doctor(self.layout)
+
+        self.assertTrue(diagnosis["ok"])
+        self.assertEqual("FULL_READY", diagnosis["status"])
+        self.assertEqual("SELECTED", diagnosis["coordinatorStatus"])
+        self.assertEqual(
+            "COORDINATOR_PAIR_SELECTED",
+            diagnosis["coordinatorReasonCode"],
+        )
+        self.assertEqual(
+            "2026-08-06T09:00:00.000000Z",
+            diagnosis["lastSuccessfulCheckAt"],
+        )
+        self.assertEqual(
+            "2026-08-06T09:05:00.000000Z",
+            diagnosis["nextAttemptAt"],
+        )
+        self.assertEqual("READY", self.installer._public_readiness(diagnosis))
+
+    def test_doctor_reports_unavailable_coordinator_as_degraded(self) -> None:
+        from codex_smart_subagents.model_catalog import ModelCatalogError
+
+        refresh = {
+            "status": "UNAVAILABLE",
+            "reasonCode": "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            "lastSuccessfulCheckAt": None,
+            "nextAttemptAt": "2026-08-06T09:00:05.000000Z",
+        }
+        decision = self.coordinator_decision(
+            ModelCatalogError("MODEL_LIST_UNAVAILABLE", "temporary"),
+            refresh=refresh,
+        )
+        with (
+            mock.patch.object(
+                self.installer,
+                "_resolve_activation",
+                return_value=decision,
+            ),
+            mock.patch.object(
+                self.installer,
+                "_probe_command_socket",
+                return_value=True,
+            ),
+        ):
+            diagnosis = self.installer.doctor(self.layout)
+
+        self.assertFalse(diagnosis["ok"])
+        self.assertEqual("DEGRADED", diagnosis["status"])
+        self.assertEqual("UNAVAILABLE", diagnosis["coordinatorStatus"])
+        self.assertEqual(
+            "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
+            diagnosis["coordinatorReasonCode"],
+        )
+        self.assertEqual("DEGRADED", self.installer._public_readiness(diagnosis))
+
+    def test_doctor_never_trusts_missing_or_malformed_refresh_diagnostics(
+        self,
+    ) -> None:
+        selected = {"gpt-5.6-sol": frozenset({"medium"})}
+        corrupt = {
+            "status": "SELECTED",
+            "reasonCode": "/private/tmp/catalog-error",
+            "lastSuccessfulCheckAt": "not-a-time",
+            "nextAttemptAt": None,
+        }
+        for refresh in (None, corrupt):
+            with self.subTest(refresh=refresh):
+                decision = self.coordinator_decision(
+                    selected,
+                    refresh=refresh,
+                )
+                with (
+                    mock.patch.object(
+                        self.installer,
+                        "_resolve_activation",
+                        return_value=decision,
+                    ),
+                    mock.patch.object(
+                        self.installer,
+                        "_probe_command_socket",
+                        return_value=True,
+                    ),
+                ):
+                    diagnosis = self.installer.doctor(self.layout)
+
+                self.assertFalse(diagnosis["ok"])
+                self.assertEqual("DEGRADED", diagnosis["status"])
+                self.assertEqual(
+                    "COORDINATOR_REFRESH_UNPROVEN",
+                    diagnosis["coordinatorReasonCode"],
+                )
+                self.assertNotIn("/private/tmp", json.dumps(diagnosis))
 
     def test_health_only_never_allows_smoke(self) -> None:
         with (
