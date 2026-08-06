@@ -44,7 +44,10 @@ from .controller_health_v2 import (
     ControllerHealthServerV2,
     ControllerRegistrationReceiptV2,
 )
-from .coordinator_selection_v2 import inspect_coordinator_selection_v2
+from .coordinator_selection_v2 import (
+    CoordinatorSelectionRefreshLoopV2,
+    inspect_coordinator_selection_v2,
+)
 from .model_catalog import AppServerModelCatalogInspector
 from .policy_bundle_v2 import PolicyBundleV2
 from .installer_upgrade_v2 import (
@@ -77,6 +80,7 @@ class HealthBootstrapRuntimeV2:
         controller: AcceptingControllerV2 | None = None,
         server: ControllerHealthServerV2 | None = None,
         thread: threading.Thread | None = None,
+        catalog_refresh: CoordinatorSelectionRefreshLoopV2 | None = None,
         registry_key: str | None = None,
     ) -> None:
         if gateway_decision.state is not GatewayState.READY:
@@ -98,6 +102,7 @@ class HealthBootstrapRuntimeV2:
         self.controller = controller
         self._server = server
         self._thread = thread
+        self._catalog_refresh = catalog_refresh
         self._registry_key = registry_key
         self._close_lock = threading.Lock()
         self._closed = False
@@ -105,6 +110,13 @@ class HealthBootstrapRuntimeV2:
     @property
     def thread_alive(self) -> bool:
         return bool(self._thread is not None and self._thread.is_alive())
+
+    @property
+    def catalog_refresh_alive(self) -> bool:
+        return bool(
+            self._catalog_refresh is not None
+            and self._catalog_refresh.thread_alive
+        )
 
     def bind_lifecycle_handler(
         self,
@@ -136,10 +148,17 @@ class HealthBootstrapRuntimeV2:
             self._closed = True
             error: BaseException | None = None
             try:
-                assert self._server is not None
-                self._server.close()
-            except BaseException as exc:
-                error = exc
+                if self._catalog_refresh is not None:
+                    try:
+                        self._catalog_refresh.close()
+                    except BaseException as exc:
+                        error = exc
+                try:
+                    assert self._server is not None
+                    self._server.close()
+                except BaseException as exc:
+                    if error is None:
+                        error = exc
             finally:
                 if self._thread is not None:
                     self._thread.join(timeout=2.0)
@@ -297,6 +316,7 @@ def bootstrap_health_activation_v2(
         finalization: ActivationFinalizationV2 | None = None
         server: ControllerHealthServerV2 | None = None
         thread: threading.Thread | None = None
+        catalog_refresh: CoordinatorSelectionRefreshLoopV2 | None = None
         initial_registration: _RecoveryRegistrationV2 | None = None
         initial_database: tuple[
             dict[str, object], dict[str, object]
@@ -343,6 +363,7 @@ def bootstrap_health_activation_v2(
                 candidates=policy_bundle.coordinator_candidates,
                 active_context_fingerprint=staged.activation_fingerprint,
                 inspector_factory=coordinator_inspector_factory,
+                timeout_seconds=1.0,
             )
 
             def registrar(
@@ -414,6 +435,16 @@ def bootstrap_health_activation_v2(
                 snapshot_verifier=snapshot_verifier,
                 controller_probe=_unix_controller_probe,
             )
+            catalog_refresh = _start_catalog_refresh_v2(
+                initial_selection=coordinator_selection,
+                server=server,
+                codex_executable=staged.snapshot_path,
+                codex_home=staged.codex_home,
+                runtime_parent=staged.state_home,
+                policy_bundle=policy_bundle,
+                active_context_fingerprint=staged.activation_fingerprint,
+                inspector_factory=coordinator_inspector_factory,
+            )
             runtime = HealthBootstrapRuntimeV2(
                 gateway_decision=decision,
                 owns_runtime=True,
@@ -422,12 +453,18 @@ def bootstrap_health_activation_v2(
                 controller=controller,
                 server=server,
                 thread=thread,
+                catalog_refresh=catalog_refresh,
                 registry_key=registry_key,
             )
             _OWNER_RUNTIMES[registry_key] = runtime
             return runtime
         except BaseException as primary_error:
             cleanup_errors: list[str] = []
+            if catalog_refresh is not None:
+                try:
+                    catalog_refresh.close()
+                except BaseException as cleanup_error:
+                    cleanup_errors.append(f"catalog refresh close: {cleanup_error}")
             if server is not None:
                 try:
                     server.close()
@@ -470,6 +507,38 @@ def bootstrap_health_activation_v2(
                     "; ".join(cleanup_errors),
                 ) from primary_error
             raise
+
+
+def _start_catalog_refresh_v2(
+    *,
+    initial_selection,
+    server: ControllerHealthServerV2,
+    codex_executable: Path,
+    codex_home: Path,
+    runtime_parent: Path,
+    policy_bundle: PolicyBundleV2,
+    active_context_fingerprint: str,
+    inspector_factory: Callable[..., object],
+) -> CoordinatorSelectionRefreshLoopV2:
+    def probe(timeout_seconds: float):
+        return inspect_coordinator_selection_v2(
+            codex_executable=codex_executable,
+            codex_home=codex_home,
+            runtime_parent=runtime_parent,
+            selection=policy_bundle.coordinator_selection,
+            candidates=policy_bundle.coordinator_candidates,
+            active_context_fingerprint=active_context_fingerprint,
+            inspector_factory=inspector_factory,
+            timeout_seconds=timeout_seconds,
+        )
+
+    refresh = CoordinatorSelectionRefreshLoopV2(
+        initial_selection=initial_selection,
+        probe=probe,
+        publish=server.publish_coordinator_selection,
+    )
+    refresh.start()
+    return refresh
 
 
 def _inspect_initial_finalization_database_v2(
@@ -700,6 +769,7 @@ def _recover_persisted_activation_v2(
     registration: _RecoveryRegistrationV2 | None = None
     server: ControllerHealthServerV2 | None = None
     thread: threading.Thread | None = None
+    catalog_refresh: CoordinatorSelectionRefreshLoopV2 | None = None
     try:
         coordinator_selection = inspect_coordinator_selection_v2(
             codex_executable=Path(
@@ -711,6 +781,7 @@ def _recover_persisted_activation_v2(
             candidates=policy_bundle.coordinator_candidates,
             active_context_fingerprint=binding.activation_fingerprint,
             inspector_factory=coordinator_inspector_factory,
+            timeout_seconds=1.0,
         )
 
         def registrar(
@@ -779,6 +850,18 @@ def _recover_persisted_activation_v2(
             decision=decision,
             controller=controller,
         )
+        catalog_refresh = _start_catalog_refresh_v2(
+            initial_selection=coordinator_selection,
+            server=server,
+            codex_executable=Path(
+                str(binding.activation_identity["codexSnapshot"]["absolutePath"])
+            ),
+            codex_home=layout.codex_home,
+            runtime_parent=binding.state_home,
+            policy_bundle=policy_bundle,
+            active_context_fingerprint=binding.activation_fingerprint,
+            inspector_factory=coordinator_inspector_factory,
+        )
         runtime = HealthBootstrapRuntimeV2(
             gateway_decision=decision,
             owns_runtime=True,
@@ -787,12 +870,18 @@ def _recover_persisted_activation_v2(
             controller=controller,
             server=server,
             thread=thread,
+            catalog_refresh=catalog_refresh,
             registry_key=registry_key,
         )
         _OWNER_RUNTIMES[registry_key] = runtime
         return runtime
     except BaseException as exc:
         cleanup_errors: list[str] = []
+        if catalog_refresh is not None:
+            try:
+                catalog_refresh.close()
+            except BaseException as cleanup_exc:
+                cleanup_errors.append(f"catalog refresh close: {cleanup_exc}")
         if server is not None:
             try:
                 server.close()

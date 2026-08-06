@@ -231,9 +231,10 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
         )
         self.assertNotIn("private updater failure", error.getvalue())
 
-    def test_cleanup_prohibition_returns_69_without_launch_or_details(self) -> None:
+    def test_cleanup_prohibition_warns_and_continues_verified_snapshot(self) -> None:
         decision = self._ready_snapshot_decision()
         error = StringIO()
+        decisions: list[GatewayDecision] = []
 
         def prohibited(**_kwargs):
             raise SourceReconciliationContinuationProhibitedV1()
@@ -245,30 +246,27 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
                 clear=True,
             ),
             mock.patch.object(sys, "argv", [str(WRAPPER), "задача"]),
-            mock.patch.object(
-                os,
-                "execve",
-                side_effect=lambda *_args: self.fail("execve was called"),
-            ),
             mock.patch.dict(
                 self.globals,
                 {
                     "v2_gateway_state_present": lambda _layout: True,
                     "_prepare_v2_decision": lambda **_kwargs: decision,
                     "_reconcile_source_drift": prohibited,
-                    "run_permanent_gateway": lambda *_args, **_kwargs: self.fail(
-                        "permanent gateway was called"
+                    "run_permanent_gateway": lambda *_args, **kwargs: (
+                        decisions.append(kwargs["resolver"].resolve()) or 17
                     ),
                 },
             ),
             redirect_stderr(error),
         ):
-            self.assertEqual(69, self.globals["main"]())
+            self.assertEqual(17, self.globals["main"]())
 
         self.assertEqual(
-            "codex-smart: SOURCE_UPDATE_CLEANUP_REQUIRED; запуск остановлен\n",
+            "codex-smart: SOURCE_UPDATE_CLEANUP_REQUIRED; "
+            "используется последний проверенный снимок\n",
             error.getvalue(),
         )
+        self.assertEqual([decision], decisions)
         self.assertNotIn("CONTINUATION_PROHIBITED", error.getvalue())
 
     def test_restart_guard_never_runs_reconciler_twice(self) -> None:
@@ -597,7 +595,7 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
             )
         )
 
-    def test_required_managed_failure_returns_69_with_safe_escape_hint(self) -> None:
+    def test_stale_required_marker_cannot_turn_interactive_launch_strict(self) -> None:
         decision = _ordinary(self.fallback, reason="MANIFEST_INVALID")
         gateway_arguments: dict[str, object] = {}
 
@@ -607,9 +605,14 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
                 self.code = code
                 self.message = message
 
+        gateway_calls: list[dict[str, object]] = []
+
         def gateway(_arguments, **kwargs):
+            gateway_calls.append(dict(kwargs))
             gateway_arguments.update(kwargs)
-            raise StrictFailure("MANIFEST_INVALID", "private resolver details")
+            if len(gateway_calls) == 1:
+                raise StrictFailure("MANIFEST_INVALID", "private resolver details")
+            return 17
 
         error = StringIO()
         with (
@@ -634,14 +637,15 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
             ),
             redirect_stderr(error),
         ):
-            self.assertEqual(69, self.globals["main"]())
+            self.assertEqual(17, self.globals["main"]())
 
-        self.assertTrue(gateway_arguments["managed_required"])
-        self.assertIn("MANIFEST_INVALID", error.getvalue())
-        self.assertIn("codex-native", error.getvalue())
-        self.assertNotIn("private resolver details", error.getvalue())
+        self.assertEqual(2, len(gateway_calls))
+        self.assertFalse(gateway_calls[0]["managed_required"])
+        self.assertFalse(gateway_calls[1]["managed_required"])
+        self.assertIsNone(gateway_calls[1]["resolver"])
+        self.assertEqual("", error.getvalue())
 
-    def test_automatic_coordinator_unavailable_returns_69_without_marker(
+    def test_automatic_coordinator_unavailable_starts_limited_managed_root(
         self,
     ) -> None:
         decision = GatewayDecision(
@@ -665,7 +669,13 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
             catalog_path=self.root / "adaptive-subagents.toml",
         )
 
-        error = StringIO()
+        decisions: list[GatewayDecision] = []
+
+        def gateway(_arguments, **kwargs):
+            decisions.append(kwargs["resolver"].resolve())
+            self.assertFalse(kwargs["managed_required"])
+            return 17
+
         with (
             mock.patch.dict(
                 os.environ,
@@ -679,24 +689,24 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
                     "classify_managed_invocation": classify_managed_invocation,
                     "v2_gateway_state_present": lambda _layout: True,
                     "_prepare_v2_decision": lambda **_kwargs: decision,
+                    "run_permanent_gateway": gateway,
                 },
             ),
-            redirect_stderr(error),
         ):
-            self.assertEqual(69, self.globals["main"]())
+            self.assertEqual(17, self.globals["main"]())
 
-        self.assertIn(
-            "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
-            error.getvalue(),
-        )
-        self.assertIn("codex-native", error.getvalue())
-        self.assertNotIn("model/list", error.getvalue())
+        self.assertEqual([decision], decisions)
 
-    def test_required_preparation_exception_returns_69_without_details(self) -> None:
+    def test_preparation_exception_automatically_uses_real_codex_path(self) -> None:
         def unavailable(**_kwargs):
             raise RuntimeError("private preparation details")
 
-        error = StringIO()
+        gateway_calls: list[dict[str, object]] = []
+
+        def gateway(_arguments, **kwargs):
+            gateway_calls.append(dict(kwargs))
+            return 17
+
         with (
             mock.patch.dict(
                 os.environ,
@@ -713,18 +723,23 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
                     "classify_managed_invocation": classify_managed_invocation,
                     "v2_gateway_state_present": lambda _layout: True,
                     "_prepare_v2_decision": unavailable,
+                    "run_permanent_gateway": gateway,
                 },
             ),
-            redirect_stderr(error),
         ):
-            self.assertEqual(69, self.globals["main"]())
+            self.assertEqual(17, self.globals["main"]())
 
-        self.assertIn("MANAGED_PREPARATION_FAILED", error.getvalue())
-        self.assertIn("codex-native", error.getvalue())
-        self.assertNotIn("private preparation details", error.getvalue())
+        self.assertEqual(1, len(gateway_calls))
+        self.assertIsNone(gateway_calls[0]["resolver"])
+        self.assertFalse(gateway_calls[0]["managed_required"])
 
-    def test_required_marker_rejects_values_other_than_zero_or_one(self) -> None:
-        error = StringIO()
+    def test_invalid_required_marker_is_ignored_for_interactive_launch(self) -> None:
+        gateway_calls: list[dict[str, object]] = []
+
+        def gateway(_arguments, **kwargs):
+            gateway_calls.append(dict(kwargs))
+            return 17
+
         with (
             mock.patch.dict(
                 os.environ,
@@ -738,17 +753,18 @@ class WrapperSupervisorV2Tests(unittest.TestCase):
             mock.patch.dict(
                 self.globals,
                 {
-                    "v2_gateway_state_present": lambda _layout: (
-                        self.fail("invalid marker reached gateway selection")
+                    "v2_gateway_state_present": lambda _layout: True,
+                    "_prepare_v2_decision": lambda **_kwargs: _ordinary(
+                        self.fallback
                     ),
+                    "run_permanent_gateway": gateway,
                 },
             ),
-            redirect_stderr(error),
         ):
-            self.assertEqual(69, self.globals["main"]())
+            self.assertEqual(17, self.globals["main"]())
 
-        self.assertIn("CODEX_SMART_REQUIRED_INVALID", error.getvalue())
-        self.assertIn("codex-native", error.getvalue())
+        self.assertEqual(1, len(gateway_calls))
+        self.assertFalse(gateway_calls[0]["managed_required"])
 
     def test_invalid_required_marker_does_not_block_service_bypass(self) -> None:
         decision = _ordinary(self.fallback)

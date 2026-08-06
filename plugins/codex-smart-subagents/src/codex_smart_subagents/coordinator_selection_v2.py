@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Mapping, Protocol, Sequence
@@ -16,6 +17,10 @@ _SELECTION = "first-verified-available"
 _SELECTED = "SELECTED"
 _UNAVAILABLE = "UNAVAILABLE"
 _SHA256_CHARACTERS = frozenset("0123456789abcdef")
+_CATALOG_REFRESH_TIMEOUT_SECONDS = 20.0
+_CATALOG_REFRESH_FAILURE_DELAYS_SECONDS = (5.0, 30.0, 120.0, 300.0)
+_CATALOG_REFRESH_HEALTHY_DELAY_SECONDS = 300.0
+_CATALOG_REFRESH_JOIN_SECONDS = 25.0
 
 
 class CoordinatorCatalogInspectorV2(Protocol):
@@ -92,6 +97,94 @@ class CoordinatorSelectionV2:
             account_catalog_fingerprint=catalog_fingerprint,
             active_context_fingerprint=active_context,
         )
+
+
+class CoordinatorSelectionRefreshLoopV2:
+    """Один останавливаемый фоновый цикл обновления каталога."""
+
+    def __init__(
+        self,
+        *,
+        initial_selection: CoordinatorSelectionV2,
+        probe: Callable[[float], CoordinatorSelectionV2],
+        publish: Callable[[CoordinatorSelectionV2], None],
+        wait: Callable[[float], bool] | None = None,
+    ) -> None:
+        if not isinstance(initial_selection, CoordinatorSelectionV2):
+            raise TypeError("initial_selection must be CoordinatorSelectionV2")
+        if not callable(probe) or not callable(publish):
+            raise TypeError("probe and publish must be callable")
+        if wait is not None and not callable(wait):
+            raise TypeError("wait must be callable")
+        self._initial_selection = initial_selection
+        self._probe = probe
+        self._publish = publish
+        self._stop = threading.Event()
+        self._wait = self._stop.wait if wait is None else wait
+        self._lifecycle_lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._closed = False
+
+    @property
+    def thread_alive(self) -> bool:
+        thread = self._thread
+        return bool(thread is not None and thread.is_alive())
+
+    def start(self) -> None:
+        with self._lifecycle_lock:
+            if self._closed:
+                raise RuntimeError("coordinator refresh loop is closed")
+            if self._thread is not None:
+                return
+            self._thread = threading.Thread(
+                target=self._run,
+                name="codex-smart-coordinator-catalog-refresh-v2",
+                daemon=True,
+            )
+            self._thread.start()
+
+    def close(self) -> None:
+        with self._lifecycle_lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._stop.set()
+            thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=_CATALOG_REFRESH_JOIN_SECONDS)
+        if self.thread_alive:
+            raise RuntimeError("coordinator refresh loop did not stop")
+
+    def _run(self) -> None:
+        selection = self._initial_selection
+        failure_index = 0
+        if selection.status == _SELECTED and self._wait(
+            _CATALOG_REFRESH_HEALTHY_DELAY_SECONDS
+        ):
+            return
+        while not self._stop.is_set():
+            try:
+                selection = self._probe(_CATALOG_REFRESH_TIMEOUT_SECONDS)
+                if not isinstance(selection, CoordinatorSelectionV2):
+                    raise TypeError("coordinator refresh probe returned another type")
+            except Exception:
+                selection = None
+            if selection is not None and selection.status == _SELECTED:
+                try:
+                    self._publish(selection)
+                except Exception:
+                    selection = None
+                else:
+                    failure_index = 0
+            if selection is not None and selection.status == _SELECTED:
+                delay = _CATALOG_REFRESH_HEALTHY_DELAY_SECONDS
+            else:
+                delay = _CATALOG_REFRESH_FAILURE_DELAYS_SECONDS[
+                    min(failure_index, len(_CATALOG_REFRESH_FAILURE_DELAYS_SECONDS) - 1)
+                ]
+                failure_index += 1
+            if self._wait(delay):
+                return
 
 
 def collect_coordinator_selection_v2(
@@ -186,6 +279,7 @@ def inspect_coordinator_selection_v2(
     candidates: Sequence[Mapping[str, str]],
     active_context_fingerprint: str,
     inspector_factory: Callable[..., Any] = AppServerModelCatalogInspector,
+    timeout_seconds: float = 5.0,
 ) -> CoordinatorSelectionV2:
     """Создаёт один inspector и сохраняет результат его единственного чтения."""
 
@@ -198,11 +292,18 @@ def inspect_coordinator_selection_v2(
         active_context_fingerprint,
         "active coordinator context fingerprint",
     )
+    if (
+        not isinstance(timeout_seconds, (int, float))
+        or isinstance(timeout_seconds, bool)
+        or not 0 < float(timeout_seconds) <= 60
+    ):
+        raise ValueError("timeout_seconds must be in (0, 60]")
     try:
         inspector = inspector_factory(
             codex_executable=codex_executable,
             codex_home=codex_home,
             runtime_parent=runtime_parent,
+            timeout_seconds=float(timeout_seconds),
         )
     except ModelCatalogError as exc:
         return _failed_catalog_selection(

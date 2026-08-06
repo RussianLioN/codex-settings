@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Mapping, Protocol, Sequence
+from typing import Mapping, NoReturn, Protocol, Sequence
 from urllib.parse import quote
 
 from .canonical_json import CanonicalJsonError, canonical_json_bytes, domain_fingerprint
@@ -1534,6 +1534,30 @@ def _managed_failure_code(error: Exception, default: str) -> str:
     return _normalize_failure_code(getattr(error, "code", default), default)
 
 
+def _exec_verified_ordinary(
+    arguments: Sequence[str],
+    *,
+    source_environment: Mapping[str, str],
+    wrapper: Path,
+    execve,
+) -> NoReturn:
+    executable = validate_real_binary(
+        Path(
+            source_environment.get(
+                "CODEX_REAL_BIN",
+                "/opt/homebrew/bin/codex",
+            )
+        ),
+        wrapper,
+    )
+    execve(
+        str(executable),
+        [str(executable), *arguments],
+        clean_ordinary_environment(source_environment),
+    )
+    raise AssertionError("execve unexpectedly returned")
+
+
 def run_permanent_gateway(
     arguments: Sequence[str],
     *,
@@ -1559,10 +1583,11 @@ def run_permanent_gateway(
         and invocation.kind is InvocationKind.REJECTED_MANAGED
         and resume_requested
     ):
-        raise ManagedLaunchUnavailable(
-            "MANAGED_RESUME_UNSUPPORTED",
-            "умное возобновление не поддерживает эти параметры; "
-            "для явного обхода используйте codex-native resume",
+        _exec_verified_ordinary(
+            arguments,
+            source_environment=source_environment,
+            wrapper=wrapper,
+            execve=execve,
         )
     if is_native_ultra_invocation(arguments) or not invocation.adaptive:
         executable = validate_real_binary(
@@ -1581,9 +1606,11 @@ def run_permanent_gateway(
         )
         raise AssertionError("execve unexpectedly returned")
     if resolver is None:
-        raise ManagedLaunchUnavailable(
-            "MANAGED_RESOLVER_UNAVAILABLE",
-            "managed activation resolver is unavailable",
+        _exec_verified_ordinary(
+            arguments,
+            source_environment=source_environment,
+            wrapper=wrapper,
+            execve=execve,
         )
     try:
         decision = resolver.resolve()
@@ -1593,7 +1620,12 @@ def run_permanent_gateway(
                 _managed_failure_code(exc, "MANAGED_RESOLUTION_FAILED"),
                 "managed activation resolution failed",
             ) from exc
-        raise
+        _exec_verified_ordinary(
+            arguments,
+            source_environment=source_environment,
+            wrapper=wrapper,
+            execve=execve,
+        )
     executable = decision.executable
     if executable.resolve() == wrapper.expanduser().resolve():
         raise RuntimeError("LAUNCHER_RECURSION: selected Codex is the gateway")
@@ -1622,19 +1654,6 @@ def run_permanent_gateway(
             decision.coordinator_selection
         )
     )
-    if (
-        not parsed_invocation.coordinator_control
-        and coordinator_selection is not None
-        and coordinator_selection["status"] == "UNAVAILABLE"
-    ):
-        raise ManagedLaunchUnavailable(
-            _normalize_failure_code(
-                coordinator_selection["reasonCode"],
-                "COORDINATOR_PAIR_UNAVAILABLE",
-            ),
-            "automatic coordinator pair is unavailable",
-        )
-
     try:
         require_bundled_mcp_manifest_v2(Path(__file__).resolve().parents[2])
         policy_proof = build_user_mcp_policy_proof_v2(
@@ -1702,10 +1721,10 @@ def run_permanent_gateway(
         )
     separator_index = parsed_invocation.separator_index
     rewritten_root = list(arguments[:root_end])
-    if not parsed_invocation.coordinator_control:
+    if not parsed_invocation.coordinator_control and decision.coordinator is not None:
         rewritten_root = apply_coordinator_defaults(
             rewritten_root,
-            dict(decision.coordinator or {}),
+            dict(decision.coordinator),
         )
     # Codex 0.145.0 откладывает MCP-команды, но координатор Terra не получает
     # средство их поиска. Оставляем напрямую видимым только проверенное

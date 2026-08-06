@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -11,6 +12,7 @@ PLUGIN_ROOT = REPO / "plugins" / "codex-smart-subagents"
 sys.path.insert(0, str(PLUGIN_ROOT / "src"))
 
 from codex_smart_subagents.coordinator_selection_v2 import (  # noqa: E402
+    CoordinatorSelectionRefreshLoopV2,
     CoordinatorSelectionV2,
     collect_coordinator_selection_v2,
     coordinator_selection_from_health_v2,
@@ -310,6 +312,84 @@ class CoordinatorSelectionV2Tests(unittest.TestCase):
                 catalog_schema_version=2,
                 candidates=CANDIDATES,
             )
+
+    def test_refresh_loop_recovers_once_then_checks_every_five_minutes(self) -> None:
+        unavailable, _ = self.collect(
+            ModelCatalogError("MODEL_LIST_UNAVAILABLE", "temporary")
+        )
+        recovered, _ = self.collect(
+            {"gpt-5.6-sol": frozenset({"medium"})}
+        )
+        published: list[CoordinatorSelectionV2] = []
+        timeouts: list[float] = []
+        waits: list[float] = []
+        recovered_event = threading.Event()
+        stop_wait = threading.Event()
+
+        def probe(timeout_seconds: float) -> CoordinatorSelectionV2:
+            timeouts.append(timeout_seconds)
+            return recovered
+
+        def publish(selection: CoordinatorSelectionV2) -> None:
+            published.append(selection)
+            recovered_event.set()
+
+        def wait(delay: float) -> bool:
+            waits.append(delay)
+            if delay == 300:
+                return stop_wait.wait(1.0)
+            return False
+
+        loop = CoordinatorSelectionRefreshLoopV2(
+            initial_selection=unavailable,
+            probe=probe,
+            publish=publish,
+            wait=wait,
+        )
+        loop.start()
+        self.assertTrue(recovered_event.wait(1.0))
+        stop_wait.set()
+        loop.close()
+
+        self.assertEqual([20.0], timeouts)
+        self.assertEqual([recovered], published)
+        self.assertEqual([300.0], waits)
+        self.assertFalse(loop.thread_alive)
+
+    def test_refresh_loop_uses_bounded_failure_backoff_and_is_idempotent(self) -> None:
+        unavailable, _ = self.collect(
+            ModelCatalogError("MODEL_LIST_UNAVAILABLE", "temporary")
+        )
+        recovered, _ = self.collect(
+            {"gpt-5.6-sol": frozenset({"medium"})}
+        )
+        results = iter((unavailable, unavailable, recovered))
+        waits: list[float] = []
+        published = threading.Event()
+        stop_wait = threading.Event()
+
+        def wait(delay: float) -> bool:
+            waits.append(delay)
+            if delay == 300:
+                return stop_wait.wait(1.0)
+            return False
+
+        loop = CoordinatorSelectionRefreshLoopV2(
+            initial_selection=unavailable,
+            probe=lambda _timeout: next(results),
+            publish=lambda _selection: published.set(),
+            wait=wait,
+        )
+        loop.start()
+        loop.start()
+        self.assertTrue(published.wait(1.0))
+        stop_wait.set()
+        loop.close()
+        loop.close()
+
+        self.assertEqual([5.0, 30.0], waits[:2])
+        self.assertLessEqual(max(waits), 300.0)
+        self.assertFalse(loop.thread_alive)
 
         selected, _inspector = self.collect(
             {

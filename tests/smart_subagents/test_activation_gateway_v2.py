@@ -324,7 +324,7 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
             catalog_path=self.root / "adaptive-subagents.toml",
         )
 
-    def test_automatic_unavailable_pair_is_always_managed_unavailable(self) -> None:
+    def test_automatic_unavailable_pair_starts_managed_root_without_defaults(self) -> None:
         decision = self._v2_decision(
             CoordinatorSelectionV2(
                 selection="first-verified-available",
@@ -336,22 +336,24 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
                 account_context_fingerprint="6" * 64,
             )
         )
-        executions: list[object] = []
+        path, argv, environment = self._execute(
+            decision,
+            ["проверь"],
+            {"PATH": "/usr/bin"},
+        )
 
-        with self.assertRaises(ManagedLaunchUnavailable) as caught:
-            run_permanent_gateway(
-                ["проверь"],
-                resolver=_StaticResolver(decision),
-                wrapper=self.wrapper,
-                environment={
-                    "PATH": "/usr/bin",
-                    "CODEX_HOME": str(self.root),
-                },
-                execve=lambda *_arguments: executions.append(object()),
-            )
-
-        self.assertEqual("COORDINATOR_PAIR_UNAVAILABLE", caught.exception.code)
-        self.assertEqual([], executions)
+        self.assertEqual(str(self.real), path)
+        self.assertEqual(
+            (
+                str(self.real),
+                "проверь",
+                *self.ADAPTIVE_DIRECT_TOOL_ARGUMENTS,
+                *self.ADAPTIVE_DISABLED_FEATURE_ARGUMENTS,
+            ),
+            argv,
+        )
+        self.assertNotIn("CODEX_COORDINATOR_MODEL", environment)
+        self.assertNotIn("model_reasoning_effort", " ".join(argv))
 
     def test_explicit_root_controls_bypass_unavailable_automatic_pair(self) -> None:
         decision = self._v2_decision(
@@ -570,10 +572,14 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
         self.assertEqual(0, resolver.calls)
         self.assertEqual([], observed)
 
-    def test_unsupported_resume_fails_closed_without_native_execution(self) -> None:
-        executions: list[object] = []
+    def test_unsupported_resume_executes_real_codex_with_original_arguments(self) -> None:
+        executions: list[tuple[str, tuple[str, ...], dict[str, str]]] = []
 
-        with self.assertRaises(ManagedLaunchUnavailable) as raised:
+        def expected_exec(path, arguments, environment):
+            executions.append((path, tuple(arguments), dict(environment)))
+            raise RuntimeError("expected exec")
+
+        with self.assertRaisesRegex(RuntimeError, "expected exec"):
             run_permanent_gateway(
                 ["resume", "--profile", "fast"],
                 resolver=None,
@@ -584,12 +590,19 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
                     "CODEX_REAL_BIN": str(self.real),
                 },
                 managed_required=True,
-                execve=lambda *_arguments: executions.append(object()),
+                execve=expected_exec,
             )
 
-        self.assertEqual("MANAGED_RESUME_UNSUPPORTED", raised.exception.code)
-        self.assertIn("codex-native resume", str(raised.exception))
-        self.assertEqual([], executions)
+        self.assertEqual(
+            [
+                (
+                    str(self.real),
+                    (str(self.real), "resume", "--profile", "fast"),
+                    {"PATH": "/usr/bin", "CODEX_HOME": str(self.root)},
+                )
+            ],
+            executions,
+        )
 
     def test_ultra_bypasses_gateway_without_a_resolver(self) -> None:
         original = [
@@ -637,8 +650,14 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
             observed,
         )
 
-    def test_managed_invocation_without_resolver_fails_closed(self) -> None:
-        with self.assertRaises(ManagedLaunchUnavailable) as raised:
+    def test_managed_invocation_without_resolver_executes_real_codex(self) -> None:
+        executions: list[tuple[str, tuple[str, ...], dict[str, str]]] = []
+
+        def expected_exec(path, arguments, environment):
+            executions.append((path, tuple(arguments), dict(environment)))
+            raise RuntimeError("expected exec")
+
+        with self.assertRaisesRegex(RuntimeError, "expected exec"):
             run_permanent_gateway(
                 ["проверь"],
                 resolver=None,
@@ -648,10 +667,14 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
                     "CODEX_HOME": str(self.root),
                     "CODEX_REAL_BIN": str(self.real),
                 },
-                execve=lambda *_arguments: self.fail("выполнен управляемый запуск"),
+                execve=expected_exec,
             )
 
-        self.assertEqual("MANAGED_RESOLVER_UNAVAILABLE", raised.exception.code)
+        self.assertEqual(str(self.real), executions[0][0])
+        self.assertEqual((str(self.real), "проверь"), executions[0][1])
+        self.assertFalse(
+            any(name.startswith("CODEX_SMART_") for name in executions[0][2])
+        )
 
     def test_required_managed_ordinary_decision_fails_without_exec(self) -> None:
         decision = GatewayDecision(
@@ -728,6 +751,45 @@ class PermanentGatewayExecutionTests(unittest.TestCase):
 
         self.assertEqual("FALLBACK_UNAVAILABLE", raised.exception.code)
         self.assertEqual([], executions)
+
+    def test_interactive_resolver_failure_executes_verified_real_codex(self) -> None:
+        class UnavailableResolver:
+            def resolve(self):
+                raise GatewayUnavailable(
+                    "FALLBACK_UNAVAILABLE",
+                    "private resolver details",
+                )
+
+        executions: list[tuple[str, tuple[str, ...], dict[str, str]]] = []
+
+        def expected_exec(path, arguments, environment):
+            executions.append((path, tuple(arguments), dict(environment)))
+            raise RuntimeError("expected exec")
+
+        with self.assertRaisesRegex(RuntimeError, "expected exec"):
+            run_permanent_gateway(
+                ["resume", "--last"],
+                resolver=UnavailableResolver(),
+                wrapper=self.wrapper,
+                environment={
+                    "PATH": "/usr/bin",
+                    "CODEX_HOME": str(self.root),
+                    "CODEX_REAL_BIN": str(self.real),
+                    "CODEX_SMART_REQUIRED": "1",
+                    "CODEX_SMART_GATE_FINGERPRINT": "stale",
+                },
+                managed_required=False,
+                execve=expected_exec,
+            )
+
+        self.assertEqual(
+            (str(self.real), "resume", "--last"),
+            executions[0][1],
+        )
+        self.assertEqual(
+            {"PATH": "/usr/bin", "CODEX_HOME": str(self.root)},
+            executions[0][2],
+        )
 
     def test_ready_adds_atomic_coordinator_pair_only_without_explicit_choice(self) -> None:
         decision = GatewayDecision(

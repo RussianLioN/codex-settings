@@ -150,15 +150,10 @@ def main() -> int:
             managed_required=False,
         )
     invocation = classify_managed_invocation(arguments)
-    required_value = environment.get("CODEX_SMART_REQUIRED", "0")
-    if invocation.adaptive and required_value not in {"0", "1"}:
-        print(
-            "codex-smart: CODEX_SMART_REQUIRED_INVALID; "
-            "используйте codex-native",
-            file=sys.stderr,
-        )
-        return 69
-    managed_required = required_value == "1" and invocation.adaptive
+    # Устаревший пользовательский маркер не может сделать обычный
+    # интерактивный запуск строгим. Строгий режим остаётся только у
+    # внутренних вызовов run_permanent_gateway.
+    managed_required = False
     try:
         if v2_gateway_state_present(gateway_layout):
             if not invocation.adaptive:
@@ -179,13 +174,14 @@ def main() -> int:
                     codex_home=codex_home,
                     environment=environment,
                 )
-            except Exception as exc:
-                if managed_required:
-                    raise ManagedLaunchUnavailable(
-                        "MANAGED_PREPARATION_FAILED",
-                        "managed activation preparation failed",
-                    ) from exc
-                raise
+            except Exception:
+                return run_permanent_gateway(
+                    arguments,
+                    resolver=None,
+                    wrapper=Path(__file__),
+                    environment=environment,
+                    managed_required=False,
+                )
             if decision.source_drift is not None:
                 if environment.get("CODEX_SMART_RECONCILED_V1") != "1":
                     try:
@@ -197,10 +193,9 @@ def main() -> int:
                     except SourceReconciliationContinuationProhibitedV1:
                         print(
                             "codex-smart: SOURCE_UPDATE_CLEANUP_REQUIRED; "
-                            "запуск остановлен",
+                            "используется последний проверенный снимок",
                             file=sys.stderr,
                         )
-                        return 69
                     except Exception:
                         print(
                             "codex-smart: SOURCE_UPDATE_RETRY_AFTER; "
@@ -235,17 +230,14 @@ def main() -> int:
                 environment=environment,
                 managed_required=managed_required,
             )
-        if managed_required:
-            raise ManagedLaunchUnavailable(
-                "V2_GATEWAY_UNAVAILABLE",
-                "managed activation state is absent",
-            )
-    except ManagedLaunchUnavailable as exc:
-        print(
-            f"codex-smart: {exc.code}; используйте codex-native",
-            file=sys.stderr,
+    except ManagedLaunchUnavailable:
+        return run_permanent_gateway(
+            arguments,
+            resolver=None,
+            wrapper=Path(__file__),
+            environment=environment,
+            managed_required=False,
         )
-        return 69
     environment.setdefault(
         "CODEX_ADAPTIVE_CATALOG",
         str(PLUGIN_ROOT / "config" / "adaptive-subagents.toml"),

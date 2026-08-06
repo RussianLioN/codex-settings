@@ -39,7 +39,7 @@ LEGACY_ALIASES = (
     b"alias codexfd='$HOME/.local/bin/codex-highfd --fd-doctor'\n"
 )
 TARGET_ALIASES = (
-    b"alias codex='CODEX_SMART_ENABLED=1 CODEX_SMART_REQUIRED=1 "
+    b"alias codex='CODEX_SMART_ENABLED=1 "
     b"$HOME/.local/bin/codex-highfd'\n"
     b"alias codex-native='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
     b"$HOME/.local/bin/codex-highfd'\n"
@@ -158,6 +158,16 @@ def _managed_version_identity(
 # Before changing either managed file, add the departing exact pair here.
 REGISTERED_MANAGED_VERSIONS: frozenset[ManagedVersionIdentity] = frozenset(
     {
+        (
+            "a04efa493f60cc4a31cfe443aecfc8d02"
+            "e804422aeb976cfc3cc7aa4602a8e57",
+            2169,
+            0o755,
+            "c8a87dac327ac4552660f4bbefac3eefa"
+            "799a99a11f0b6e01ea3af6437d80aac",
+            718,
+            0o600,
+        ),
         (
             "a04efa493f60cc4a31cfe443aecfc8d02"
             "e804422aeb976cfc3cc7aa4602a8e57",

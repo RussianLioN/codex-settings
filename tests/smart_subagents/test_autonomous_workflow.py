@@ -11,7 +11,7 @@ from types import ModuleType
 ROOT = Path(__file__).resolve().parents[2]
 VALIDATOR = ROOT / "scripts" / "validate_autonomous_workflow.py"
 TARGET_ALIASES = (
-    b"alias codex='CODEX_SMART_ENABLED=1 CODEX_SMART_REQUIRED=1 "
+    b"alias codex='CODEX_SMART_ENABLED=1 "
     b"$HOME/.local/bin/codex-highfd'\n"
     b"alias codex-native='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
     b"$HOME/.local/bin/codex-highfd'\n"

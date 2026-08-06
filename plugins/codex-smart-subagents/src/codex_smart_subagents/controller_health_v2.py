@@ -224,6 +224,7 @@ class ControllerHealthServerV2:
 
         self._lifecycle_lock = threading.RLock()
         self._close_lock = threading.Lock()
+        self._coordinator_lock = threading.Lock()
         self._workers_lock = threading.Lock()
         self._connections: set[socket.socket] = set()
         self._worker_slots = threading.BoundedSemaphore(MAX_WORKERS)
@@ -247,6 +248,35 @@ class ControllerHealthServerV2:
         self._candidate_mode = False
         self._started = False
         self._closed = False
+
+    def publish_coordinator_selection(
+        self,
+        selection: CoordinatorSelectionV2,
+    ) -> None:
+        """Атомарно публикует повторно доказанный выбор в живом health."""
+
+        if not isinstance(selection, CoordinatorSelectionV2):
+            _fail(
+                "INVALID_CONFIGURATION",
+                "coordinator selection refresh has another type",
+            )
+        if (
+            selection.recompute_account_context_fingerprint(
+                active_context_fingerprint=self.activation_fingerprint,
+            )
+            != selection.account_context_fingerprint
+        ):
+            _fail(
+                "INVALID_CONFIGURATION",
+                "refreshed coordinator selection context differs from activation",
+            )
+        document = validate_coordinator_selection_document_v2(
+            selection.to_document()
+        )
+        with self._coordinator_lock:
+            if self._closed:
+                _fail("SERVER_CLOSED", "controller health server is closed")
+            self.coordinator_selection = document
 
     def start(self) -> AcceptingControllerV2:
         """Связывает сокет, регистрирует БД и только после проверки открывает готовность."""
@@ -795,6 +825,8 @@ class ControllerHealthServerV2:
         maintenance_mode = maintenance_modes.get(str(row["maintenance_mode"]))
         if str(row["maintenance_mode"]) not in maintenance_modes:
             _fail("CONTROLLER_BINDING_MISMATCH", "maintenance mode is invalid")
+        with self._coordinator_lock:
+            coordinator_selection = dict(self.coordinator_selection)
         return {
             "namespace": NAMESPACE,
             "controllerIdentity": row["controller_identity"],
@@ -812,7 +844,7 @@ class ControllerHealthServerV2:
             "compatibilityFingerprint": row["compatibility_fingerprint"],
             "routingPolicyFingerprint": row["routing_policy_fingerprint"],
             "bundledCatalogFingerprint": row["bundled_catalog_fingerprint"],
-            "coordinatorSelection": dict(self.coordinator_selection),
+            "coordinatorSelection": coordinator_selection,
             "databaseId": row["database_id"],
             "databaseSchemaVersion": 2,
             "workCounts": counts,

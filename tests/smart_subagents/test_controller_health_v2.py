@@ -294,6 +294,36 @@ class ControllerHealthServerV2Tests(unittest.TestCase):
         ):
             _validate_health_response(tampered, request=request)
 
+    def test_catalog_recovery_atomically_replaces_health_selection(self) -> None:
+        self._start_server()
+        recovered = collect_coordinator_selection_v2(
+            selection="first-verified-available",
+            candidates=(
+                {"model": "gpt-5.6-terra", "reasoningEffort": "medium"},
+            ),
+            inspector=type(
+                "_RecoveredInspector",
+                (),
+                {
+                    "inspect": lambda _self: {
+                        "gpt-5.6-terra": frozenset({"medium"})
+                    }
+                },
+            )(),
+            active_context_fingerprint=self.database_identity.activation_fingerprint,
+        )
+
+        assert self.server is not None
+        self.server.publish_coordinator_selection(recovered)
+        request = self._health_request()
+        response = _unix_controller_probe(self.socket_path, request)
+        _validate_health_response(response, request=request)
+
+        self.assertEqual(
+            recovered.to_document(),
+            response["payload"]["coordinatorSelection"],
+        )
+
     def test_owned_codex_home_mode_0755_is_accepted(self) -> None:
         self.codex_home.chmod(0o755)
 

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from contextlib import closing
 from datetime import datetime, timezone
@@ -406,6 +407,7 @@ os._exit(0)
         runtime = self._bootstrap(coordinator_inspector_factory=factory)
 
         self.assertEqual(1, len(factories))
+        self.assertEqual(1.0, factories[0]["timeout_seconds"])
         self.assertEqual(1, inspector.calls)
         self.assertEqual(
             {
@@ -447,7 +449,10 @@ os._exit(0)
         selection = runtime.gateway_decision.coordinator_selection
         self.assertIsNotNone(selection)
         assert selection is not None
-        self.assertEqual(1, inspector.calls)
+        deadline = time.monotonic() + 1.0
+        while inspector.calls < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(2, inspector.calls)
         self.assertEqual("UNAVAILABLE", selection["status"])
         self.assertEqual(
             "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
@@ -461,6 +466,43 @@ os._exit(0)
             ],
         )
 
+    def test_temporary_catalog_failure_recovers_in_one_joined_background_loop(
+        self,
+    ) -> None:
+        recovered = threading.Event()
+        factory_calls = 0
+        probe_timeouts: list[float] = []
+
+        def factory(**arguments):
+            nonlocal factory_calls
+            factory_calls += 1
+            probe_timeouts.append(arguments["timeout_seconds"])
+            if factory_calls == 1:
+                return _CoordinatorInspector(_coordinator_deadline())
+
+            class RecoveredInspector(_CoordinatorInspector):
+                def inspect(self):
+                    result = super().inspect()
+                    recovered.set()
+                    return result
+
+            return RecoveredInspector(
+                {"gpt-5.6-sol": frozenset({"medium"})}
+            )
+
+        runtime = self._bootstrap(coordinator_inspector_factory=factory)
+        self.assertTrue(recovered.wait(1.0))
+        self.assertTrue(runtime.catalog_refresh_alive)
+        assert runtime._server is not None
+        self.assertEqual(
+            "SELECTED",
+            runtime._server.coordinator_selection["status"],
+        )
+        self.assertEqual([1.0, 20.0], probe_timeouts)
+
+        runtime.close()
+        self.assertFalse(runtime.catalog_refresh_alive)
+
     def test_recovery_deadline_is_materialized_as_health_unavailable(self) -> None:
         self._create_dead_persisted_activation()
         inspector = _CoordinatorInspector(_coordinator_deadline())
@@ -471,7 +513,10 @@ os._exit(0)
         selection = runtime.gateway_decision.coordinator_selection
         self.assertIsNotNone(selection)
         assert selection is not None
-        self.assertEqual(1, inspector.calls)
+        deadline = time.monotonic() + 1.0
+        while inspector.calls < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(2, inspector.calls)
         self.assertEqual("UNAVAILABLE", selection["status"])
         self.assertEqual(
             "COORDINATOR_ACCOUNT_CATALOG_UNAVAILABLE",
