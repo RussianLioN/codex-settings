@@ -440,6 +440,7 @@ class OperationProcessGroupSupervisorV2:
                 outcome="verified-exit",
                 cleanup_obligation=None,
             )
+            _close_process_streams(record.lease.process)
             del self._owned[lease_id]
             removed.append(lease_id)
         return tuple(removed)
@@ -973,6 +974,7 @@ class OperationProcessGroupSupervisorV2:
             outcome="soft-terminated",
             cleanup_obligation=None,
         )
+        _close_process_streams(record.lease.process)
         del self._owned[lease.lease_id]
         return ProcessGroupTerminationResultV2(
             lease_id=lease.lease_id,
