@@ -404,6 +404,37 @@ class TurnContextStoreV2:
     ) -> HookTurnContextV2:
         """Атомарно обновляет счётчик и другие поля одного хода."""
 
+        updated = self._update(
+            mutator,
+            deadline=deadline,
+            missing_ok=False,
+        )
+        if updated is None:
+            raise IntegrationV2Error("обязательная запись контекста не загружена")
+        return updated
+
+    def update_if_present(
+        self,
+        mutator: Callable[[HookTurnContextV2], HookTurnContextV2],
+        *,
+        deadline: float | None = None,
+    ) -> HookTurnContextV2 | None:
+        """Атомарно обновляет существующий контекст умного хода."""
+
+        return self._update(
+            mutator,
+            deadline=deadline,
+            missing_ok=True,
+        )
+
+    def _update(
+        self,
+        mutator: Callable[[HookTurnContextV2], HookTurnContextV2],
+        *,
+        deadline: float | None,
+        missing_ok: bool,
+    ) -> HookTurnContextV2 | None:
+
         if not callable(mutator):
             raise IntegrationV2Error("обновитель контекста хода неверен")
         if deadline is None:
@@ -425,6 +456,15 @@ class TurnContextStoreV2:
                 raise IntegrationV2Error(str(error)) from error
             acquired = True
             _remaining_hook_budget(deadline)
+            if missing_ok:
+                try:
+                    os.lstat(self.path)
+                except FileNotFoundError:
+                    return None
+                except OSError as exc:
+                    raise IntegrationV2Error(
+                        "запись контекста хода недоступна"
+                    ) from exc
             current = self._decode(_read_private_file(self.path))
             _remaining_hook_budget(deadline)
             updated = mutator(current)

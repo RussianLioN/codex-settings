@@ -345,6 +345,17 @@ class DocsNavigationValidatorTests(unittest.TestCase):
                 with self.subTest(document=name, value=value):
                     self.assertIn(value, document)
 
+        autonomous_workflow = (
+            REPO / "docs/guides/autonomous-workflow.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "не требует перехода на\n`codex-native`",
+            autonomous_workflow,
+        )
+        self.assertNotIn(
+            "завершается кодом 69 и предлагает `codex-native`",
+            autonomous_workflow,
+        )
         combined = "\n".join(documents.values())
         for obsolete in (
             "нет обеих пар, обязательный управляемый запуск завершается",

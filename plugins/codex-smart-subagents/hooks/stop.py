@@ -129,10 +129,12 @@ def handle(
                     continuation_count=current.continuation_count + 1,
                 )
 
-            updated_record = store_v2.update(
+            updated_record = store_v2.update_if_present(
                 inspect_and_increment,
                 deadline=deadline,
             )
+            if updated_record is None:
+                return None
             require_time_remaining(deadline, "истёк общий срок Stop")
             if outcome in {"different-turn", "complete"}:
                 if outcome == "complete":

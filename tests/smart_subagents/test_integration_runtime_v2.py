@@ -1964,6 +1964,38 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
             TurnContextStoreV2(self.config).load().continuation_count,
         )
 
+    def test_stop_without_turn_context_is_silent_fail_open(self) -> None:
+        environment, publisher = self._proven_environment()
+        self.addCleanup(publisher.cleanup)
+        stop_path = PLUGIN / "hooks" / "stop.py"
+        stop_spec = importlib.util.spec_from_file_location(
+            "smart_stop_missing_context_test",
+            stop_path,
+        )
+        assert stop_spec is not None and stop_spec.loader is not None
+        stop_module = importlib.util.module_from_spec(stop_spec)
+        sys.modules[stop_spec.name] = stop_module
+        stop_spec.loader.exec_module(stop_module)
+
+        for launch_kind in ("new", "resume"):
+            invocation_environment = dict(environment)
+            if launch_kind == "resume":
+                invocation_environment["CODEX_SMART_LAUNCH_KIND"] = "resume"
+            response = stop_module.handle(
+                {
+                    "session_id": self.record.session_id,
+                    "turn_id": self.record.turn_id,
+                    "hook_event_name": "Stop",
+                },
+                invocation_environment,
+                v2_plan_state_provider=lambda *_args, **_kwargs: self.fail(
+                    "Stop не должен проверять план без контекста умного хода"
+                ),
+            )
+            with self.subTest(launch_kind=launch_kind):
+                self.assertIsNone(response)
+        self.assertFalse(TurnContextStoreV2(self.config).path.exists())
+
     def test_unrelated_config_rewrite_keeps_user_prompt_active(self) -> None:
         environment, publisher = self._proven_environment()
         self.addCleanup(publisher.cleanup)
