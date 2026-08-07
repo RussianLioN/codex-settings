@@ -203,6 +203,10 @@ class CapacityStore:
 
             ticket_id = self._create_ticket(conn, request_id, session_id, turn_id, now, "PENDING")
             self._log(conn, now, "queue", request_id=request_id, ticket_id=ticket_id)
+            # Наличие более старого READY-билета сохраняет порядок очереди,
+            # но не должно оставлять остальные глобальные слоты пустыми.
+            # Один новый запрос открывает не более одного нового резерва.
+            self._promote_pending(conn, now, limit=1)
             return self._ticket_result_from_row(conn, self._ticket_by_id(conn, ticket_id))
 
         return self._write(work)
@@ -533,7 +537,14 @@ class CapacityStore:
         return self._write(work)
 
     def wait(self, ticket_id: str) -> dict[str, Any]:
+        now = current_time()
+
         def work(conn: sqlite3.Connection) -> dict[str, Any]:
+            self._expire_stale_leases(conn, now)
+            # Ожидающий процесс может быть единственным оставшимся участником.
+            # Поэтому он сам заполняет доказанно свободные глобальные слоты,
+            # а не зависит от будущего события release или нового запроса.
+            self._promote_pending(conn, now)
             row = conn.execute(
                 "select * from tickets where ticket_id = ?",
                 (ticket_id,),
@@ -542,7 +553,7 @@ class CapacityStore:
                 return {"state": "ERROR", "reason": "ticket_not_found", "ticket_id": ticket_id}
             return self._ticket_result_from_row(conn, row)
 
-        return self._read(work)
+        return self._write(work)
 
     def snapshot(self) -> dict[str, Any]:
         def work(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -1356,6 +1367,7 @@ class CapacityStore:
             return lease_result(row["request_id"], lease_id, epoch, "PROVISIONAL")
         ticket_id = self._create_ticket(conn, row["request_id"], row["session_id"], row["turn_id"], now, "PENDING")
         self._log(conn, now, "requeue-released", request_id=row["request_id"], ticket_id=ticket_id)
+        self._promote_pending(conn, now, limit=1)
         return self._ticket_result_from_row(conn, self._ticket_by_id(conn, ticket_id))
 
     def _promote_pending(self, conn: sqlite3.Connection, now: float, *, limit: Optional[int] = None) -> None:

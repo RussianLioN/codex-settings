@@ -896,6 +896,54 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertEqual(1, canceled["canceled"])
         self.assertEqual("CANCELED", store.wait(str(ready["ticket_id"]))["ticket_state"])
 
+    def test_ready_ticket_never_leaves_other_global_slots_idle(self) -> None:
+        initial = self.manager(limit=1)
+        lease = initial.acquire_or_queue(**self.request(1, session="old", turn="t1"))
+        ready = initial.acquire_or_queue(**self.request(2, session="old", turn="t1"))
+        initial.release(
+            lease_id=str(lease["lease_id"]),
+            fencing_epoch=int(lease["fencing_epoch"]),
+        )
+        self.assertEqual(
+            "READY",
+            initial.wait(str(ready["ticket_id"]))["ticket_state"],
+        )
+
+        expanded = self.manager(limit=3)
+        newcomer = expanded.acquire_or_queue(
+            **self.request(1, session="new", turn="t1")
+        )
+
+        self.assertEqual("READY", newcomer["ticket_state"])
+        self.assertEqual("READY", newcomer["state"])
+        self.assertEqual(0, expanded.snapshot()["active_count"])
+        self.assertEqual(2, expanded.snapshot()["reserved_count"])
+
+    def test_wait_fills_a_free_slot_without_an_external_release_trigger(self) -> None:
+        initial = self.manager(limit=1)
+        lease = initial.acquire_or_queue(**self.request(1, session="active", turn="t1"))
+        ready = initial.acquire_or_queue(**self.request(1, session="old", turn="t1"))
+        pending = initial.acquire_or_queue(**self.request(1, session="new", turn="t1"))
+        initial.release(
+            lease_id=str(lease["lease_id"]),
+            fencing_epoch=int(lease["fencing_epoch"]),
+        )
+        self.assertEqual(
+            "READY",
+            initial.wait(str(ready["ticket_id"]))["ticket_state"],
+        )
+        self.assertEqual(
+            "PENDING",
+            initial.wait(str(pending["ticket_id"]))["ticket_state"],
+        )
+
+        expanded = self.manager(limit=3)
+        refreshed = expanded.wait(str(pending["ticket_id"]))
+
+        self.assertEqual("READY", refreshed["ticket_state"])
+        self.assertEqual("READY", refreshed["state"])
+        self.assertEqual(2, expanded.snapshot()["reserved_count"])
+
     def test_cancel_session_cancels_ready_and_pending_tickets(self) -> None:
         store = self.manager(limit=1)
         lease = store.acquire_or_queue(**self.request(1, session="s1", turn="t1"))
@@ -1569,8 +1617,12 @@ class CodexCapacityTests(unittest.TestCase):
 
         canceled_turn = store.cancel_turn(session_id="s1", turn_id="t1")
         self.assertEqual(1, canceled_turn["canceled"])
-        pending_wait = self.cli("wait", "--ticket-id", str(two["ticket_id"]))
-        canceled_wait = self.cli("wait", "--ticket-id", str(one["ticket_id"]))
+        pending_wait = self.cli(
+            "wait", "--ticket-id", str(two["ticket_id"]), "--capacity", "0"
+        )
+        canceled_wait = self.cli(
+            "wait", "--ticket-id", str(one["ticket_id"]), "--capacity", "0"
+        )
         canceled_session = store.cancel_session(session_id="s1")
         reconciled = store.reconcile(session_id="s2")
 
