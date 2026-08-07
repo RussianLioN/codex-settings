@@ -204,8 +204,7 @@ class SnapshotBuilderTests(unittest.TestCase):
             "*.bin filter=lfs diff=lfs merge=lfs -text\n",
             encoding="utf-8",
         )
-        (self.repository / "ordinary.bin").write_bytes(b"ordinary content\n")
-        git(self.repository, "add", ".gitattributes", "ordinary.bin")
+        git(self.repository, "add", ".gitattributes")
         git(self.repository, "commit", "-qm", "lfs attributes")
         self.base_sha = git(self.repository, "rev-parse", "HEAD").decode().strip()
 

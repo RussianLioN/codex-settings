@@ -129,7 +129,10 @@ class AutonomousWorkflowResourceLimitTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.validator = load_validator()
 
-    def parse_fd_doctor_output(self, completed: subprocess.CompletedProcess[str]) -> dict[str, str]:
+    def parse_fd_doctor_output(
+        self,
+        completed: subprocess.CompletedProcess[str],
+    ) -> dict[str, str]:
         fields: dict[str, str] = {}
         for line in completed.stdout.splitlines():
             if "=" not in line:

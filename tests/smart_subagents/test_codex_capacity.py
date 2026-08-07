@@ -768,7 +768,10 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertEqual(1, result["suspect_leases"])
         self.assertEqual("SUSPECT", self.lease_states_by_session(first)["tab-a"])
         event_log = (self.state_dir / "events.jsonl").read_text(encoding="utf-8")
-        self.assertNotIn('"root_pid":700', event_log)
+        events = [json.loads(line) for line in event_log.splitlines()]
+        self.assertTrue(events)
+        for event in events:
+            self.assertNotIn("root_pid", event)
         self.assertNotIn("root-secret", event_log)
 
     def test_schema_v1_database_migrates_managed_root_registry_without_losing_leases(self) -> None:

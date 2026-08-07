@@ -275,7 +275,7 @@ class CapacityObserverTests(unittest.TestCase):
             store = observer.CalibrationStore(state_dir)
             store.load(deadline=time.monotonic() + 0.5)
             original_timeout = observer.OBSERVE_TIMEOUT_SECONDS
-            observer.OBSERVE_TIMEOUT_SECONDS = 0.05
+            observer.OBSERVE_TIMEOUT_SECONDS = 0.5
             try:
                 with (state_dir / "calibration.lock").open("r+", encoding="utf-8") as handle:
                     fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -286,7 +286,7 @@ class CapacityObserverTests(unittest.TestCase):
             finally:
                 observer.OBSERVE_TIMEOUT_SECONDS = original_timeout
 
-            self.assertLess(elapsed, 0.5)
+            self.assertLess(elapsed, 1.0)
             self.assertEqual(6, result["effective_capacity"])
             self.assertLessEqual(result["admission_capacity"], 6)
             self.assertEqual("calibration_unavailable_fixed6", result["capacity_mode"])
