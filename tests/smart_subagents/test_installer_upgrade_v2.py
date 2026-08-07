@@ -460,6 +460,51 @@ class InstallerUpgradePreparationV2Tests(unittest.TestCase):
         self.assertFalse(activation_dir.exists())
         self.assertFalse(marker.exists())
 
+    def test_persisted_recovery_seals_activation_after_publish_interruption(
+        self,
+    ) -> None:
+        proof = self.fixture.capture()
+        preparation = build_upgrade_preparation_v2(
+            proof=proof,
+            operation_id="op2_" + "a" * 32,
+            source_root=ROOT,
+            codex_binary=self.fixture.codex_binary,
+            policy_bundle=self.fixture.policy,
+            snapshotter=self.fixture.snapshotter,
+            interface_executor=self.fixture.interface_executor,
+        )
+        intent = preparation.definition.activation_intent
+        marker = installer_upgrade_v2._activation_tree_stage_owner_path_v2(intent)
+
+        with (
+            mock.patch.object(
+                installer_upgrade_v2,
+                "seal_activation_tree_v2",
+                side_effect=RuntimeError("simulated process interruption"),
+            ),
+            mock.patch.object(
+                installer_upgrade_v2,
+                "_remove_published_activation_tree_v2",
+            ),
+            self.assertRaisesRegex(RuntimeError, "process interruption"),
+        ):
+            ActivationPreparationExecutorV2(
+                definition=preparation.definition,
+                callbacks=preparation.callbacks,
+            ).execute()
+
+        self.assertTrue(intent.activation_dir.is_dir())
+        self.assertTrue(marker.is_file())
+        self.assertEqual(0o700, stat.S_IMODE(intent.activation_dir.stat().st_mode))
+
+        recovered = build_persisted_upgrade_preparation_recovery_v2(
+            journal_path=preparation.definition.journal_path,
+        ).recover()
+
+        self.assertEqual(intent.activation_id, recovered.activation_intent.activation_id)
+        self.assertEqual(0o500, stat.S_IMODE(intent.activation_dir.stat().st_mode))
+        self.assertFalse(marker.exists())
+
     def test_initial_install_moves_writable_stage_before_sealing_activation(
         self,
     ) -> None:
@@ -534,6 +579,60 @@ class InstallerUpgradePreparationV2Tests(unittest.TestCase):
                 ).execute()
 
         self.assertFalse(activation_dir.exists())
+        self.assertFalse(marker.exists())
+
+    def test_initial_install_recovers_publish_interruption_before_sealing(
+        self,
+    ) -> None:
+        codex_home = self.fixture.root / "i2"
+        codex_home.mkdir(mode=0o700)
+        layout = type(self.fixture.layout).for_codex_home(codex_home)
+        arguments = {
+            "source_root": ROOT,
+            "codex_home": codex_home,
+            "state_home": codex_home / "state" / "codex-smart-subagents-v2",
+            "codex_binary": self.fixture.codex_binary,
+            "policy_bundle": self.fixture.policy,
+            "installation_id": "ins2_" + "9" * 32,
+            "operation_id": "op2_" + "9" * 32,
+            "snapshotter": type(self.fixture.snapshotter)(
+                layout.managed_root / "codex-snapshots"
+            ),
+            "interface_executor": self.fixture.interface_executor,
+        }
+        preparation = build_initial_activation_preparation_v2(**arguments)
+        intent = preparation.definition.activation_intent
+        marker = installer_upgrade_v2._activation_tree_stage_owner_path_v2(intent)
+
+        with (
+            mock.patch.object(
+                installer_upgrade_v2,
+                "seal_activation_tree_v2",
+                side_effect=RuntimeError("simulated process interruption"),
+            ),
+            mock.patch.object(
+                installer_upgrade_v2,
+                "_remove_published_activation_tree_v2",
+            ),
+            self.assertRaisesRegex(RuntimeError, "process interruption"),
+        ):
+            ActivationPreparationExecutorV2(
+                definition=preparation.definition,
+                callbacks=preparation.callbacks,
+            ).execute()
+
+        self.assertTrue(intent.activation_dir.is_dir())
+        self.assertTrue(marker.is_file())
+        self.assertEqual(0o700, stat.S_IMODE(intent.activation_dir.stat().st_mode))
+
+        replay = build_initial_activation_preparation_v2(**arguments)
+        recovered = ActivationPreparationExecutorV2(
+            definition=replay.definition,
+            callbacks=replay.callbacks,
+        ).execute()
+
+        self.assertEqual(intent.activation_id, recovered.activation_intent.activation_id)
+        self.assertEqual(0o500, stat.S_IMODE(intent.activation_dir.stat().st_mode))
         self.assertFalse(marker.exists())
 
     def test_preparation_definition_and_receipt_freeze_transition_proof(self) -> None:

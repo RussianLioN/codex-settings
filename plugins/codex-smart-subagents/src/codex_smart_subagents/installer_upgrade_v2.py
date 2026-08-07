@@ -227,6 +227,25 @@ def build_initial_activation_preparation_v2(
             or persisted.transition_proof_snapshot is not None
         ):
             raise ValueError("persisted initial preparation differs from request")
+        marker = _activation_tree_stage_owner_path_v2(intent)
+        if os.path.lexists(intent.activation_dir) and os.path.lexists(marker):
+            if os.path.lexists(_activation_tree_stage_path_v2(intent)):
+                raise ValueError(
+                    "persisted initial activation has both published and staged trees"
+                )
+            try:
+                _finalize_published_activation_tree_v2(
+                    intent,
+                    expected_activation_tree_sha256=(
+                        persisted.activation_tree_logical.content_sha256
+                    ),
+                    tree_mismatch_message=(
+                        "persisted initial activation differs from preparation intent"
+                    ),
+                )
+            except BaseException:
+                _remove_published_activation_tree_v2(intent)
+                raise
         return InitialActivationPreparationV2(
             definition=persisted,
             callbacks=_initial_callbacks_for_intent_v2(
@@ -497,7 +516,24 @@ def _initial_callbacks_for_intent_v2(
         if received.to_document() != intent.to_document():
             raise ValueError("initial activation preparation intent changed")
         if os.path.lexists(received.activation_dir):
-            raise ValueError("initial activation path is already occupied")
+            stage = _activation_tree_stage_path_v2(received)
+            marker = _activation_tree_stage_owner_path_v2(received)
+            if os.path.lexists(stage) or not os.path.lexists(marker):
+                raise ValueError("initial activation path is already occupied")
+            try:
+                _finalize_published_activation_tree_v2(
+                    received,
+                    expected_activation_tree_sha256=(
+                        expected_activation_tree_sha256
+                    ),
+                    tree_mismatch_message=(
+                        "materialized initial activation differs from intent"
+                    ),
+                )
+            except BaseException:
+                _remove_published_activation_tree_v2(received)
+                raise
+            return
         _remove_incomplete_activation_stage_v2(received)
         stage = _activation_tree_stage_path_v2(received)
         previous_umask = os.umask(0o077)
@@ -519,17 +555,15 @@ def _initial_callbacks_for_intent_v2(
                 )
                 os.replace(stage, received.activation_dir)
                 published = True
-                seal_activation_tree_v2(received.activation_dir)
-                if (
-                    tree_content_sha256_v2(received.activation_dir)
-                    != expected_activation_tree_sha256
-                ):
-                    raise ValueError(
+                _finalize_published_activation_tree_v2(
+                    received,
+                    expected_activation_tree_sha256=(
+                        expected_activation_tree_sha256
+                    ),
+                    tree_mismatch_message=(
                         "materialized initial activation differs from intent"
-                    )
-                _fsync_materialized_tree_v2(received.activation_dir)
-                _fsync_directory(received.activation_dir.parent)
-                _remove_published_stage_owner_v2(received)
+                    ),
+                )
             except BaseException:
                 if published:
                     _remove_published_activation_tree_v2(received)
@@ -597,6 +631,26 @@ class PersistedUpgradePreparationRecoveryV2(ActivationPreparationExecutorV2):
         if not os.path.lexists(intent.activation_dir):
             _remove_incomplete_activation_stage_v2(intent)
             return self.abort_before_first_effect()
+
+        marker = _activation_tree_stage_owner_path_v2(intent)
+        if os.path.lexists(marker):
+            if os.path.lexists(_activation_tree_stage_path_v2(intent)):
+                raise ValueError(
+                    "persisted activation has both published and staged trees"
+                )
+            try:
+                _finalize_published_activation_tree_v2(
+                    intent,
+                    expected_activation_tree_sha256=(
+                        self.definition.activation_tree_logical.content_sha256
+                    ),
+                    tree_mismatch_message=(
+                        "persisted activation tree differs from preparation intent"
+                    ),
+                )
+            except BaseException:
+                _remove_published_activation_tree_v2(intent)
+                raise
 
         observed_tree = capture_tree_projection_v2(
             intent.activation_dir,
@@ -1441,11 +1495,27 @@ def _callbacks_for_intent(
             raise ValueError("activation preparation intent changed")
         stage = _activation_tree_stage_path_v2(received)
         marker = _activation_tree_stage_owner_path_v2(received)
-        if (
-            os.path.lexists(received.activation_dir)
-            or os.path.lexists(stage)
-            or os.path.lexists(marker)
-        ):
+        if os.path.lexists(received.activation_dir):
+            if os.path.lexists(stage) or not os.path.lexists(marker):
+                raise ValueError(
+                    "activation preparation tree path is already occupied"
+                )
+            try:
+                _finalize_published_activation_tree_v2(
+                    received,
+                    expected_activation_tree_sha256=(
+                        expected_activation_tree_sha256
+                    ),
+                    expected_source_digest=expected_source_digest,
+                    tree_mismatch_message=(
+                        "materialized activation tree differs from preparation intent"
+                    ),
+                )
+            except BaseException:
+                _remove_published_activation_tree_v2(received)
+                raise
+            return
+        if os.path.lexists(stage) or os.path.lexists(marker):
             raise ValueError("activation preparation tree path is already occupied")
         previous_umask = os.umask(0o077)
         try:
@@ -1468,31 +1538,16 @@ def _callbacks_for_intent(
                 )
                 os.replace(stage, received.activation_dir)
                 published = True
-                seal_activation_tree_v2(received.activation_dir)
-                if expected_source_digest is not None:
-                    observed_source_digest = (
-                        installer_source_digest_from_materialized_activation_v2(
-                            activation_dir=received.activation_dir,
-                            codex_binary=received.codex_binary,
-                            source_locator=received.source_locator,
-                            snapshot_locator=received.snapshot_locator,
-                            snapshot_path=received.snapshot_path,
-                        )
-                    )
-                    if observed_source_digest != expected_source_digest:
-                        raise ValueError(
-                            "sourceDigest differs from immutable candidate"
-                        )
-                if (
-                    tree_content_sha256_v2(received.activation_dir)
-                    != expected_activation_tree_sha256
-                ):
-                    raise ValueError(
+                _finalize_published_activation_tree_v2(
+                    received,
+                    expected_activation_tree_sha256=(
+                        expected_activation_tree_sha256
+                    ),
+                    expected_source_digest=expected_source_digest,
+                    tree_mismatch_message=(
                         "materialized activation tree differs from preparation intent"
-                    )
-                _fsync_materialized_tree_v2(received.activation_dir)
-                _fsync_directory(received.activation_dir.parent)
-                _remove_published_stage_owner_v2(received)
+                    ),
+                )
             except BaseException:
                 if published:
                     _remove_published_activation_tree_v2(received)
@@ -1765,12 +1820,54 @@ def _remove_published_activation_tree_v2(
 ) -> None:
     activation_dir = intent.activation_dir
     marker = _activation_tree_stage_owner_path_v2(intent)
+    if not os.path.lexists(marker):
+        raise ValueError("published activation has no ownership marker")
+    if os.path.lexists(_activation_tree_stage_path_v2(intent)):
+        raise ValueError("published activation retained its preparation stage")
+    _validate_activation_stage_owner_v2(intent)
     if os.path.lexists(activation_dir):
         _validate_owned_stage_tree_v2(activation_dir, normalized=False)
         shutil.rmtree(activation_dir)
         _fsync_directory(activation_dir.parent)
     if os.path.lexists(marker):
         _unlink_activation_stage_owner_v2(intent)
+
+
+def _finalize_published_activation_tree_v2(
+    intent: ActivationPreparationIntentV2,
+    *,
+    expected_activation_tree_sha256: str,
+    tree_mismatch_message: str,
+    expected_source_digest: str | None = None,
+) -> None:
+    activation_dir = intent.activation_dir
+    marker = _activation_tree_stage_owner_path_v2(intent)
+    if (
+        not os.path.lexists(activation_dir)
+        or not os.path.lexists(marker)
+        or os.path.lexists(_activation_tree_stage_path_v2(intent))
+    ):
+        raise ValueError("published activation ownership is incomplete")
+    _validate_activation_stage_owner_v2(intent)
+    _validate_owned_stage_tree_v2(activation_dir, normalized=False)
+    seal_activation_tree_v2(activation_dir)
+    if expected_source_digest is not None:
+        observed_source_digest = (
+            installer_source_digest_from_materialized_activation_v2(
+                activation_dir=activation_dir,
+                codex_binary=intent.codex_binary,
+                source_locator=intent.source_locator,
+                snapshot_locator=intent.snapshot_locator,
+                snapshot_path=intent.snapshot_path,
+            )
+        )
+        if observed_source_digest != expected_source_digest:
+            raise ValueError("sourceDigest differs from immutable candidate")
+    if tree_content_sha256_v2(activation_dir) != expected_activation_tree_sha256:
+        raise ValueError(tree_mismatch_message)
+    _fsync_materialized_tree_v2(activation_dir)
+    _fsync_directory(activation_dir.parent)
+    _remove_published_stage_owner_v2(intent)
 
 
 def _fsync_materialized_tree_v2(root: Path) -> None:
