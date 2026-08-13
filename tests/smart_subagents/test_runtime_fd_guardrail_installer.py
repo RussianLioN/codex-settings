@@ -51,8 +51,8 @@ class RuntimeFdGuardrailInstallerTests(unittest.TestCase):
         self.installed_inventory = self.root / "libexec" / "codex_process_inventory.py"
         self.hooks_json = self.codex_home / "hooks.json"
         self.installed_policy = self.codex_home / "hooks" / "autonomous_policy.py"
-        self.installed_capacity = self.codex_home / "hooks" / "codex_capacity.py"
-        self.installed_observer = self.codex_home / "hooks" / "codex_capacity_observer.py"
+        self.installed_capacity = self.installed_doctor.parent / "codex_capacity.py"
+        self.installed_observer = self.installed_doctor.parent / "codex_capacity_observer.py"
         self.installed_doctor.parent.mkdir()
         self.installed_highfd.parent.mkdir()
         self.installed_policy.parent.mkdir()
@@ -163,20 +163,13 @@ max_depth = 1
     def expected_paths(self) -> dict[str, Path]:
         return {
             "config.toml": self.config,
-            "AGENTS.md": self.agents,
             "codex_fd_doctor.sh": self.installed_doctor,
             "codex-highfd": self.installed_highfd,
             "codex_process_inventory.py": self.installed_inventory,
             "validate_wide_wave_manifest.py": self.installed_doctor.parent / "validate_wide_wave_manifest.py",
             "trusted-wide-wave-skills.json": self.codex_home / "config" / "trusted-wide-wave-skills.json",
-            "hooks.json": self.hooks_json,
-            "autonomous_policy.py": self.installed_policy,
             "codex_capacity.py": self.installed_capacity,
             "codex_capacity_observer.py": self.installed_observer,
-            **{
-                f"{name}.config.toml": self.codex_home / f"{name}.config.toml"
-                for name in PROFILE_VALUES
-            },
         }
 
     def tearDown(self) -> None:
@@ -207,8 +200,6 @@ max_depth = 1
                 str(self.installed_inventory),
                 "--source-process-inventory",
                 str(self.source_inventory),
-                "--source-autonomous-policy",
-                str(self.source_policy),
                 "--source-capacity",
                 str(self.source_capacity),
                 "--source-capacity-observer",
@@ -271,6 +262,102 @@ max_depth = 1
         self.assertFalse((self.codex_home / "backups" / "fd-guardrails-20260804-212800").exists())
         config = tomllib.loads(self.config.read_text(encoding="utf-8"))
         self.assertEqual(1000, config["agents"]["max_threads"])
+
+    def test_apply_rejects_missing_trusted_registry_from_preflight_bundle(self) -> None:
+        self.source_trusted_registry.unlink()
+
+        completed = self.run_installer("--apply")
+
+        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("managed_source_bundle_missing:trusted-wide-wave-skills.json", completed.stdout)
+        self.assertFalse((self.codex_home / "backups" / "fd-guardrails-20260804-212800").exists())
+
+    def test_apply_preserves_disabled_hooks_and_hook_artifacts(self) -> None:
+        self.config.write_text(
+            self.config.read_text(encoding="utf-8").replace(
+                "[features.multi_agent_v2]",
+                "[features]\nhooks = false\n\n[features.multi_agent_v2]",
+            ),
+            encoding="utf-8",
+        )
+        hooks_before = self.hooks_json.read_bytes()
+        policy_before = self.installed_policy.read_bytes()
+        hooks_mode = stat.S_IMODE(self.hooks_json.stat().st_mode)
+        policy_mode = stat.S_IMODE(self.installed_policy.stat().st_mode)
+
+        completed = self.run_installer("--apply")
+
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertEqual(hooks_before, self.hooks_json.read_bytes())
+        self.assertEqual(policy_before, self.installed_policy.read_bytes())
+        self.assertEqual(hooks_mode, stat.S_IMODE(self.hooks_json.stat().st_mode))
+        self.assertEqual(policy_mode, stat.S_IMODE(self.installed_policy.stat().st_mode))
+        applied = tomllib.loads(self.config.read_text(encoding="utf-8"))
+        self.assertFalse(applied["features"]["hooks"])
+
+    def test_receipt_records_atomic_preflight_bundle_and_compensation_order(self) -> None:
+        completed = self.run_installer("--apply")
+
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        backup = self.codex_home / "backups" / "fd-guardrails-20260804-212800"
+        receipt = json.loads((backup / "manifest.json").read_text(encoding="utf-8"))
+        expected = {
+            "config.toml",
+            "codex_fd_doctor.sh",
+            "codex-highfd",
+            "codex_process_inventory.py",
+            "validate_wide_wave_manifest.py",
+            "trusted-wide-wave-skills.json",
+            "codex_capacity.py",
+            "codex_capacity_observer.py",
+        }
+        self.assertEqual(expected, {target["id"] for target in receipt["targets"]})
+        self.assertEqual(
+            list(range(1, len(receipt["targets"]) + 1)),
+            sorted(target["compensation_order"] for target in receipt["targets"]),
+        )
+        for target in receipt["targets"]:
+            self.assertRegex(target["source_sha256"], r"^[0-9a-f]{64}$")
+            self.assertIn("backup", target)
+            self.assertIn("mode", target)
+
+    def test_check_rejects_installed_trusted_registry_drift(self) -> None:
+        applied = self.run_installer("--apply")
+        self.assertEqual(0, applied.returncode, applied.stdout + applied.stderr)
+        registry = self.codex_home / "config" / "trusted-wide-wave-skills.json"
+        registry.write_bytes(registry.read_bytes() + b"\n")
+
+        completed = self.run_installer()
+
+        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("installed_trusted_wide_wave_registry_drifted", completed.stdout)
+
+    def test_failure_after_capacity_restores_every_preflight_target_byte_and_mode(self) -> None:
+        original = {
+            path: (path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+            for path in (
+                self.config,
+                self.installed_doctor,
+                self.installed_highfd,
+            )
+        }
+        absent = (
+            self.installed_inventory,
+            self.installed_doctor.parent / "validate_wide_wave_manifest.py",
+            self.codex_home / "config" / "trusted-wide-wave-skills.json",
+            self.installed_capacity,
+            self.installed_observer,
+        )
+
+        completed = self.run_installer("--apply", "--fail-after-atomic-write", "7")
+
+        self.assertNotEqual(0, completed.returncode)
+        self.assertIn("automatic rollback applied", completed.stderr)
+        for path, (data, mode) in original.items():
+            self.assertEqual(data, path.read_bytes(), path)
+            self.assertEqual(mode, stat.S_IMODE(path.stat().st_mode), path)
+        for path in absent:
+            self.assertFalse(path.exists(), path)
 
     def test_dirty_managed_source_blocks_legacy_backup_migration_before_move(self) -> None:
         applied = self.run_installer("--apply")
@@ -349,58 +436,29 @@ max_concurrent_threads_per_session = 1000
         self.assertEqual(1, repaired_text.count("[features.multi_agent_v2]"))
 
     def test_apply_backs_up_repairs_and_rechecks_all_owned_files(self) -> None:
+        hooks_before = self.hooks_json.read_bytes()
+        policy_before = self.installed_policy.read_bytes()
         completed = self.run_installer("--apply")
 
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("status=APPLIED", completed.stdout)
-        self.assertIn("next_action=Откройте /hooks и подтвердите изменённые hooks", completed.stdout)
         config = tomllib.loads(self.config.read_text(encoding="utf-8"))
         self.assertEqual(20, config["agents"]["max_concurrent_threads_per_session"])
         self.assertNotIn("max_threads", config["agents"])
-        self.assertTrue(config["features"]["multi_agent_v2"]["enabled"])
         self.assertNotIn(
             "max_concurrent_threads_per_session",
             config["features"]["multi_agent_v2"],
         )
-        agents = self.agents.read_text(encoding="utf-8")
-        self.assertIn("не более 6 живых субагентов", agents)
-        self.assertIn("`BLOCK` запрещает новые запуски", agents)
-        self.assertIn("доверенной широкой волны 7-20", agents)
-        self.assertIn("--skill-id ID --skill-file PATH --manifest PATH", agents)
-        self.assertIn("роли широкой волны не запускают вложенное делегирование", agents)
-        self.assertIn("20 узлов умного графа маршрутизатора", agents)
-        self.assertIn("один интегратор для общих или генерируемых файлов", agents)
         self.assertEqual(self.source_doctor.read_bytes(), self.installed_doctor.read_bytes())
         self.assertEqual(self.source_highfd.read_bytes(), self.installed_highfd.read_bytes())
         self.assertEqual(0o755, stat.S_IMODE(self.installed_highfd.stat().st_mode))
         self.assertEqual(self.source_inventory.read_bytes(), self.installed_inventory.read_bytes())
-        self.assertEqual(self.source_policy.read_bytes(), self.installed_policy.read_bytes())
         self.assertEqual(self.source_capacity.read_bytes(), self.installed_capacity.read_bytes())
         self.assertEqual(self.source_observer.read_bytes(), self.installed_observer.read_bytes())
-        for profile_name, value in PROFILE_VALUES.items():
-            profile_text = (self.codex_home / f"{profile_name}.config.toml").read_text(encoding="utf-8")
-            profile = tomllib.loads(profile_text)
-            self.assertEqual(value, profile["agents"]["max_concurrent_threads_per_session"])
-            self.assertNotIn("max_threads", profile["agents"])
-            self.assertEqual(1, profile["agents"]["max_depth"])
+        self.assertEqual(hooks_before, self.hooks_json.read_bytes())
+        self.assertEqual(policy_before, self.installed_policy.read_bytes())
         self.assertTrue((self.installed_doctor.parent / "validate_wide_wave_manifest.py").is_file())
         self.assertTrue((self.codex_home / "config" / "trusted-wide-wave-skills.json").is_file())
-        hooks = json.loads(self.hooks_json.read_text(encoding="utf-8"))["hooks"]
-        self.assertIn("SessionEnd", hooks)
-        self.assertEqual("echo unrelated", hooks["PreToolUse"][0]["hooks"][0]["command"])
-        self.assertEqual("echo stop", hooks["Stop"][0]["hooks"][0]["command"])
-        self.assertEqual(3, len(hooks["PreToolUse"]))
-        self.assertEqual(2, len(hooks["Stop"]))
-        self.assertEqual(
-            ["echo keep-me", "echo keep-two"],
-            [hook["command"] for hook in hooks["PreToolUse"][2]["hooks"]],
-        )
-        for event in ("PreToolUse", "PermissionRequest", "PostToolUse", "SubagentStart", "SubagentStop", "Stop", "SessionEnd"):
-            managed = [entry for entry in hooks[event] if "autonomous_policy.py" in entry["hooks"][0]["command"]]
-            self.assertEqual(1, len(managed), event)
-            self.assertIn(str(self.installed_policy), managed[0]["hooks"][0]["command"])
-        self.assertEqual(1, hooks["PreToolUse"][1]["hooks"][0]["timeout"])
-        self.assertEqual(3, hooks["SessionEnd"][-1]["hooks"][0]["timeout"])
 
         backup = self.codex_home / "backups" / "fd-guardrails-20260804-212800"
         self.assertFalse(list((self.codex_home / "backups").glob("runtime-fd-*")))
@@ -418,17 +476,13 @@ max_concurrent_threads_per_session = 1000
         self.assertEqual(
             {
                 "config.toml",
-                "AGENTS.md",
                 "codex_fd_doctor.sh",
                 "codex-highfd",
                 "codex_process_inventory.py",
                 "validate_wide_wave_manifest.py",
                 "trusted-wide-wave-skills.json",
-                "hooks.json",
-                "autonomous_policy.py",
                 "codex_capacity.py",
                 "codex_capacity_observer.py",
-                *(f"{name}.config.toml" for name in PROFILE_VALUES),
             },
             {target["id"] for target in receipt["targets"]},
         )
@@ -471,7 +525,7 @@ max_concurrent_threads_per_session = 1000
         self.assertIn("status=OK", repeated.stdout)
         self.assertFalse((self.codex_home / "backups" / "fd-guardrails-20260804-212801").exists())
 
-    def test_full_version_two_rollback_restores_hooks_and_removes_new_targets(self) -> None:
+    def test_full_version_two_rollback_restores_preflight_targets_and_leaves_hooks_untouched(self) -> None:
         original_hooks = self.hooks_json.read_bytes()
         applied = self.run_installer("--apply")
         self.assertEqual(0, applied.returncode, applied.stdout + applied.stderr)
@@ -545,7 +599,7 @@ max_concurrent_threads_per_session = 1000
             self.installed_observer,
         ]
 
-        for index in range(1, len(self.expected_paths()) + 1):
+        for index in range(1, 9):
             with self.subTest(index=index):
                 completed = self.run_installer(
                     "--apply",
@@ -575,36 +629,35 @@ max_concurrent_threads_per_session = 1000
         self.assertFalse(self.installed_highfd.exists())
 
     def test_rejects_symlink_and_hardlink_managed_targets(self) -> None:
-        self.hooks_json.unlink()
-        outside = self.root / "outside-hooks.json"
+        self.installed_doctor.unlink()
+        outside = self.root / "outside-doctor.sh"
         outside.write_text("{}\n", encoding="utf-8")
-        self.hooks_json.symlink_to(outside)
+        self.installed_doctor.symlink_to(outside)
 
         symlink_result = self.run_installer("--apply")
 
         self.assertNotEqual(0, symlink_result.returncode)
         self.assertIn("managed target is a symlink", symlink_result.stderr)
-        self.hooks_json.unlink()
-        self.hooks_json.write_text("{}\n", encoding="utf-8")
-        linked = self.root / "policy-hardlink.py"
-        os.link(self.installed_policy, linked)
+        self.installed_doctor.unlink()
+        self.installed_doctor.write_text("old doctor\n", encoding="utf-8")
+        linked = self.root / "doctor-hardlink.sh"
+        os.link(self.installed_doctor, linked)
 
         hardlink_result = self.run_installer("--apply", "--timestamp", "20260804-212801")
 
         self.assertNotEqual(0, hardlink_result.returncode)
         self.assertIn("managed target hardlink count is unsafe", hardlink_result.stderr)
 
-    def test_rejects_non_finite_hooks_json_before_writing(self) -> None:
+    def test_preserves_non_finite_hooks_json_without_parsing(self) -> None:
         self.hooks_json.write_text('{"hooks":{"Stop":[]},"bad":NaN}\n', encoding="utf-8")
         before = self.hooks_json.read_bytes()
 
         completed = self.run_installer("--apply")
 
-        self.assertNotEqual(0, completed.returncode)
-        self.assertIn("non-finite JSON value is unsupported: NaN", completed.stderr)
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
         self.assertEqual(before, self.hooks_json.read_bytes())
 
-    def test_relative_codex_home_is_normalized_in_receipt_and_hook_command(self) -> None:
+    def test_relative_codex_home_is_normalized_in_receipt(self) -> None:
         completed = self.run_installer("--apply", codex_home=".codex", cwd=self.root)
 
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
@@ -617,12 +670,6 @@ max_concurrent_threads_per_session = 1000
         for target in receipt["targets"]:
             self.assertEqual(str(target_paths[target["id"]].resolve(strict=False)), target["target_path"])
             self.assertTrue(Path(target["target_path"]).is_absolute())
-        hooks = json.loads(self.hooks_json.read_text(encoding="utf-8"))["hooks"]
-        managed = [entry for entry in hooks["Stop"] if "autonomous_policy.py" in entry["hooks"][0]["command"]]
-        self.assertEqual(1, len(managed))
-        command = managed[0]["hooks"][0]["command"]
-        self.assertIn(str(self.installed_policy.resolve(strict=False)), command)
-        self.assertNotIn(" .codex/", command)
 
     def test_rejects_symlink_parent_inside_managed_tree(self) -> None:
         outside = self.root / "outside"
@@ -703,7 +750,7 @@ max_concurrent_threads_per_session = 1000
         self.assertIn("managed target parent permissions are unsafe", completed.stderr)
         self.assertFalse(list(backups.glob("fd-guardrails-*")))
 
-    def test_replaces_managed_hook_in_mixed_entry_without_reordering_handlers(self) -> None:
+    def test_preserves_hook_entry_without_reordering_handlers(self) -> None:
         self.hooks_json.write_text(
             json.dumps(
                 {
@@ -725,17 +772,14 @@ max_concurrent_threads_per_session = 1000
             + "\n",
             encoding="utf-8",
         )
+        before = self.hooks_json.read_bytes()
 
         completed = self.run_installer("--apply")
 
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
-        hooks = json.loads(self.hooks_json.read_text(encoding="utf-8"))["hooks"]
-        mixed_hooks = hooks["PreToolUse"][0]["hooks"]
-        self.assertEqual("echo keep-before", mixed_hooks[0]["command"])
-        self.assertIn(str(self.installed_policy), mixed_hooks[1]["command"])
-        self.assertEqual("echo keep-after", mixed_hooks[2]["command"])
+        self.assertEqual(before, self.hooks_json.read_bytes())
 
-    def test_does_not_treat_foreign_autonomous_policy_path_as_managed_hook(self) -> None:
+    def test_preserves_foreign_autonomous_policy_hook(self) -> None:
         self.hooks_json.write_text(
             json.dumps(
                 {
@@ -758,24 +802,14 @@ max_concurrent_threads_per_session = 1000
             + "\n",
             encoding="utf-8",
         )
+        before = self.hooks_json.read_bytes()
 
         completed = self.run_installer("--apply")
 
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
-        hooks = json.loads(self.hooks_json.read_text(encoding="utf-8"))["hooks"]
-        self.assertEqual(
-            "/usr/bin/python3 /tmp/autonomous_policy.py PreToolUse",
-            hooks["PreToolUse"][0]["hooks"][0]["command"],
-        )
-        managed = [
-            hook
-            for entry in hooks["PreToolUse"]
-            for hook in entry["hooks"]
-            if str(self.installed_policy) in hook.get("command", "")
-        ]
-        self.assertEqual(1, len(managed))
+        self.assertEqual(before, self.hooks_json.read_bytes())
 
-    def test_rejects_invalid_profile_caps_before_writing(self) -> None:
+    def test_preserves_profile_configs_without_validating_or_writing_them(self) -> None:
         scenarios = [
             (
                 "small",
@@ -838,13 +872,7 @@ max_depth = 1
                     profile_path.unlink()
                 else:
                     profile_path.write_text(profile_text, encoding="utf-8")
-                originals = {
-                    self.config: self.config.read_bytes(),
-                    self.agents: self.agents.read_bytes(),
-                    self.installed_doctor: self.installed_doctor.read_bytes(),
-                    self.hooks_json: self.hooks_json.read_bytes(),
-                    self.installed_policy: self.installed_policy.read_bytes(),
-                }
+                before = profile_path.read_bytes() if profile_path.exists() else None
 
                 completed = self.run_installer(
                     "--apply",
@@ -852,11 +880,8 @@ max_depth = 1
                     f"20260804-2129{index:02d}",
                 )
 
-                self.assertNotEqual(0, completed.returncode)
-                self.assertIn(expected_error, completed.stdout + completed.stderr)
-                self.assertFalse((self.codex_home / "backups" / f"fd-guardrails-20260804-2129{index:02d}").exists())
-                for path, data in originals.items():
-                    self.assertEqual(data, path.read_bytes(), path)
+                self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+                self.assertEqual(before, profile_path.read_bytes() if profile_path.exists() else None)
 
     def test_install_and_rollback_never_signal_codex_or_chatgpt(self) -> None:
         combined = SCRIPT.read_text(encoding="utf-8") + ROLLBACK.read_text(encoding="utf-8")
@@ -896,6 +921,9 @@ max_depth = 1
             "trusted-wide-wave-skills.json",
         }
         receipt["targets"] = [target for target in receipt["targets"] if target["id"] in keep_ids]
+        for target in receipt["targets"]:
+            target.pop("source_sha256")
+            target.pop("compensation_order")
         for backup_file in backup.iterdir():
             if backup_file.name == "manifest.json" or backup_file.name in {
                 target["backup"] for target in receipt["targets"] if target["existed"]
@@ -1067,6 +1095,19 @@ enabled = true
                     for key in ("id", "backup", "existed", "mode", "sha256")
                 }
             )
+        agents_data = self.agents.read_bytes()
+        (backup / "AGENTS.md").write_bytes(agents_data)
+        (backup / "AGENTS.md").chmod(0o600)
+        legacy_targets.insert(
+            1,
+            {
+                "id": "AGENTS.md",
+                "backup": "AGENTS.md",
+                "existed": True,
+                "mode": f"0o{stat.S_IMODE(self.agents.stat().st_mode):03o}",
+                "sha256": hashlib.sha256(agents_data).hexdigest(),
+            },
+        )
         (backup / "manifest.json").write_text(
             json.dumps(
                 {
@@ -1135,6 +1176,9 @@ enabled = true
                 "trusted-wide-wave-skills.json",
             }
         ]
+        for target in receipt["targets"]:
+            target.pop("source_sha256")
+            target.pop("compensation_order")
         for backup_file in (
             backup / "hooks.json",
             backup / "autonomous_policy.py",
@@ -1187,6 +1231,9 @@ enabled = true
             for target in receipt["targets"]
             if target["id"] != "codex-highfd"
         ]
+        for target in receipt["targets"]:
+            target.pop("source_sha256")
+            target.pop("compensation_order")
         (backup / "codex-highfd").unlink()
         (backup / "manifest.json").write_text(
             json.dumps(receipt, indent=2, sort_keys=True) + "\n",
