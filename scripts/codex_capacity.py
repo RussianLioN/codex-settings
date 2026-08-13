@@ -1911,9 +1911,11 @@ def prepare_wave(
     else:
         allowed = max(0, min(requested_wave_size, max_wave_size, available_capacity))
     decision = "ALLOW" if allowed == requested_wave_size and status == "GREEN" else "DEGRADED" if allowed > 0 else "BLOCK"
+    capacity_decision = "ALLOW" if decision == "ALLOW" else "WARN" if allowed > 0 else "BLOCK"
     return {
         "state": "OK",
         "decision": decision,
+        "capacity_decision": capacity_decision,
         "requested_wave_size": requested_wave_size,
         "allowed_wave_size": allowed,
         "observer_status": status,
