@@ -1906,7 +1906,18 @@ def prepare_wave(
         )
         max_wave_size = min(int(observation.get("max_wave_size") or 0), trust_cap, admission_capacity)
         available_capacity = admission_capacity
-    if requested_wave_size > DEFAULT_CAPACITY and partial_trust:
+    exact_nineteen_required = (
+        requested_wave_size > DEFAULT_CAPACITY
+        and bool(trust["trusted"])
+        and (
+            requested_wave_size != 19
+            or wide_wave_skill_id != "consilium"
+        )
+    )
+    if exact_nineteen_required:
+        trust["reason"] = "wide_wave_requires_exact_nineteen"
+        allowed = 0
+    elif requested_wave_size > DEFAULT_CAPACITY and partial_trust:
         allowed = 0
     else:
         allowed = max(0, min(requested_wave_size, max_wave_size, available_capacity))

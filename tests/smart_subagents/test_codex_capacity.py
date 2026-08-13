@@ -1364,13 +1364,13 @@ class CodexCapacityTests(unittest.TestCase):
         snapshot = self.write_observer_snapshot()
         observer_state_dir = self.root / "dynamic-observer"
         self.write_dynamic_green_observer_state(observer_state_dir)
-        skill, registry, manifest = self.write_trusted_wide_wave_inputs(wave_size=8)
+        skill, registry, manifest = self.write_trusted_wide_wave_inputs(wave_size=19)
         test_env = dict(self.env, CODEX_CAPACITY_TEST_MODE="1")
 
         missing = self.read_cli_json(
             "prepare-wave",
             "--wave-size",
-            "8",
+            "19",
             "--observer-snapshot-json",
             str(snapshot),
             "--observer-state-dir",
@@ -1386,7 +1386,7 @@ class CodexCapacityTests(unittest.TestCase):
         trusted = self.read_cli_json(
             "prepare-wave",
             "--wave-size",
-            "8",
+            "19",
             "--observer-snapshot-json",
             str(snapshot),
             "--observer-state-dir",
@@ -1407,8 +1407,38 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertEqual("wide_wave_requires_trust_manifest", missing["wide_wave_trust_reason"])
         self.assertEqual("ALLOW", trusted["decision"], trusted)
         self.assertEqual("ALLOW", trusted["capacity_decision"], trusted)
-        self.assertEqual(8, trusted["allowed_wave_size"])
+        self.assertEqual(19, trusted["allowed_wave_size"])
         self.assertEqual(True, trusted["wide_wave_trusted"])
+
+    def test_prepare_wave_rejects_trusted_non_nineteen_wide_wave(self) -> None:
+        snapshot = self.write_observer_snapshot()
+        observer_state_dir = self.root / "dynamic-observer"
+        self.write_dynamic_green_observer_state(observer_state_dir, effective_capacity=20)
+        skill, registry, manifest = self.write_trusted_wide_wave_inputs(wave_size=8)
+        test_env = dict(self.env, CODEX_CAPACITY_TEST_MODE="1")
+
+        result = self.read_cli_json(
+            "prepare-wave",
+            "--wave-size",
+            "8",
+            "--observer-snapshot-json",
+            str(snapshot),
+            "--observer-state-dir",
+            str(observer_state_dir),
+            "--wide-wave-skill-id",
+            "consilium",
+            "--wide-wave-skill-file",
+            str(skill),
+            "--wide-wave-manifest",
+            str(manifest),
+            "--wide-wave-trusted-registry",
+            str(registry),
+            env=test_env,
+        )
+
+        self.assertEqual("BLOCK", result["capacity_decision"], result)
+        self.assertEqual(0, result["allowed_wave_size"])
+        self.assertEqual("wide_wave_requires_exact_nineteen", result["wide_wave_trust_reason"])
 
     def test_prepare_wave_validator_uses_exact_requested_wave_size(self) -> None:
         snapshot = self.write_observer_snapshot()
