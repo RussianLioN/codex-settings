@@ -628,8 +628,8 @@ class PluginMetadataTests(unittest.TestCase):
             parse_single_deferred_stdout(result.stdout)
             self.assertLess(elapsed, 1.75)
 
-    def test_stop_parent_supervises_slow_bootstrap_json_and_select_imports(self) -> None:
-        for module_name in ("json", "select"):
+    def test_stop_parent_supervises_slow_bootstrap_json_and_selectors_imports(self) -> None:
+        for module_name in ("json", "selectors"):
             with self.subTest(module_name=module_name):
                 with tempfile.TemporaryDirectory() as tmp:
                     write_fake_module(
@@ -732,8 +732,8 @@ class PluginMetadataTests(unittest.TestCase):
         self.assertLess(p95, 1.5)
         self.assertLess(p99, 1.5)
 
-    def test_stop_parent_supervises_broken_bootstrap_json_and_select_imports(self) -> None:
-        for module_name in ("json", "select"):
+    def test_stop_parent_supervises_broken_bootstrap_json_and_selectors_imports(self) -> None:
+        for module_name in ("json", "selectors"):
             with self.subTest(module_name=module_name):
                 with tempfile.TemporaryDirectory() as tmp:
                     write_fake_module(
