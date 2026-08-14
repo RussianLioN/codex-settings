@@ -985,6 +985,73 @@ class SmartStoreV2Tests(unittest.TestCase):
         self.assertEqual(started.start_request_id, replay.start_request_id)
         self.assertTrue(replay.replayed)
 
+    def test_independent_nodes_allow_parallel_inflight_start_requests(self) -> None:
+        context = request_context()
+        first = node()
+        second = replace(node("node2_" + "b" * 32), ordinal=1)
+        binding = self.store.issue_turn_binding(context, ttl_seconds=120, now=NOW)
+        route_id = self.store.create_planned_route(
+            binding_id=binding.binding_id,
+            request_context=context,
+            request_key="idem2_" + "1" * 32,
+            request_hash=HEX["record"],
+            catalog_generation="catalog-v2",
+            algorithm_version="q+p+v+o-v2",
+            disposition="DELEGATE",
+            expires_at=NOW + timedelta(minutes=15),
+            plan_output={"status": "PLANNED"},
+            nodes=(first, second),
+            now=NOW + timedelta(seconds=1),
+        )
+
+        first_start = self.store.create_start_request(
+            route_id=route_id,
+            node_id=first.node_id,
+            request_context=context,
+            idempotency_key="idem2_" + "2" * 32,
+            activation_gate_fingerprint=activation_gate()["gateFingerprint"],
+            deadline_at=NOW + timedelta(seconds=180),
+            now=NOW + timedelta(seconds=2),
+        )
+        second_start = self.store.create_start_request(
+            route_id=route_id,
+            node_id=second.node_id,
+            request_context=context,
+            idempotency_key="idem2_" + "3" * 32,
+            activation_gate_fingerprint=activation_gate()["gateFingerprint"],
+            deadline_at=NOW + timedelta(seconds=180),
+            now=NOW + timedelta(seconds=3),
+        )
+
+        self.assertNotEqual(first_start.start_request_id, second_start.start_request_id)
+        self.assertEqual((1, 2), (first_start.queue_position, second_start.queue_position))
+        with closing(sqlite3.connect(self.path)) as connection:
+            self.assertEqual(
+                [
+                    (first.node_id, "ATTESTING", 1),
+                    (second.node_id, "ATTESTING", 2),
+                ],
+                connection.execute(
+                    "select j.boundary_id,s.state,j.queue_position "
+                    "from start_requests s join account_evidence_jobs j "
+                    "on j.evidence_job_id=s.evidence_job_id "
+                    "where s.route_id=? order by j.queue_position",
+                    (route_id,),
+                ).fetchall(),
+            )
+
+        with self.assertRaises(StateStoreV2Error) as caught:
+            self.store.create_start_request(
+                route_id=route_id,
+                node_id=first.node_id,
+                request_context=context,
+                idempotency_key="idem2_" + "4" * 32,
+                activation_gate_fingerprint=activation_gate()["gateFingerprint"],
+                deadline_at=NOW + timedelta(seconds=180),
+                now=NOW + timedelta(seconds=4),
+            )
+        self.assertEqual("START_REQUEST_INFLIGHT", caught.exception.code)
+
     def test_expired_first_start_stales_every_unstarted_node_atomically(self) -> None:
         context = request_context()
         peer = replace(node("node2_" + "b" * 32), ordinal=1)

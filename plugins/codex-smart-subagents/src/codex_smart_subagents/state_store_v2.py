@@ -3662,14 +3662,17 @@ class SmartStoreV2:
                     )
             unfinished = int(
                 self._connection.execute(
-                    "select count(*) from start_requests "
-                    "where route_id=? and state in ('ATTESTING','READY')",
-                    (route_id,),
+                    "select count(*) from start_requests s "
+                    "join account_evidence_jobs j "
+                    "on j.evidence_job_id=s.evidence_job_id "
+                    "where s.route_id=? and j.boundary_id=? "
+                    "and s.state in ('ATTESTING','READY')",
+                    (route_id, node_id),
                 ).fetchone()[0]
             )
             if unfinished:
                 self._fail(
-                    "START_REQUEST_INFLIGHT", "route already has an unfinished start"
+                    "START_REQUEST_INFLIGHT", "node already has an unfinished start"
                 )
             queued = int(
                 self._connection.execute(
