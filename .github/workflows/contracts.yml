@@ -19,6 +19,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+          python-version: "3.11"
           version: "0.10.2"
       - name: Выполнить полный шлюз качества
         run: make quality
