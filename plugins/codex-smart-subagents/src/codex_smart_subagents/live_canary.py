@@ -634,9 +634,14 @@ class CanaryProbeTargets:
     def __post_init__(self) -> None:
         snapshot_root = _safe_probe_root(self.snapshot_root)
         object.__setattr__(self, "snapshot_root", snapshot_root)
+        for field in ("snapshot_read_file", "snapshot_write_file"):
+            path = _safe_snapshot_probe_target(
+                getattr(self, field),
+                snapshot_root,
+                field,
+            )
+            object.__setattr__(self, field, path)
         regular = (
-            "snapshot_read_file",
-            "snapshot_write_file",
             "secret_read_file",
             "source_git_read_file",
             "controller_database_read_file",
@@ -645,9 +650,6 @@ class CanaryProbeTargets:
         for field in regular:
             path = _safe_probe_file(getattr(self, field), field)
             object.__setattr__(self, field, path)
-        for field in ("snapshot_read_file", "snapshot_write_file"):
-            if not getattr(self, field).is_relative_to(snapshot_root):
-                raise ValueError(f"{field} must be inside snapshot_root")
         controller = _safe_controller_socket(self.controller_socket)
         object.__setattr__(self, "controller_socket", controller)
 
@@ -1969,6 +1971,28 @@ def _safe_probe_file(path: Path, label: str) -> Path:
     return resolved
 
 
+def _safe_snapshot_probe_target(path: Path, root: Path, label: str) -> Path:
+    if not path.is_absolute() or path.is_symlink():
+        raise ValueError(f"{label} must be an absolute non-symlink path")
+    try:
+        resolved = path.resolve(strict=True)
+        metadata = resolved.stat()
+    except OSError as exc:
+        raise ValueError(f"{label} is unavailable") from exc
+    if resolved == root:
+        if not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid != os.getuid():
+            raise ValueError(f"{label} must be the owned snapshot root")
+        return resolved
+    if (
+        not resolved.is_relative_to(root)
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or metadata.st_nlink != 1
+    ):
+        raise ValueError(f"{label} must be an owned snapshot file")
+    return resolved
+
+
 def _safe_controller_socket(path: Path) -> Path:
     if not path.is_absolute() or path.is_symlink():
         raise ValueError("controller_socket must be an absolute socket path")
@@ -2179,7 +2203,11 @@ p=JSON.parse(ARGV[0])
 denied=[Errno::EACCES,Errno::EPERM]
 read_allowed=lambda do |path|
   begin
-    File.open(path,"rb"){|file| file.read(1)}
+    if File.directory?(path)
+      Dir.children(path)
+    else
+      File.open(path,"rb"){|file| file.read(1)}
+    end
     true
   rescue SystemCallError
     false
@@ -2193,6 +2221,23 @@ open_denied=lambda do |path,flags|
     denied.include?(error.class)
   end
 end
+snapshot_write_denied=lambda do |path|
+  unless File.directory?(path)
+    next open_denied.call(path,File::WRONLY)
+  end
+  target=File.join(path,".codex-permission-canary-#{Process.pid}")
+  begin
+    File.open(target,File::WRONLY|File::CREAT|File::EXCL,0600){|_|}
+    false
+  rescue SystemCallError => error
+    denied.include?(error.class)
+  ensure
+    begin
+      File.unlink(target) if File.exist?(target)
+    rescue SystemCallError
+    end
+  end
+end
 network_denied=lambda do |&operation|
   begin
     operation.call
@@ -2203,7 +2248,7 @@ network_denied=lambda do |&operation|
 end
 r={
 "snapshot_read_allowed"=>read_allowed.call(p["snapshot_read"]),
-"snapshot_write_denied"=>open_denied.call(p["snapshot_write"],File::WRONLY),
+"snapshot_write_denied"=>snapshot_write_denied.call(p["snapshot_write"]),
 "secret_read_denied"=>open_denied.call(p["secret_read"],File::RDONLY),
 "source_git_read_denied"=>open_denied.call(p["source_git_read"],File::RDONLY),
 "controller_database_read_denied"=>open_denied.call(p["controller_database_read"],File::RDONLY),

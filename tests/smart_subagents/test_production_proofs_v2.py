@@ -258,6 +258,16 @@ class ProductionProofsV2Tests(unittest.TestCase):
             self.digest, hashlib.sha256(self.executable.read_bytes()).hexdigest()
         )
 
+        snapshot.chmod(0o700)
+        read_probe.unlink()
+        snapshot.chmod(0o500)
+        captured.clear()
+
+        self.assertEqual("pc1_" + "A" * 43, probe(prepared))
+        empty_targets = captured["targets"]
+        self.assertEqual(snapshot, empty_targets.snapshot_read_file)
+        self.assertEqual(snapshot, empty_targets.snapshot_write_file)
+
 
 if __name__ == "__main__":
     unittest.main()

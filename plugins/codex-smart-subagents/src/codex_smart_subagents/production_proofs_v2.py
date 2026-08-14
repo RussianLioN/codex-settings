@@ -346,7 +346,7 @@ class LivePreparedPermissionProbeV2:
                 "PERMISSION_PROFILE_MISMATCH",
                 "аргументы запуска содержат другой профиль разрешений",
             )
-        read_probe = _first_regular_file(snapshot_root)
+        read_probe = _snapshot_probe_target(snapshot_root)
         targets = CanaryProbeTargets(
             snapshot_root=snapshot_root,
             snapshot_read_file=read_probe,
@@ -416,7 +416,7 @@ def _permission_overrides(argv: tuple[str, ...], profile: str) -> tuple[str, ...
     return tuple(values)
 
 
-def _first_regular_file(root: Path) -> Path:
+def _snapshot_probe_target(root: Path) -> Path:
     for candidate in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
         try:
             info = candidate.lstat()
@@ -424,7 +424,7 @@ def _first_regular_file(root: Path) -> Path:
             continue
         if stat.S_ISREG(info.st_mode) and not stat.S_ISLNK(info.st_mode):
             return candidate
-    _fail("PERMISSION_TARGET_UNAVAILABLE", "снимок репозитория не содержит файла")
+    return root
 
 
 def _file_identity(value: os.stat_result) -> tuple[int, ...]:
