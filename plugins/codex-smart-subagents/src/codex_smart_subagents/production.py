@@ -570,33 +570,87 @@ def materialize_boundary_permission_snapshot(path: Path) -> Path:
     temporary = parent / (
         f".{path.name}.{os.getpid()}.{os.urandom(8).hex()}"
     )
-    temporary.mkdir(mode=0o700)
     probe = temporary / "read-probe.txt"
-    descriptor = os.open(
-        probe,
-        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-        0o600,
-    )
     try:
-        view = memoryview(expected)
-        while view:
-            view = view[os.write(descriptor, view) :]
-        os.fsync(descriptor)
-        os.fchmod(descriptor, 0o400)
-    finally:
-        os.close(descriptor)
-    os.chmod(temporary, 0o500)
+        temporary.mkdir(mode=0o700)
+        descriptor = os.open(
+            probe,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+        try:
+            view = memoryview(expected)
+            while view:
+                view = view[os.write(descriptor, view) :]
+            os.fsync(descriptor)
+            os.fchmod(descriptor, 0o400)
+        finally:
+            os.close(descriptor)
+        own_metadata = temporary.lstat()
+        own_identity = (own_metadata.st_dev, own_metadata.st_ino)
+    except BaseException:
+        _remove_unpublished_boundary_snapshot(temporary, probe)
+        raise
+
     try:
         os.replace(temporary, path)
-    except BaseException:
-        try:
-            os.chmod(temporary, 0o700)
-            probe.unlink(missing_ok=True)
-            temporary.rmdir()
-        except OSError:
-            pass
+    except OSError:
+        _remove_unpublished_boundary_snapshot(temporary, probe)
+        if os.path.lexists(path):
+            try:
+                return _verify_boundary_permission_snapshot(path, expected)
+            except ControllerStartError:
+                pass
         raise
-    return _verify_boundary_permission_snapshot(path, expected)
+    except BaseException:
+        _remove_unpublished_boundary_snapshot(temporary, probe)
+        raise
+
+    try:
+        os.chmod(path, 0o500)
+        return _verify_boundary_permission_snapshot(path, expected)
+    except BaseException:
+        _remove_published_boundary_snapshot_if_owned(path, own_identity)
+        raise
+
+
+def _remove_unpublished_boundary_snapshot(temporary: Path, probe: Path) -> None:
+    try:
+        os.chmod(temporary, 0o700)
+    except BaseException:
+        pass
+    try:
+        probe.unlink(missing_ok=True)
+    except BaseException:
+        pass
+    try:
+        temporary.rmdir()
+    except BaseException:
+        pass
+
+
+def _remove_published_boundary_snapshot_if_owned(
+    path: Path,
+    own_identity: tuple[int, int],
+) -> None:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return
+    if (metadata.st_dev, metadata.st_ino) != own_identity:
+        return
+    try:
+        os.chmod(path, 0o700)
+    except BaseException:
+        pass
+    try:
+        (path / "read-probe.txt").unlink(missing_ok=True)
+    except BaseException:
+        pass
+    try:
+        path.rmdir()
+    except BaseException:
+        pass
 
 
 def _materialize_schema(path: Path, schema: dict[str, Any]) -> None:

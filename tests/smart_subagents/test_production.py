@@ -23,6 +23,7 @@ from codex_smart_subagents.daemon import (  # noqa: E402
 )
 from codex_smart_subagents.production import (  # noqa: E402
     build_production_runtime,
+    materialize_boundary_permission_snapshot,
     materialize_reader_schema,
 )
 from codex_smart_subagents.catalog import Catalog  # noqa: E402
@@ -94,6 +95,136 @@ class ProductionCompositionTests(unittest.TestCase):
         materialize_reader_schema(schema)
         self.assertEqual(READER_RESULT_SCHEMA, json.loads(schema.read_text()))
         self.assertEqual(0o400, stat.S_IMODE(schema.stat().st_mode))
+
+    def test_boundary_snapshot_keeps_source_private_until_replace_failure_cleanup(
+        self,
+    ) -> None:
+        parent = self.root / "contracts"
+        parent.mkdir(mode=0o700)
+        snapshot = parent / "boundary-permission-snapshot"
+        observed_modes: list[int] = []
+
+        class ReplaceFailure(RuntimeError):
+            pass
+
+        def fail_replace(
+            source: str | os.PathLike[str],
+            target: str | os.PathLike[str],
+        ) -> None:
+            del target
+            observed_modes.append(stat.S_IMODE(Path(source).stat().st_mode))
+            raise ReplaceFailure("forced replace failure")
+
+        with mock.patch(
+            "codex_smart_subagents.production.os.replace",
+            side_effect=fail_replace,
+        ):
+            with self.assertRaises(ReplaceFailure):
+                materialize_boundary_permission_snapshot(snapshot)
+
+        self.assertEqual([0o700], observed_modes)
+        self.assertFalse(os.path.lexists(snapshot))
+        self.assertEqual(
+            [],
+            [
+                item.name
+                for item in parent.iterdir()
+                if item.name.startswith(".boundary-")
+            ],
+        )
+
+    def test_boundary_snapshot_final_modes_and_idempotency(self) -> None:
+        parent = self.root / "contracts"
+        parent.mkdir(mode=0o700)
+        snapshot = parent / "boundary-permission-snapshot"
+
+        first = materialize_boundary_permission_snapshot(snapshot)
+        first_identity = (snapshot.stat().st_dev, snapshot.stat().st_ino)
+        second = materialize_boundary_permission_snapshot(snapshot)
+
+        self.assertEqual(first, second)
+        self.assertEqual(
+            first_identity,
+            (snapshot.stat().st_dev, snapshot.stat().st_ino),
+        )
+        self.assertEqual(0o500, stat.S_IMODE(snapshot.stat().st_mode))
+        self.assertEqual(
+            0o400,
+            stat.S_IMODE((snapshot / "read-probe.txt").stat().st_mode),
+        )
+
+    def test_boundary_snapshot_final_chmod_failure_removes_owned_publication(
+        self,
+    ) -> None:
+        parent = self.root / "contracts"
+        parent.mkdir(mode=0o700)
+        snapshot = parent / "boundary-permission-snapshot"
+        original_chmod = os.chmod
+
+        class ChmodFailure(RuntimeError):
+            pass
+
+        def fail_final_chmod(
+            target: str | os.PathLike[str],
+            mode: int,
+            *args: object,
+            **kwargs: object,
+        ) -> None:
+            if Path(target) == snapshot and mode == 0o500:
+                raise ChmodFailure("forced final chmod failure")
+            original_chmod(target, mode, *args, **kwargs)
+
+        with mock.patch(
+            "codex_smart_subagents.production.os.chmod",
+            side_effect=fail_final_chmod,
+        ):
+            with self.assertRaises(ChmodFailure):
+                materialize_boundary_permission_snapshot(snapshot)
+
+        self.assertFalse(os.path.lexists(snapshot))
+
+    def test_boundary_snapshot_uses_valid_concurrent_publication_and_cleans_temp(
+        self,
+    ) -> None:
+        parent = self.root / "contracts"
+        parent.mkdir(mode=0o700)
+        snapshot = parent / "boundary-permission-snapshot"
+        expected = b"adaptive boundary classifier read probe\n"
+        temporary_names: list[str] = []
+
+        def publish_competing_snapshot(
+            source: str | os.PathLike[str],
+            target: str | os.PathLike[str],
+        ) -> None:
+            temporary_names.append(Path(source).name)
+            competing = Path(target)
+            competing.mkdir(mode=0o700)
+            probe = competing / "read-probe.txt"
+            probe.write_bytes(expected)
+            probe.chmod(0o400)
+            competing.chmod(0o500)
+            raise FileExistsError("competing snapshot already exists")
+
+        with mock.patch(
+            "codex_smart_subagents.production.os.replace",
+            side_effect=publish_competing_snapshot,
+        ):
+            result = materialize_boundary_permission_snapshot(snapshot)
+
+        self.assertEqual(snapshot.resolve(strict=True), result)
+        self.assertEqual(0o500, stat.S_IMODE(snapshot.stat().st_mode))
+        self.assertEqual(
+            0o400,
+            stat.S_IMODE((snapshot / "read-probe.txt").stat().st_mode),
+        )
+        self.assertEqual(
+            [],
+            [
+                parent / name
+                for name in temporary_names
+                if (parent / name).exists()
+            ],
+        )
 
     def test_builds_controller_executor_and_closes_owned_socket(self) -> None:
         runtime = build_production_runtime(self.config)
