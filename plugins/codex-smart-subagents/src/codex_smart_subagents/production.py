@@ -571,8 +571,8 @@ def materialize_boundary_permission_snapshot(path: Path) -> Path:
         f".{path.name}.{os.getpid()}.{os.urandom(8).hex()}"
     )
     probe = temporary / "read-probe.txt"
+    temporary.mkdir(mode=0o700)
     try:
-        temporary.mkdir(mode=0o700)
         descriptor = os.open(
             probe,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL,
@@ -617,15 +617,15 @@ def materialize_boundary_permission_snapshot(path: Path) -> Path:
 def _remove_unpublished_boundary_snapshot(temporary: Path, probe: Path) -> None:
     try:
         os.chmod(temporary, 0o700)
-    except BaseException:
+    except OSError:
         pass
     try:
         probe.unlink(missing_ok=True)
-    except BaseException:
+    except OSError:
         pass
     try:
         temporary.rmdir()
-    except BaseException:
+    except OSError:
         pass
 
 
@@ -641,15 +641,15 @@ def _remove_published_boundary_snapshot_if_owned(
         return
     try:
         os.chmod(path, 0o700)
-    except BaseException:
+    except OSError:
         pass
     try:
         (path / "read-probe.txt").unlink(missing_ok=True)
-    except BaseException:
+    except OSError:
         pass
     try:
         path.rmdir()
-    except BaseException:
+    except OSError:
         pass
 
 

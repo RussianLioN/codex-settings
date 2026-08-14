@@ -133,6 +133,37 @@ class ProductionCompositionTests(unittest.TestCase):
             ],
         )
 
+    def test_boundary_snapshot_does_not_clean_preexisting_temporary_directory(
+        self,
+    ) -> None:
+        parent = self.root / "contracts"
+        parent.mkdir(mode=0o700)
+        snapshot = parent / "boundary-permission-snapshot"
+        random_suffix = b"\x42" * 8
+        temporary = parent / (
+            f".{snapshot.name}.{os.getpid()}.{random_suffix.hex()}"
+        )
+        temporary.mkdir(mode=0o700)
+        foreign_probe = temporary / "read-probe.txt"
+        foreign_probe.write_text("foreign\n", encoding="utf-8")
+        foreign_probe.chmod(0o600)
+        temporary.chmod(0o500)
+
+        with mock.patch(
+            "codex_smart_subagents.production.os.urandom",
+            return_value=random_suffix,
+        ):
+            with self.assertRaises(FileExistsError):
+                materialize_boundary_permission_snapshot(snapshot)
+
+        self.assertTrue(temporary.is_dir())
+        self.assertEqual(0o500, stat.S_IMODE(temporary.stat().st_mode))
+        self.assertEqual(
+            "foreign\n",
+            foreign_probe.read_text(encoding="utf-8"),
+        )
+        self.assertEqual(0o600, stat.S_IMODE(foreign_probe.stat().st_mode))
+
     def test_boundary_snapshot_final_modes_and_idempotency(self) -> None:
         parent = self.root / "contracts"
         parent.mkdir(mode=0o700)
@@ -182,6 +213,62 @@ class ProductionCompositionTests(unittest.TestCase):
                 materialize_boundary_permission_snapshot(snapshot)
 
         self.assertFalse(os.path.lexists(snapshot))
+
+    def test_boundary_snapshot_final_failure_preserves_replaced_foreign_snapshot(
+        self,
+    ) -> None:
+        parent = self.root / "contracts"
+        parent.mkdir(mode=0o700)
+        snapshot = parent / "boundary-permission-snapshot"
+        owned_backup = parent / "owned-published-snapshot"
+        expected = b"adaptive boundary classifier read probe\n"
+        original_chmod = os.chmod
+        original_replace = os.replace
+        owned_identity: list[tuple[int, int]] = []
+
+        class FinalFailure(RuntimeError):
+            pass
+
+        def fail_after_competing_replace(
+            target: str | os.PathLike[str],
+            mode: int,
+            *args: object,
+            **kwargs: object,
+        ) -> None:
+            if Path(target) == snapshot and mode == 0o500:
+                original_replace(snapshot, owned_backup)
+                metadata = owned_backup.stat()
+                owned_identity.append((metadata.st_dev, metadata.st_ino))
+                snapshot.mkdir(mode=0o700)
+                probe = snapshot / "read-probe.txt"
+                probe.write_bytes(expected)
+                original_chmod(probe, 0o400)
+                original_chmod(snapshot, 0o500)
+                raise FinalFailure("forced final failure after replacement")
+            original_chmod(target, mode, *args, **kwargs)
+
+        with mock.patch(
+            "codex_smart_subagents.production.os.chmod",
+            side_effect=fail_after_competing_replace,
+        ):
+            with self.assertRaises(FinalFailure):
+                materialize_boundary_permission_snapshot(snapshot)
+
+        self.assertTrue(snapshot.is_dir())
+        self.assertTrue(owned_backup.is_dir())
+        self.assertNotEqual(
+            owned_identity[0],
+            (snapshot.stat().st_dev, snapshot.stat().st_ino),
+        )
+        self.assertEqual(0o500, stat.S_IMODE(snapshot.stat().st_mode))
+        self.assertEqual(
+            expected,
+            (snapshot / "read-probe.txt").read_bytes(),
+        )
+        self.assertEqual(
+            0o400,
+            stat.S_IMODE((snapshot / "read-probe.txt").stat().st_mode),
+        )
 
     def test_boundary_snapshot_uses_valid_concurrent_publication_and_cleans_temp(
         self,
