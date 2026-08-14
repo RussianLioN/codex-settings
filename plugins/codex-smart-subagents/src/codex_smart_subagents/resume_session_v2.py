@@ -16,7 +16,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Iterator
 
-from . import finite_file_lock_v2
+from . import finite_file_lock_v2, operation_deadline_v2, sqlite_deadline_v2
 from .canonical_json import canonical_json_bytes, domain_fingerprint
 from .child_guard_v2 import system_process_start_marker_v2
 
@@ -95,6 +95,38 @@ def _deadline_limited_timeout(
 
 def _require_deadline_remaining(deadline: float | None) -> None:
     _deadline_limited_timeout(deadline, _LEASE_LOCK_TIMEOUT_SECONDS)
+
+
+def _deadline_remaining_seconds(deadline: float | None) -> float:
+    if deadline is None:
+        return 0.2
+    if type(deadline) not in {int, float}:
+        raise ResumeSessionV2Error(
+            "RESUME_DEADLINE_INVALID",
+            "абсолютный срок resume неверен",
+        )
+    remaining = float(deadline) - time.monotonic()
+    if remaining <= 0:
+        raise ResumeSessionV2Error(
+            "RESUME_DEADLINE_EXCEEDED",
+            "истёк абсолютный срок resume",
+        )
+    return remaining
+
+
+def _operation_deadline_for_resume_sqlite_v2(
+    *,
+    operation: str,
+    deadline: float | None,
+) -> operation_deadline_v2.OperationDeadlineV2:
+    current = operation_deadline_v2.current_operation_deadline_v2()
+    if current is not None:
+        return current
+    return operation_deadline_v2.OperationDeadlineV2.start(
+        operation=operation,
+        timeout_seconds=_deadline_remaining_seconds(deadline),
+        timeout_code="RESUME_DEADLINE_EXCEEDED",
+    )
 
 
 class ResumeSessionV2Error(RuntimeError):
@@ -862,66 +894,99 @@ def discover_resume_candidate_v2(
     database_path: Path,
     *,
     session_id: str,
+    deadline: float | None = None,
 ) -> ResumeCandidateV2 | None:
     """Выбирает самый новый доказуемый маршрут выбранного Codex-диалога."""
 
     _require_text(session_id, "sessionId")
-    connection = sqlite3.connect(
-        database_path.resolve().as_uri() + "?mode=ro",
-        uri=True,
-        timeout=0.2,
+    _require_deadline_remaining(deadline)
+    operation_deadline = _operation_deadline_for_resume_sqlite_v2(
+        operation="resume-candidate-discovery",
+        deadline=deadline,
     )
-    connection.row_factory = sqlite3.Row
+    connection: sqlite3.Connection | None = None
     try:
-        connection.execute("pragma query_only=on")
-        rows = connection.execute(
-            "select route_id,shell_session_id,session_id,turn_id,state,"
-            "terminal_result_json from routes where session_id=? "
-            "and disposition='DELEGATE' order by created_at desc,route_id desc limit 32",
-            (session_id,),
-        ).fetchall()
-        for route in rows:
-            state = str(route["state"])
-            if state not in _ELIGIBLE_ROUTE_STATES:
-                continue
-            start = connection.execute(
-                "select s.start_request_id,j.boundary_id from start_requests s "
-                "left join account_evidence_jobs j on j.evidence_job_id=s.evidence_job_id "
-                "where s.route_id=? order by s.created_at desc,s.start_request_id desc limit 1",
-                (route["route_id"],),
-            ).fetchone()
-            node_id: str | None
-            start_request_id: str | None
-            if start is not None:
-                start_request_id = str(start["start_request_id"])
-                node_id = (
-                    None if start["boundary_id"] is None else str(start["boundary_id"])
-                )
-            else:
-                node = connection.execute(
-                    "select node_id from nodes where route_id=? "
-                    "order by ordinal,node_id limit 1",
+        with operation_deadline_v2.scoped_current_deadline_v2(operation_deadline):
+            operation_deadline.checkpoint()
+            timeout = operation_deadline.bounded_timeout_seconds(
+                local_cap_seconds=0.2
+            )
+            connection = sqlite_deadline_v2.connect_sqlite_with_deadline_v2(
+                database_path.resolve().as_uri() + "?mode=ro",
+                uri=True,
+                timeout=timeout,
+            )
+            connection.row_factory = sqlite3.Row
+            connection.execute("pragma query_only=on")
+            rows = connection.execute(
+                "select route_id,shell_session_id,session_id,turn_id,state,"
+                "terminal_result_json from routes where session_id=? "
+                "and disposition='DELEGATE' "
+                "order by created_at desc,route_id desc limit 32",
+                (session_id,),
+            ).fetchall()
+            for route in rows:
+                state = str(route["state"])
+                if state not in _ELIGIBLE_ROUTE_STATES:
+                    continue
+                start = connection.execute(
+                    "select s.start_request_id,j.boundary_id from start_requests s "
+                    "left join account_evidence_jobs j on "
+                    "j.evidence_job_id=s.evidence_job_id "
+                    "where s.route_id=? "
+                    "order by s.created_at desc,s.start_request_id desc limit 1",
                     (route["route_id"],),
                 ).fetchone()
-                start_request_id = None
-                node_id = None if node is None else str(node["node_id"])
-            if node_id is None:
-                continue
-            return ResumeCandidateV2(
-                route_id=str(route["route_id"]),
-                original_shell_session_id=str(route["shell_session_id"]),
-                original_session_id=str(route["session_id"]),
-                original_turn_id=str(route["turn_id"]),
-                route_state=state,
-                start_request_id=start_request_id,
-                node_id=node_id,
-                terminal_result_unacknowledged=(
-                    state in _TERMINAL_ROUTE_STATES
-                    and route["terminal_result_json"] is not None
-                ),
-            )
+                node_id: str | None
+                start_request_id: str | None
+                if start is not None:
+                    start_request_id = str(start["start_request_id"])
+                    node_id = (
+                        None
+                        if start["boundary_id"] is None
+                        else str(start["boundary_id"])
+                    )
+                else:
+                    node = connection.execute(
+                        "select node_id from nodes where route_id=? "
+                        "order by ordinal,node_id limit 1",
+                        (route["route_id"],),
+                    ).fetchone()
+                    start_request_id = None
+                    node_id = None if node is None else str(node["node_id"])
+                if node_id is None:
+                    continue
+                candidate = ResumeCandidateV2(
+                    route_id=str(route["route_id"]),
+                    original_shell_session_id=str(route["shell_session_id"]),
+                    original_session_id=str(route["session_id"]),
+                    original_turn_id=str(route["turn_id"]),
+                    route_state=state,
+                    start_request_id=start_request_id,
+                    node_id=node_id,
+                    terminal_result_unacknowledged=(
+                        state in _TERMINAL_ROUTE_STATES
+                        and route["terminal_result_json"] is not None
+                    ),
+                )
+                operation_deadline.checkpoint()
+                _require_deadline_remaining(deadline)
+                return candidate
+            operation_deadline.checkpoint()
+            _require_deadline_remaining(deadline)
+    except operation_deadline_v2.OperationDeadlineExceededV2 as exc:
+        raise ResumeSessionV2Error(
+            "RESUME_DEADLINE_EXCEEDED",
+            "истёк абсолютный срок resume",
+        ) from exc
+    except sqlite3.Error as exc:
+        raise ResumeSessionV2Error(
+            "RESUME_ROUTE_READ_FAILED",
+            "не удалось прочитать маршрут resume",
+        ) from exc
     finally:
-        connection.close()
+        if connection is not None:
+            connection.close()
     return None
 
 
@@ -932,22 +997,44 @@ def route_is_terminal_v2(
     deadline: float | None = None,
 ) -> bool:
     _require_text(route_id, "routeId")
-    timeout_seconds = _deadline_limited_timeout(deadline, 0.2)
-    connection = sqlite3.connect(
-        database_path.resolve().as_uri() + "?mode=ro",
-        uri=True,
-        timeout=timeout_seconds,
+    _require_deadline_remaining(deadline)
+    operation_deadline = _operation_deadline_for_resume_sqlite_v2(
+        operation="resume-route-terminal-check",
+        deadline=deadline,
     )
+    connection: sqlite3.Connection | None = None
     try:
-        _require_deadline_remaining(deadline)
-        connection.execute("pragma query_only=on")
-        _require_deadline_remaining(deadline)
-        row = connection.execute(
-            "select state from routes where route_id=?",
-            (route_id,),
-        ).fetchone()
+        with operation_deadline_v2.scoped_current_deadline_v2(operation_deadline):
+            operation_deadline.checkpoint()
+            timeout_seconds = operation_deadline.bounded_timeout_seconds(
+                local_cap_seconds=0.2
+            )
+            connection = sqlite_deadline_v2.connect_sqlite_with_deadline_v2(
+                database_path.resolve().as_uri() + "?mode=ro",
+                uri=True,
+                timeout=timeout_seconds,
+            )
+            connection.execute("pragma query_only=on")
+            operation_deadline.checkpoint()
+            row = connection.execute(
+                "select state from routes where route_id=?",
+                (route_id,),
+            ).fetchone()
+            operation_deadline.checkpoint()
+            _require_deadline_remaining(deadline)
+    except operation_deadline_v2.OperationDeadlineExceededV2 as exc:
+        raise ResumeSessionV2Error(
+            "RESUME_DEADLINE_EXCEEDED",
+            "истёк абсолютный срок resume",
+        ) from exc
+    except sqlite3.Error as exc:
+        raise ResumeSessionV2Error(
+            "RESUME_ROUTE_READ_FAILED",
+            "не удалось прочитать маршрут resume",
+        ) from exc
     finally:
-        connection.close()
+        if connection is not None:
+            connection.close()
     if row is None:
         raise ResumeSessionV2Error(
             "RESUME_ATTACHMENT_CHANGED", "присоединённый маршрут отсутствует"

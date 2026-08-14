@@ -80,6 +80,7 @@ def handle(payload: dict[str, Any], environ: Mapping[str, str]) -> dict[str, Any
             candidate = discover_resume_candidate_v2(
                 binding.database_path,
                 session_id=payload["session_id"],
+                deadline=deadline,
             )
             prepared = store.prepare_resume(
                 session_id=payload["session_id"],

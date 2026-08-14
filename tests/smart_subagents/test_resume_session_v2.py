@@ -16,7 +16,11 @@ REPO = Path(__file__).resolve().parents[2]
 PLUGIN_ROOT = REPO / "plugins" / "codex-smart-subagents"
 sys.path.insert(0, str(PLUGIN_ROOT / "src"))
 
-from codex_smart_subagents import finite_file_lock_v2  # noqa: E402
+from codex_smart_subagents import (  # noqa: E402
+    finite_file_lock_v2,
+    operation_deadline_v2,
+    sqlite_deadline_v2,
+)
 from codex_smart_subagents.canonical_json import (  # noqa: E402
     canonical_json_bytes,
     domain_fingerprint,
@@ -218,6 +222,58 @@ class RootSessionLeaseStoreV2Tests(unittest.TestCase):
             )
 
         self.assertEqual("RESUME_DEADLINE_EXCEEDED", captured.exception.code)
+
+    def test_route_terminal_lookup_honors_deadline_while_database_is_locked(
+        self,
+    ) -> None:
+        database_path = self.state_home / "routes.sqlite3"
+        route_id = "route2_" + "4" * 32
+        connection = sqlite3.connect(database_path)
+        try:
+            connection.execute("create table routes(route_id text primary key,state text)")
+            connection.execute(
+                "insert into routes(route_id,state) values(?,?)",
+                (route_id, "SUCCEEDED"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        observed_deadlines = []
+        real_connect = sqlite_deadline_v2.connect_sqlite_with_deadline_v2
+
+        def observing_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
+            observed_deadlines.append(
+                operation_deadline_v2.current_operation_deadline_v2()
+            )
+            return real_connect(*args, **kwargs)
+
+        locking_connection = sqlite3.connect(database_path)
+        try:
+            locking_connection.execute("begin exclusive")
+            started = time.monotonic()
+            with mock.patch(
+                "codex_smart_subagents.sqlite_deadline_v2."
+                "connect_sqlite_with_deadline_v2",
+                side_effect=observing_connect,
+            ):
+                with self.assertRaises(ResumeSessionV2Error) as captured:
+                    route_is_terminal_v2(
+                        database_path,
+                        route_id,
+                        deadline=started + 0.05,
+                    )
+            elapsed = time.monotonic() - started
+        finally:
+            locking_connection.rollback()
+            locking_connection.close()
+
+        self.assertIn(
+            captured.exception.code,
+            {"RESUME_DEADLINE_EXCEEDED", "RESUME_ROUTE_READ_FAILED"},
+        )
+        self.assertTrue(observed_deadlines)
+        self.assertTrue(all(deadline is not None for deadline in observed_deadlines))
+        self.assertLess(elapsed, 0.20)
 
     def test_authorize_route_does_not_hide_expired_deadline(self) -> None:
         with self.assertRaises(ResumeSessionV2Error) as captured:
@@ -610,6 +666,73 @@ class RootSessionLeaseStoreV2Tests(unittest.TestCase):
         self.assertIsNotNone(candidate)
         self.assertEqual("route2_" + "2" * 32, candidate.route_id)
         self.assertEqual("node2_" + "2" * 32, candidate.node_id)
+
+    def test_candidate_discovery_honors_deadline_while_database_is_locked(
+        self,
+    ) -> None:
+        database = self.state_home / "routes.sqlite3"
+        route_id = "route2_" + "1" * 32
+        with sqlite3.connect(database) as connection:
+            connection.executescript(
+                "create table routes (route_id text, shell_session_id text, "
+                "session_id text, turn_id text, state text, disposition text, "
+                "terminal_result_json text, created_at text);"
+                "create table nodes (route_id text, node_id text, ordinal integer);"
+                "create table start_requests (start_request_id text, route_id text, "
+                "evidence_job_id text, created_at text);"
+                "create table account_evidence_jobs (evidence_job_id text, boundary_id text);"
+            )
+            connection.execute(
+                "insert into routes values (?,?,?,?,?,'DELEGATE',null,?)",
+                (
+                    route_id,
+                    "cas2_original",
+                    "codex-session",
+                    "turn-1",
+                    "RUNNING",
+                    "2026-08-05T10:00:00Z",
+                ),
+            )
+            connection.execute(
+                "insert into nodes values (?,?,0)",
+                (route_id, "node2_" + "1" * 32),
+            )
+        observed_deadlines = []
+        real_connect = sqlite_deadline_v2.connect_sqlite_with_deadline_v2
+
+        def observing_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
+            observed_deadlines.append(
+                operation_deadline_v2.current_operation_deadline_v2()
+            )
+            return real_connect(*args, **kwargs)
+
+        locking_connection = sqlite3.connect(database)
+        try:
+            locking_connection.execute("begin exclusive")
+            started = time.monotonic()
+            with mock.patch(
+                "codex_smart_subagents.sqlite_deadline_v2."
+                "connect_sqlite_with_deadline_v2",
+                side_effect=observing_connect,
+            ):
+                with self.assertRaises(ResumeSessionV2Error) as captured:
+                    discover_resume_candidate_v2(
+                        database,
+                        session_id="codex-session",
+                        deadline=started + 0.05,
+                    )
+            elapsed = time.monotonic() - started
+        finally:
+            locking_connection.rollback()
+            locking_connection.close()
+
+        self.assertIn(
+            captured.exception.code,
+            {"RESUME_DEADLINE_EXCEEDED", "RESUME_ROUTE_READ_FAILED"},
+        )
+        self.assertTrue(observed_deadlines)
+        self.assertTrue(all(deadline is not None for deadline in observed_deadlines))
+        self.assertLess(elapsed, 0.20)
 
     def test_v3_separates_stable_identity_from_mutable_snapshot(self) -> None:
         root = self._root(101, "start-original")
