@@ -12,7 +12,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 FD_DOCTOR = ROOT / "scripts" / "codex_fd_doctor.sh"
 CAPACITY = ROOT / "scripts" / "codex_capacity.py"
-NODE_REPL = "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl"
 
 
 class FdDoctorProcessInventoryTests(unittest.TestCase):
@@ -190,7 +189,11 @@ class FdDoctorProcessInventoryTests(unittest.TestCase):
 
     def test_single_snapshot_classifies_twenty_one_attached_helpers(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp", prefix="codex-inventory-") as root:
-            snapshot = Path(root) / "snapshot.json"
+            root_path = Path(root)
+            snapshot = root_path / "snapshot.json"
+            node_repl = root_path / "node_repl"
+            node_repl.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            node_repl.chmod(0o700)
             processes = [
                 {
                     "pid": 100,
@@ -219,8 +222,8 @@ class FdDoctorProcessInventoryTests(unittest.TestCase):
                         "uid": os.getuid(),
                         "user": "operator",
                         "started_epoch": 902.0,
-                        "executable": NODE_REPL,
-                        "command": f"{NODE_REPL} {index}",
+                        "executable": str(node_repl),
+                        "command": f"{node_repl} {index}",
                     }
                 )
             snapshot.write_text(
