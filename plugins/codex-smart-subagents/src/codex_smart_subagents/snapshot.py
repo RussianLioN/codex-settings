@@ -330,10 +330,10 @@ def _verify_clean_head(
         deadline_at=deadline_at,
     )
     worktree_paths = _parse_worktree_paths(worktree_output)
-    if len(worktree_paths) != 1 or worktree_paths[0] != repository:
+    if sum(path == repository for path in worktree_paths) != 1:
         raise SnapshotError(
             "EXTERNAL_WORKTREE",
-            "linked or external Git worktrees are not supported",
+            "snapshot source must be exactly one registered Git worktree",
         )
     return resolved_base
 

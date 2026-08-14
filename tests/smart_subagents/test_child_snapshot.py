@@ -14,6 +14,7 @@ REPO = Path(__file__).resolve().parents[2]
 PLUGIN_ROOT = REPO / "plugins" / "codex-smart-subagents"
 sys.path.insert(0, str(PLUGIN_ROOT / "src"))
 
+import codex_smart_subagents.snapshot as snapshot_module  # noqa: E402
 from codex_smart_subagents.snapshot import (  # noqa: E402
     SnapshotBuilder,
     SnapshotError,
@@ -131,7 +132,7 @@ class SnapshotBuilderTests(unittest.TestCase):
                 destination=self.base / "wrong-head",
             )
 
-    def test_rejects_symlinks_submodules_lfs_and_linked_worktrees(self) -> None:
+    def test_rejects_symlinks_submodules_and_lfs(self) -> None:
         symlink = self.repository / "link"
         symlink.symlink_to("tracked.txt")
         git(self.repository, "add", "link")
@@ -155,13 +156,6 @@ class SnapshotBuilderTests(unittest.TestCase):
             self.build("lfs")
 
         git(self.repository, "reset", "--hard", "HEAD~1")
-        linked = self.base / "linked-worktree"
-        git(self.repository, "worktree", "add", "-q", "-b", "linked-test", str(linked))
-        self.base_sha = git(self.repository, "rev-parse", "HEAD").decode().strip()
-        with self.assertRaisesRegex(SnapshotError, "EXTERNAL_WORKTREE"):
-            self.build("linked")
-        git(self.repository, "worktree", "remove", "--force", str(linked))
-
         nested = self.base / "nested"
         nested_sha = initialize_repository(nested)
         del nested_sha
@@ -179,6 +173,48 @@ class SnapshotBuilderTests(unittest.TestCase):
         self.base_sha = git(self.repository, "rev-parse", "HEAD").decode().strip()
         with self.assertRaisesRegex(SnapshotError, "SUBMODULE"):
             self.build("submodule")
+
+    def test_accepts_registered_primary_and_linked_worktrees(self) -> None:
+        linked = self.base / "linked-worktree"
+        git(
+            self.repository,
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "linked-test",
+            str(linked),
+        )
+        try:
+            primary = self.build("primary-with-linked-peer")
+            linked_sha = git(linked, "rev-parse", "HEAD").decode().strip()
+            linked_result = self.builder.build(
+                repository=linked,
+                base_sha=linked_sha,
+                destination=self.base / "linked-snapshot",
+            )
+
+            self.assertEqual("tracked\n", (primary.root / "tracked.txt").read_text())
+            self.assertEqual(
+                "tracked\n",
+                (linked_result.root / "tracked.txt").read_text(),
+            )
+            self.assertEqual(primary.manifest_sha256, linked_result.manifest_sha256)
+        finally:
+            git(self.repository, "worktree", "remove", "--force", str(linked))
+
+    def test_rejects_worktree_list_without_exact_current_repository(self) -> None:
+        other = self.base / "other-repository"
+        other.mkdir()
+        for paths in ([other], [self.repository, self.repository]):
+            with self.subTest(paths=paths):
+                with mock.patch.object(
+                    snapshot_module,
+                    "_parse_worktree_paths",
+                    return_value=paths,
+                ):
+                    with self.assertRaisesRegex(SnapshotError, "EXTERNAL_WORKTREE"):
+                        self.build(f"bad-worktrees-{len(paths)}")
 
     def test_enforces_file_and_total_size_limits(self) -> None:
         (self.repository / "large.txt").write_bytes(b"x" * 128)
