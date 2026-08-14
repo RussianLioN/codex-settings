@@ -28,3 +28,18 @@ Consilium и её изолированный установщик. Он не в�
 Проверки и текущий статус приведены в
 `docs/analysis/2026-08-13-consilium-19-wide-preflight-rca.md` и
 `docs/plans/2026-08-13-consilium-19-wide-preflight-recovery.md`.
+
+## Планы и история
+
+Нормативная текущая работа описана в
+[`docs/plans/2026-08-14-codex-capacity-observer-specification.md`](docs/plans/2026-08-14-codex-capacity-observer-specification.md);
+она не реализована этой документационной веткой. Действующий общий ограничитель
+описан в
+[`docs/plans/2026-08-13-consilium-19-wide-preflight-recovery.md`](docs/plans/2026-08-13-consilium-19-wide-preflight-recovery.md).
+
+Исторические материалы от 2026-08-05 (не текущий договор и не доказательство
+живого состояния):
+
+- [разбор истощения файловых дескрипторов](docs/analysis/2026-08-05-codex-cli-fd-exhaustion-rca.md);
+- [план доверенных широких волн субагентов](docs/superpowers/plans/2026-08-05-trusted-wide-subagent-waves.md);
+- [план защиты по запасу процессов](docs/superpowers/plans/2026-08-05-runtime-process-headroom-guard.md).
