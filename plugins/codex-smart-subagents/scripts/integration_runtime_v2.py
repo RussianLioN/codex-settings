@@ -29,7 +29,11 @@ from codex_smart_subagents.canonical_json import (
     canonical_json_bytes,
     domain_fingerprint,
 )
-from codex_smart_subagents import finite_file_lock_v2, operation_deadline_v2
+from codex_smart_subagents import (
+    finite_file_lock_v2,
+    operation_deadline_v2,
+    sqlite_deadline_v2,
+)
 from codex_smart_subagents.state_store_v2 import (
     RequestContextV2,
     canonical_activation_gate_v2,
@@ -783,40 +787,43 @@ def durable_smart_turn_state_v2(
             timeout_seconds=_remaining_hook_budget(deadline),
             timeout_code="STOP_SMART_PLAN_DEADLINE",
         )
-    with operation_deadline_v2.scoped_current_deadline_v2(operation_deadline):
-        operation_deadline.checkpoint()
-        database_path = provider.runtime_binding().database_path
-        operation_deadline.checkpoint()
-    _remaining_hook_budget(deadline)
-    before = _private_database_identity(database_path)
     try:
-        timeout = min(0.15, _remaining_hook_budget(deadline))
-        connection = sqlite3.connect(
-            database_path.as_uri() + "?mode=ro",
-            uri=True,
-            timeout=timeout,
-        )
-        try:
-            connection.execute("pragma query_only=on")
-            connection.set_progress_handler(
-                lambda: int(time.monotonic() >= deadline),
-                1_000,
-            )
-            rows = connection.execute(
-                "select disposition,state from routes "
-                "where shell_session_id=? and session_id=? and turn_id=? limit 2",
-                (
-                    record.shell_session_id,
-                    record.session_id,
-                    record.turn_id,
-                ),
-            ).fetchall()
+        with operation_deadline_v2.scoped_current_deadline_v2(operation_deadline):
+            operation_deadline.checkpoint()
+            database_path = provider.runtime_binding().database_path
+            operation_deadline.checkpoint()
             _remaining_hook_budget(deadline)
-        finally:
-            connection.close()
-    except sqlite3.Error as exc:
+            before = _private_database_identity(database_path)
+            timeout = operation_deadline.bounded_timeout_seconds(
+                local_cap_seconds=0.15
+            )
+            connection = sqlite_deadline_v2.connect_sqlite_with_deadline_v2(
+                database_path.as_uri() + "?mode=ro",
+                uri=True,
+                timeout=timeout,
+            )
+            try:
+                connection.execute("pragma query_only=on")
+                rows = connection.execute(
+                    "select disposition,state from routes "
+                    "where shell_session_id=? and session_id=? and turn_id=? limit 2",
+                    (
+                        record.shell_session_id,
+                        record.session_id,
+                        record.turn_id,
+                    ),
+                ).fetchall()
+                operation_deadline.checkpoint()
+            finally:
+                connection.close()
+            after = _private_database_identity(database_path)
+            operation_deadline.checkpoint()
+            _remaining_hook_budget(deadline)
+    except (
+        operation_deadline_v2.OperationDeadlineExceededV2,
+        sqlite3.Error,
+    ) as exc:
         raise IntegrationV2Error("не удалось прочитать состояние smart_plan") from exc
-    after = _private_database_identity(database_path)
     _remaining_hook_budget(deadline)
     if after != before:
         raise IntegrationV2Error("база smart_plan изменилась при проверке")
@@ -1171,51 +1178,51 @@ def _verify_pinned_database_rows_v2(
             timeout_seconds=_remaining_hook_budget(deadline),
             timeout_code="STOP_SMART_PLAN_DEADLINE",
         )
-    operation_deadline.checkpoint()
-    before = _private_database_identity(database_path)
     connection: sqlite3.Connection | None = None
     try:
-        sqlite_timeout = operation_deadline.bounded_timeout_seconds(
-            local_cap_seconds=0.05
-        )
-        connection = sqlite3.connect(
-            database_path.as_uri() + "?mode=ro",
-            uri=True,
-            timeout=sqlite_timeout,
-        )
-        connection.row_factory = sqlite3.Row
-        busy_timeout_ms = operation_deadline.bounded_timeout_ms(local_cap_ms=50)
-        connection.execute(f"pragma busy_timeout={busy_timeout_ms}")
-        connection.set_progress_handler(
-            lambda: int(
-                operation_deadline.remaining_nanoseconds() <= 0
-                or time.monotonic() >= deadline
-            ),
-            1000,
-        )
-        operation_deadline.checkpoint()
-        connection.execute("pragma query_only=on")
-        application_id = int(connection.execute("pragma application_id").fetchone()[0])
-        user_version = int(connection.execute("pragma user_version").fetchone()[0])
-        if application_id != APPLICATION_ID or user_version != 2:
-            raise IntegrationV2Error("метаданные базы smart_plan неверны")
-        operation_deadline.checkpoint()
-        quick = connection.execute("pragma quick_check").fetchall()
-        if [tuple(row) for row in quick] != [("ok",)]:
-            raise IntegrationV2Error("quick_check базы smart_plan не прошёл")
-        operation_deadline.checkpoint()
-        integrity = connection.execute("pragma integrity_check").fetchall()
-        if [tuple(row) for row in integrity] != [("ok",)]:
-            raise IntegrationV2Error("integrity_check базы smart_plan не прошёл")
-        operation_deadline.checkpoint()
-        if connection.execute("pragma foreign_key_check").fetchone() is not None:
-            raise IntegrationV2Error("foreign_key_check базы smart_plan не прошёл")
-        operation_deadline.checkpoint()
-        schema = database_schema_fingerprint(connection, version=2)
-        operation_deadline.checkpoint()
-        identity_rows = connection.execute("select * from database_identity").fetchall()
-        controller_rows = connection.execute("select * from controller_state").fetchall()
-        operation_deadline.checkpoint()
+        with operation_deadline_v2.scoped_current_deadline_v2(operation_deadline):
+            operation_deadline.checkpoint()
+            before = _private_database_identity(database_path)
+            sqlite_timeout = operation_deadline.bounded_timeout_seconds(
+                local_cap_seconds=0.05
+            )
+            busy_timeout_ms = operation_deadline.bounded_timeout_ms(local_cap_ms=50)
+            connection = sqlite_deadline_v2.connect_sqlite_with_deadline_v2(
+                database_path.as_uri() + "?mode=ro",
+                uri=True,
+                timeout=sqlite_timeout,
+                busy_timeout_ms=busy_timeout_ms,
+            )
+            connection.row_factory = sqlite3.Row
+            operation_deadline.checkpoint()
+            connection.execute("pragma query_only=on")
+            application_id = int(
+                connection.execute("pragma application_id").fetchone()[0]
+            )
+            user_version = int(connection.execute("pragma user_version").fetchone()[0])
+            if application_id != APPLICATION_ID or user_version != 2:
+                raise IntegrationV2Error("метаданные базы smart_plan неверны")
+            operation_deadline.checkpoint()
+            quick = connection.execute("pragma quick_check").fetchall()
+            if [tuple(row) for row in quick] != [("ok",)]:
+                raise IntegrationV2Error("quick_check базы smart_plan не прошёл")
+            operation_deadline.checkpoint()
+            integrity = connection.execute("pragma integrity_check").fetchall()
+            if [tuple(row) for row in integrity] != [("ok",)]:
+                raise IntegrationV2Error("integrity_check базы smart_plan не прошёл")
+            operation_deadline.checkpoint()
+            if connection.execute("pragma foreign_key_check").fetchone() is not None:
+                raise IntegrationV2Error("foreign_key_check базы smart_plan не прошёл")
+            operation_deadline.checkpoint()
+            schema = database_schema_fingerprint(connection, version=2)
+            operation_deadline.checkpoint()
+            identity_rows = connection.execute(
+                "select * from database_identity"
+            ).fetchall()
+            controller_rows = connection.execute(
+                "select * from controller_state"
+            ).fetchall()
+            operation_deadline.checkpoint()
     except (
         sqlite3.Error,
         SchemaProjectionError,
@@ -1225,7 +1232,6 @@ def _verify_pinned_database_rows_v2(
         raise IntegrationV2Error("база smart_plan не прошла проверку схемы") from exc
     finally:
         if connection is not None:
-            connection.set_progress_handler(None, 0)
             connection.close()
     if len(identity_rows) != 1 or len(controller_rows) != 1:
         raise IntegrationV2Error("база smart_plan не содержит одиночной привязки")
@@ -1716,35 +1722,48 @@ def _route_state_from_database_v2(
     *,
     deadline: float,
 ) -> str:
-    before = _private_database_identity(database_path)
-    try:
-        timeout = min(0.15, _remaining_hook_budget(deadline))
-        connection = sqlite3.connect(
-            database_path.as_uri() + "?mode=ro",
-            uri=True,
-            timeout=timeout,
+    _remaining_hook_budget(deadline)
+    operation_deadline = operation_deadline_v2.current_operation_deadline_v2()
+    if operation_deadline is None:
+        operation_deadline = operation_deadline_v2.OperationDeadlineV2.start(
+            operation="stop-smart-plan-route-state",
+            timeout_seconds=_remaining_hook_budget(deadline),
+            timeout_code="STOP_SMART_PLAN_DEADLINE",
         )
-        try:
-            connection.execute("pragma query_only=on")
-            connection.set_progress_handler(
-                lambda: int(time.monotonic() >= deadline),
-                1_000,
+    try:
+        with operation_deadline_v2.scoped_current_deadline_v2(operation_deadline):
+            operation_deadline.checkpoint()
+            before = _private_database_identity(database_path)
+            timeout = operation_deadline.bounded_timeout_seconds(
+                local_cap_seconds=0.15
             )
-            rows = connection.execute(
-                "select disposition,state from routes "
-                "where shell_session_id=? and session_id=? and turn_id=? limit 2",
-                (
-                    record.shell_session_id,
-                    record.session_id,
-                    record.turn_id,
-                ),
-            ).fetchall()
+            connection = sqlite_deadline_v2.connect_sqlite_with_deadline_v2(
+                database_path.as_uri() + "?mode=ro",
+                uri=True,
+                timeout=timeout,
+            )
+            try:
+                connection.execute("pragma query_only=on")
+                rows = connection.execute(
+                    "select disposition,state from routes "
+                    "where shell_session_id=? and session_id=? and turn_id=? limit 2",
+                    (
+                        record.shell_session_id,
+                        record.session_id,
+                        record.turn_id,
+                    ),
+                ).fetchall()
+                operation_deadline.checkpoint()
+            finally:
+                connection.close()
+            after = _private_database_identity(database_path)
+            operation_deadline.checkpoint()
             _remaining_hook_budget(deadline)
-        finally:
-            connection.close()
-    except sqlite3.Error as exc:
+    except (
+        operation_deadline_v2.OperationDeadlineExceededV2,
+        sqlite3.Error,
+    ) as exc:
         raise IntegrationV2Error("не удалось прочитать состояние smart_plan") from exc
-    after = _private_database_identity(database_path)
     _remaining_hook_budget(deadline)
     if after != before:
         raise IntegrationV2Error("база smart_plan изменилась при проверке")

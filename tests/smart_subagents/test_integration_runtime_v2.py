@@ -50,6 +50,7 @@ from codex_smart_subagents.supervised_subprocess_v2 import (  # noqa: E402
     SupervisedCommandOutputLimitExceededV2,
 )
 from codex_smart_subagents import operation_deadline_v2  # noqa: E402
+from codex_smart_subagents import sqlite_deadline_v2  # noqa: E402
 from codex_smart_subagents.mcp_contracts_v2 import (  # noqa: E402
     get_tool_definitions_v2,
 )
@@ -1327,25 +1328,144 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
         self.addCleanup(publisher.cleanup)
         self._publish_launch_gate(environment)
         config = IntegrationConfigV2.from_environ(environment)
+        observed_deadlines = []
+        real_connect = sqlite_deadline_v2.connect_sqlite_with_deadline_v2
+
+        def observing_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
+            observed_deadlines.append(
+                operation_deadline_v2.current_operation_deadline_v2()
+            )
+            return real_connect(*args, **kwargs)
 
         locking_connection = sqlite3.connect(database_path)
         try:
             locking_connection.execute("begin exclusive")
             started = time.monotonic()
-            with self.assertRaisesRegex(IntegrationV2Error, "закреплённая база"):
-                runtime.durable_stop_smart_turn_state_v2(
-                    config,
-                    self.record,
-                    environ=environment,
-                    deadline=started + 0.005,
-                    absence_checker=lambda *_args, **_kwargs: None,
-                    health_checker=lambda **_kwargs: None,
-                )
+            with mock.patch(
+                "codex_smart_subagents.sqlite_deadline_v2."
+                "connect_sqlite_with_deadline_v2",
+                side_effect=observing_connect,
+            ):
+                with self.assertRaisesRegex(IntegrationV2Error, "закреплённая база"):
+                    runtime.durable_stop_smart_turn_state_v2(
+                        config,
+                        self.record,
+                        environ=environment,
+                        deadline=started + 0.005,
+                        absence_checker=lambda *_args, **_kwargs: None,
+                        health_checker=lambda **_kwargs: None,
+                    )
             elapsed = time.monotonic() - started
         finally:
             locking_connection.rollback()
             locking_connection.close()
 
+        self.assertTrue(observed_deadlines)
+        self.assertTrue(all(deadline is not None for deadline in observed_deadlines))
+        self.assertLess(elapsed, 0.04)
+
+    def test_stop_route_state_read_honors_deadline_while_database_is_locked(
+        self,
+    ) -> None:
+        runtime = sys.modules["integration_runtime_v2"]
+        database_id = "db2_" + "f" * 32
+        database_path = self._write_schema_routes_database(
+            database_id,
+            include_route=True,
+        )
+        observed_deadlines = []
+        real_connect = sqlite_deadline_v2.connect_sqlite_with_deadline_v2
+
+        def observing_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
+            observed_deadlines.append(
+                operation_deadline_v2.current_operation_deadline_v2()
+            )
+            return real_connect(*args, **kwargs)
+
+        locking_connection = sqlite3.connect(database_path)
+        try:
+            locking_connection.execute("begin exclusive")
+            started = time.monotonic()
+            with mock.patch(
+                "codex_smart_subagents.sqlite_deadline_v2."
+                "connect_sqlite_with_deadline_v2",
+                side_effect=observing_connect,
+            ):
+                with self.assertRaisesRegex(
+                    IntegrationV2Error,
+                    "состояние smart_plan",
+                ) as captured:
+                    runtime._route_state_from_database_v2(
+                        database_path,
+                        self.record,
+                        deadline=started + 0.005,
+                    )
+            elapsed = time.monotonic() - started
+        finally:
+            locking_connection.rollback()
+            locking_connection.close()
+
+        self.assertIsInstance(captured.exception, IntegrationV2Error)
+        self.assertTrue(observed_deadlines)
+        self.assertTrue(all(deadline is not None for deadline in observed_deadlines))
+        self.assertLess(elapsed, 0.04)
+
+    def test_durable_smart_turn_state_honors_deadline_while_database_is_locked(
+        self,
+    ) -> None:
+        runtime = sys.modules["integration_runtime_v2"]
+        decision = self._decision()
+        database_path = decision.runtime_binding.database_path
+        connection = sqlite3.connect(database_path)
+        try:
+            connection.execute(
+                "create table routes ("
+                "shell_session_id text not null,"
+                "session_id text not null,"
+                "turn_id text not null,"
+                "disposition text not null,"
+                "state text not null)"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        database_path.chmod(0o600)
+        observed_deadlines = []
+        real_connect = sqlite_deadline_v2.connect_sqlite_with_deadline_v2
+
+        def observing_connect(*args: object, **kwargs: object) -> sqlite3.Connection:
+            observed_deadlines.append(
+                operation_deadline_v2.current_operation_deadline_v2()
+            )
+            return real_connect(*args, **kwargs)
+
+        locking_connection = sqlite3.connect(database_path)
+        try:
+            locking_connection.execute("begin exclusive")
+            started = time.monotonic()
+            with mock.patch(
+                "codex_smart_subagents.sqlite_deadline_v2."
+                "connect_sqlite_with_deadline_v2",
+                side_effect=observing_connect,
+            ):
+                with self.assertRaisesRegex(
+                    IntegrationV2Error,
+                    "состояние smart_plan",
+                ) as captured:
+                    runtime.durable_smart_turn_state_v2(
+                        self.config,
+                        self.record,
+                        resolver_factory=lambda _config: _Resolver(decision),
+                        deadline=started + 0.005,
+                    )
+            elapsed = time.monotonic() - started
+        finally:
+            locking_connection.rollback()
+            locking_connection.close()
+
+        self.assertIsInstance(captured.exception, IntegrationV2Error)
+        self.assertTrue(observed_deadlines)
+        self.assertTrue(all(deadline is not None for deadline in observed_deadlines))
         self.assertLess(elapsed, 0.04)
 
     def test_stop_rejects_minimal_commit_receipt_document(self) -> None:
