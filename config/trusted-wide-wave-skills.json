@@ -1,4 +1,26 @@
 {
   "schema_version": 1,
-  "trusted_skills": []
+  "trusted_skills": [
+    {
+      "skill_id": "consilium",
+      "sha256": "98dc2531865512f8628326d03ed8152bb2d896909eb6353ff200b3a798799264",
+      "max_live_wave": 19,
+      "execution_kind": "flat-trusted-wide-wave",
+      "fallback": "6+6+6+1"
+    },
+    {
+      "skill_id": "expert-consilium",
+      "sha256": "0d98d933edad48fefb175587265810b4c6051bb50a82a8b60b5ebef8b183220c",
+      "max_live_wave": 13,
+      "execution_kind": "flat-trusted-wide-wave",
+      "fallback": "6+6+1"
+    },
+    {
+      "skill_id": "consilium-lean",
+      "sha256": "aa3fdc73d332faed449dbb7478f2655dffdbcd16330a26f7452457b8c046330c",
+      "max_live_wave": 20,
+      "execution_kind": "flat-trusted-wide-wave",
+      "fallback": "chunks<=6"
+    }
+  ]
 }

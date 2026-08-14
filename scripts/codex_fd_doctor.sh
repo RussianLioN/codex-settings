@@ -122,6 +122,7 @@ output_value() {
 
 mcp_command=${CODEX_FD_DOCTOR_MCP_COMMAND:-$(read_mcp_command 2>/dev/null || true)}
 agent_thread_cap=${CODEX_FD_DOCTOR_AGENT_THREAD_CAP:-$(read_agent_thread_cap 2>/dev/null || true)}
+[[ -n "$agent_thread_cap" ]] || agent_thread_cap=not_configured
 script_dir=${0:A:h}
 process_inventory=${CODEX_FD_DOCTOR_PROCESS_INVENTORY:-$script_dir/codex_process_inventory.py}
 inventory_status=unavailable
@@ -211,6 +212,9 @@ else
 fi
 doctor_status=OK
 reasons=()
+allowed_wave_size=$wave_size
+capacity_decision=ALLOW
+wide_wave_manifest_trusted=0
 
 block() {
   doctor_status=BLOCK
@@ -276,8 +280,12 @@ if (( wave_size > DEFAULT_WAVE_SIZE )); then
     block "wide_wave_requires_trust_manifest"
   else
     script_dir=${0:A:h}
-    manifest_validator=${CODEX_FD_DOCTOR_MANIFEST_VALIDATOR:-$script_dir/validate_wide_wave_manifest.py}
-    trusted_registry=${CODEX_FD_DOCTOR_TRUSTED_REGISTRY:-${CODEX_HOME:-$HOME/.codex}/config/trusted-wide-wave-skills.json}
+    manifest_validator=$script_dir/validate_wide_wave_manifest.py
+    trusted_registry=${CODEX_HOME:-$HOME/.codex}/config/trusted-wide-wave-skills.json
+    if [[ "$test_mode" == 1 ]]; then
+      manifest_validator=${CODEX_FD_DOCTOR_MANIFEST_VALIDATOR:-$manifest_validator}
+      trusted_registry=${CODEX_FD_DOCTOR_TRUSTED_REGISTRY:-$trusted_registry}
+    fi
     if [[ ! -f "$trusted_registry" && -f "$script_dir/../config/trusted-wide-wave-skills.json" ]]; then
       trusted_registry="$script_dir/../config/trusted-wide-wave-skills.json"
     fi
@@ -292,13 +300,68 @@ if (( wave_size > DEFAULT_WAVE_SIZE )); then
         if [[ -n "$validator_reasons" && "$validator_reasons" != "none" ]]; then
           reasons+=("$validator_reasons")
         fi
+      else
+        wide_wave_manifest_trusted=1
       fi
     fi
   fi
 fi
 
-if (( wave_size > DEFAULT_WAVE_SIZE )) && [[ "$doctor_status" == WARN ]]; then
-  block "wide_wave_cannot_start_with_warnings"
+if (( wave_size > DEFAULT_WAVE_SIZE )) && (( wide_wave_manifest_trusted == 1 )); then
+  capacity_script=$script_dir/codex_capacity.py
+  if [[ "$test_mode" == 1 ]]; then
+    capacity_script=${CODEX_FD_DOCTOR_CAPACITY_SCRIPT:-$capacity_script}
+  fi
+  if [[ ! -f "$capacity_script" ]]; then
+    block "capacity_preflight_unavailable"
+  else
+    capacity_args=(prepare-wave --wave-size "$wave_size" --wide-wave-skill-id "$skill_id" --wide-wave-skill-file "$skill_file" --wide-wave-manifest "$manifest")
+    if [[ "$test_mode" == 1 ]]; then
+      capacity_args+=(--wide-wave-trusted-registry "$trusted_registry")
+      if [[ -n ${CODEX_FD_DOCTOR_CAPACITY_OBSERVER_SNAPSHOT:-} ]]; then
+        capacity_args+=(--observer-snapshot-json "$CODEX_FD_DOCTOR_CAPACITY_OBSERVER_SNAPSHOT")
+      fi
+      if [[ -n ${CODEX_FD_DOCTOR_CAPACITY_OBSERVER_STATE_DIR:-} ]]; then
+        capacity_args+=(--observer-state-dir "$CODEX_FD_DOCTOR_CAPACITY_OBSERVER_STATE_DIR")
+      fi
+      capacity_output=$(CODEX_CAPACITY_TEST_MODE=1 python3 "$capacity_script" "${capacity_args[@]}" 2>&1)
+    else
+      capacity_output=$(python3 "$capacity_script" "${capacity_args[@]}" 2>&1)
+    fi
+    capacity_exit=$?
+    capacity_allowed=$(print -r -- "$capacity_output" | python3 -c 'import json, sys; value = json.load(sys.stdin).get("allowed_wave_size"); print(value if isinstance(value, int) else "")' 2>/dev/null || true)
+    capacity_result=$(print -r -- "$capacity_output" | python3 -c 'import json, sys; value = json.load(sys.stdin).get("capacity_decision"); print(value if isinstance(value, str) else "")' 2>/dev/null || true)
+    capacity_reasons=$(print -r -- "$capacity_output" | python3 -c 'import json, sys; value = json.load(sys.stdin).get("observer_reasons", []); print(",".join(str(item) for item in value) if isinstance(value, list) else "")' 2>/dev/null || true)
+    if (( capacity_exit != 0 )) || [[ ! "$capacity_allowed" =~ ^[0-9]+$ ]] || [[ ! "$capacity_result" =~ ^(ALLOW|WARN|BLOCK)$ ]]; then
+      block "capacity_preflight_unavailable"
+    else
+      allowed_wave_size=$capacity_allowed
+      capacity_decision=$capacity_result
+      if [[ -n "$capacity_reasons" ]]; then
+        reasons+=("$capacity_reasons")
+      fi
+      case "$capacity_decision" in
+        ALLOW)
+          ;;
+        WARN)
+          warn "capacity_limited_to_${allowed_wave_size}"
+          ;;
+        BLOCK)
+          block "capacity_preflight_blocked"
+          ;;
+      esac
+    fi
+  fi
+fi
+
+if [[ "$doctor_status" == BLOCK ]]; then
+  allowed_wave_size=0
+  capacity_decision=BLOCK
+elif [[ "$doctor_status" == WARN && "$capacity_decision" == ALLOW ]]; then
+  capacity_decision=WARN
+  if (( wave_size > DEFAULT_WAVE_SIZE )); then
+    allowed_wave_size=$DEFAULT_WAVE_SIZE
+  fi
 fi
 
 reason_text=none
@@ -308,8 +371,10 @@ fi
 
 print -- "status=$doctor_status"
 print -- "wave_size=$wave_size"
+print -- "allowed_wave_size=$allowed_wave_size"
+print -- "capacity_decision=$capacity_decision"
 print -- "default_wave_size=$DEFAULT_WAVE_SIZE"
-print -- "agent_thread_cap=${agent_thread_cap:-missing}"
+print -- "agent_thread_cap=$agent_thread_cap"
 print -- "max_agent_threads=$MAX_NATIVE_SESSION_THREADS"
 print -- "soft_limit=$soft_limit"
 print -- "hard_limit=$hard_limit"

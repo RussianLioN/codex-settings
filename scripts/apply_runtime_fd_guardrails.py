@@ -27,7 +27,6 @@ LEGACY_NATIVE_THREAD_KEY = "max_concurrent_threads_per_session"
 SOURCE_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PROCESS_INVENTORY = SOURCE_ROOT / "scripts" / "codex_process_inventory.py"
 SOURCE_HIGHFD = SOURCE_ROOT / "scripts" / "codex-highfd"
-SOURCE_AUTONOMOUS_POLICY = SOURCE_ROOT / "scripts" / "autonomous_policy.py"
 SOURCE_CAPACITY = SOURCE_ROOT / "scripts" / "codex_capacity.py"
 SOURCE_CAPACITY_OBSERVER = SOURCE_ROOT / "scripts" / "codex_capacity_observer.py"
 SOURCE_MANIFEST_VALIDATOR = SOURCE_ROOT / "scripts" / "validate_wide_wave_manifest.py"
@@ -38,7 +37,6 @@ MANAGED_SOURCE_IDS = (
     "codex_process_inventory.py",
     "validate_wide_wave_manifest.py",
     "trusted-wide-wave-skills.json",
-    "autonomous_policy.py",
     "codex_capacity.py",
     "codex_capacity_observer.py",
 )
@@ -118,13 +116,6 @@ def parse_args() -> argparse.Namespace:
         "--source-process-inventory",
         type=Path,
         default=SOURCE_PROCESS_INVENTORY,
-    )
-    parser.add_argument("--installed-hooks-json", type=Path, default=None)
-    parser.add_argument("--installed-autonomous-policy", type=Path, default=None)
-    parser.add_argument(
-        "--source-autonomous-policy",
-        type=Path,
-        default=SOURCE_AUTONOMOUS_POLICY,
     )
     parser.add_argument("--installed-capacity", type=Path, default=None)
     parser.add_argument(
@@ -254,8 +245,6 @@ def desired_config(text: str) -> str:
         in parsed.get("features", {}).get("multi_agent_v2", {})
     ):
         raise ValueError("native session thread cap removal failed")
-    if parsed.get("features", {}).get("multi_agent_v2", {}).get("enabled") is not True:
-        raise ValueError("features.multi_agent_v2.enabled must stay true")
     return text
 
 
@@ -433,11 +422,9 @@ def normalize_existing_path(path: Path) -> Path:
 
 def normalize_managed_path(path: Path) -> Path:
     expanded = path.expanduser()
-    candidate = expanded if expanded.is_absolute() else Path.cwd() / expanded
+    candidate = (expanded if expanded.is_absolute() else Path.cwd() / expanded).absolute()
     validate_managed_parent(candidate)
-    normalized = candidate.resolve(strict=False)
-    validate_managed_parent(normalized)
-    return normalized
+    return candidate
 
 
 def path_group_or_world_writable(mode: int) -> bool:
@@ -455,7 +442,6 @@ def allowed_system_writable_parent(path: Path, mode: int, uid: int) -> bool:
 def state_issues(
     *,
     config_path: Path,
-    agents_path: Path,
     installed_doctor: Path,
     source_doctor: Path,
     installed_highfd: Path,
@@ -466,14 +452,10 @@ def state_issues(
     source_manifest_validator: Path,
     installed_trusted_registry: Path,
     source_trusted_registry: Path,
-    installed_hooks_json: Path,
-    installed_autonomous_policy: Path,
-    source_autonomous_policy: Path,
     installed_capacity: Path,
     source_capacity: Path,
     installed_capacity_observer: Path,
     source_capacity_observer: Path,
-    profile_paths: dict[str, Path],
 ) -> list[str]:
     issues: list[str] = []
     parsed = tomllib.loads(config_path.read_text(encoding="utf-8"))
@@ -485,13 +467,6 @@ def state_issues(
         issues.append("agents_max_threads_legacy_present")
     if LEGACY_NATIVE_THREAD_KEY in multi_agent_v2:
         issues.append("native_session_thread_cap_legacy_present")
-    if (
-        multi_agent_v2.get("enabled") is not True
-    ):
-        issues.append("multi_agent_v2_enabled_not_true")
-    agents_text = agents_path.read_text(encoding="utf-8")
-    if POLICY_BLOCK not in agents_text:
-        issues.append("agents_resource_policy_missing_or_drifted")
     if not installed_doctor.is_file() or installed_doctor.read_bytes() != source_doctor.read_bytes():
         issues.append("installed_fd_doctor_drifted")
     if not installed_highfd.is_file() or installed_highfd.read_bytes() != source_highfd.read_bytes():
@@ -511,11 +486,6 @@ def state_issues(
         or installed_trusted_registry.read_bytes() != source_trusted_registry.read_bytes()
     ):
         issues.append("installed_trusted_wide_wave_registry_drifted")
-    if (
-        not installed_autonomous_policy.is_file()
-        or installed_autonomous_policy.read_bytes() != source_autonomous_policy.read_bytes()
-    ):
-        issues.append("installed_autonomous_policy_drifted")
     if not installed_capacity.is_file() or installed_capacity.read_bytes() != source_capacity.read_bytes():
         issues.append("installed_capacity_drifted")
     if (
@@ -523,31 +493,6 @@ def state_issues(
         or installed_capacity_observer.read_bytes() != source_capacity_observer.read_bytes()
     ):
         issues.append("installed_capacity_observer_drifted")
-    for profile_name, profile_path in profile_paths.items():
-        if not profile_path.is_file():
-            issues.append(f"profile_missing:{profile_name}")
-            continue
-        try:
-            current_profile = profile_path.read_text(encoding="utf-8")
-            desired_profile = desired_profile_config(current_profile, profile_name)
-        except ValueError as exc:
-            issues.append(f"profile_invalid:{profile_name}:{exc}")
-            continue
-        if current_profile != desired_profile:
-            issues.append(f"profile_config_drifted:{profile_name}")
-    if not installed_hooks_json.is_file():
-        issues.append("installed_hooks_json_missing")
-    else:
-        try:
-            desired_hooks = desired_hooks_json(
-                installed_hooks_json.read_text(encoding="utf-8"),
-                installed_autonomous_policy,
-            )
-        except (json.JSONDecodeError, ValueError) as exc:
-            issues.append(f"installed_hooks_json_invalid:{exc}")
-        else:
-            if installed_hooks_json.read_text(encoding="utf-8") != desired_hooks:
-                issues.append("installed_hooks_json_drifted")
     return issues
 
 
@@ -652,9 +597,9 @@ def create_fd_guardrails_backup(
     create_managed_directory(backup, 0o700)
     targets = []
     expected_ids = {target_id for target_id, _ in FD_GUARDRAILS_TARGETS}
-    if set(target_paths) != expected_ids or set(desired_artifacts) != expected_ids:
+    if not expected_ids.issubset(target_paths) or set(desired_artifacts) != expected_ids:
         raise SystemExit("managed backup targets are incomplete")
-    for target_id, backup_name in FD_GUARDRAILS_TARGETS:
+    for write_index, (target_id, backup_name) in enumerate(FD_GUARDRAILS_TARGETS, start=1):
         target = target_paths[target_id]
         existed, mode = checked_existing_file(target)
         data = target.read_bytes() if existed else None
@@ -669,6 +614,8 @@ def create_fd_guardrails_backup(
                 "target_path": str(target.resolve(strict=False)),
                 "installed_mode": f"0o{installed_mode:03o}",
                 "installed_sha256": hashlib.sha256(installed_data).hexdigest(),
+                "source_sha256": hashlib.sha256(installed_data).hexdigest(),
+                "compensation_order": len(FD_GUARDRAILS_TARGETS) - write_index + 1,
             }
         )
         if existed:
@@ -772,7 +719,6 @@ def managed_source_paths(
     source_process_inventory: Path,
     source_manifest_validator: Path,
     source_trusted_registry: Path,
-    source_autonomous_policy: Path,
     source_capacity: Path,
     source_capacity_observer: Path,
 ) -> dict[str, Path]:
@@ -782,7 +728,6 @@ def managed_source_paths(
         "codex_process_inventory.py": source_process_inventory,
         "validate_wide_wave_manifest.py": source_manifest_validator,
         "trusted-wide-wave-skills.json": source_trusted_registry,
-        "autonomous_policy.py": source_autonomous_policy,
         "codex_capacity.py": source_capacity,
         "codex_capacity_observer.py": source_capacity_observer,
     }
@@ -886,6 +831,8 @@ def installation_receipt_issues(
             continue
         if hashlib.sha256(target.read_bytes()).hexdigest() != entry["installed_sha256"]:
             issues.append(f"installation_receipt_target_hash_drifted:{entry['id']}")
+        if entry.get("source_sha256") != entry["installed_sha256"]:
+            issues.append(f"installation_receipt_source_hash_drifted:{entry['id']}")
         if stat.S_IMODE(target.stat().st_mode) != int(entry["installed_mode"], 8):
             issues.append(f"installation_receipt_target_mode_drifted:{entry['id']}")
     return issues
@@ -912,13 +859,11 @@ def main() -> int:
     installed_highfd = normalize_managed_path(args.installed_highfd)
     source_highfd = normalize_existing_path(args.source_highfd)
     source_process_inventory = normalize_existing_path(args.source_process_inventory)
-    source_autonomous_policy = normalize_existing_path(args.source_autonomous_policy)
     source_capacity = normalize_existing_path(args.source_capacity)
     source_capacity_observer = normalize_existing_path(args.source_capacity_observer)
     source_manifest_validator = normalize_existing_path(args.source_manifest_validator)
     source_trusted_registry = normalize_existing_path(args.source_trusted_registry)
     config_path = codex_home / "config.toml"
-    agents_path = codex_home / "AGENTS.md"
     installed_trusted_registry = (
         normalize_managed_path(args.installed_trusted_registry)
         if args.installed_trusted_registry is not None
@@ -934,25 +879,15 @@ def main() -> int:
         if args.installed_process_inventory is not None
         else installed_doctor.parent / "codex_process_inventory.py"
     )
-    installed_hooks_json = (
-        normalize_managed_path(args.installed_hooks_json)
-        if args.installed_hooks_json is not None
-        else codex_home / "hooks.json"
-    )
-    installed_autonomous_policy = (
-        normalize_managed_path(args.installed_autonomous_policy)
-        if args.installed_autonomous_policy is not None
-        else codex_home / "hooks" / "autonomous_policy.py"
-    )
     installed_capacity = (
         normalize_managed_path(args.installed_capacity)
         if args.installed_capacity is not None
-        else codex_home / "hooks" / "codex_capacity.py"
+        else installed_doctor.parent / "codex_capacity.py"
     )
     installed_capacity_observer = (
         normalize_managed_path(args.installed_capacity_observer)
         if args.installed_capacity_observer is not None
-        else codex_home / "hooks" / "codex_capacity_observer.py"
+        else installed_doctor.parent / "codex_capacity_observer.py"
     )
     target_paths = fd_guardrails_target_paths(
         codex_home=codex_home,
@@ -961,8 +896,6 @@ def main() -> int:
         installed_process_inventory=installed_process_inventory,
         installed_manifest_validator=installed_manifest_validator,
         installed_trusted_registry=installed_trusted_registry,
-        installed_hooks_json=installed_hooks_json,
-        installed_autonomous_policy=installed_autonomous_policy,
         installed_capacity=installed_capacity,
         installed_capacity_observer=installed_capacity_observer,
     )
@@ -973,18 +906,19 @@ def main() -> int:
         source_process_inventory=source_process_inventory,
         source_manifest_validator=source_manifest_validator,
         source_trusted_registry=source_trusted_registry,
-        source_autonomous_policy=source_autonomous_policy,
         source_capacity=source_capacity,
         source_capacity_observer=source_capacity_observer,
     )
-    for path in (
-        config_path,
-        agents_path,
-        *source_paths.values(),
-        *(target_paths[f"{name}.config.toml"] for name in PROFILE_CONFIG_NAMES),
-    ):
+    for path in (config_path,):
         if not path.is_file():
             raise SystemExit(f"required file is missing: {path}")
+    missing_source_ids = [
+        source_id for source_id, path in source_paths.items() if not path.is_file()
+    ]
+    if missing_source_ids:
+        print("status=BLOCK")
+        print("issues=" + ",".join(f"managed_source_bundle_missing:{source_id}" for source_id in missing_source_ids))
+        return 2
     source_issues, source_bytes = verify_managed_sources_at_commit(source_paths, source_commit)
     if args.apply and source_issues:
         print("status=BLOCK")
@@ -1002,7 +936,6 @@ def main() -> int:
 
     issues = state_issues(
         config_path=config_path,
-        agents_path=agents_path,
         installed_doctor=installed_doctor,
         source_doctor=source_doctor,
         installed_highfd=installed_highfd,
@@ -1013,14 +946,10 @@ def main() -> int:
         source_manifest_validator=source_manifest_validator,
         installed_trusted_registry=installed_trusted_registry,
         source_trusted_registry=source_trusted_registry,
-        installed_hooks_json=installed_hooks_json,
-        installed_autonomous_policy=installed_autonomous_policy,
-        source_autonomous_policy=source_autonomous_policy,
         installed_capacity=installed_capacity,
         source_capacity=source_capacity,
         installed_capacity_observer=installed_capacity_observer,
         source_capacity_observer=source_capacity_observer,
-        profile_paths={name: target_paths[f"{name}.config.toml"] for name in PROFILE_CONFIG_NAMES},
     )
     issues.extend(source_issues)
     issues.extend(
@@ -1039,46 +968,26 @@ def main() -> int:
     if not args.apply:
         print("status=BLOCK")
         print(f"issues={','.join(issues)}")
-        if issues_require_hook_trust_review(issues):
-            print(HOOK_TRUST_REVIEW_REQUIRED)
         return 2
     config_bytes = desired_config(config_path.read_text(encoding="utf-8")).encode()
-    agents_bytes = desired_agents(agents_path.read_text(encoding="utf-8")).encode()
     doctor_bytes = source_bytes["codex_fd_doctor.sh"]
     highfd_bytes = source_bytes["codex-highfd"]
     process_inventory_bytes = source_bytes["codex_process_inventory.py"]
-    autonomous_policy_bytes = source_bytes["autonomous_policy.py"]
     capacity_bytes = source_bytes["codex_capacity.py"]
     capacity_observer_bytes = source_bytes["codex_capacity_observer.py"]
-    hooks_text = installed_hooks_json.read_text(encoding="utf-8") if installed_hooks_json.exists() else "{}\n"
-    hooks_bytes = desired_hooks_json(hooks_text, installed_autonomous_policy).encode()
     manifest_validator_bytes = source_bytes["validate_wide_wave_manifest.py"]
     trusted_registry_bytes = source_bytes["trusted-wide-wave-skills.json"]
-    profile_writes = []
-    for profile_name in PROFILE_CONFIG_NAMES:
-        profile_id = f"{profile_name}.config.toml"
-        profile_path = target_paths[profile_id]
-        profile_bytes = desired_profile_config(
-            profile_path.read_text(encoding="utf-8"),
-            profile_name,
-        ).encode()
-        profile_writes.append((profile_id, profile_path, profile_bytes, file_mode(profile_path, 0o600)))
-
     timestamp = args.timestamp or datetime.now().strftime("%Y%m%d-%H%M%S")
     backup = codex_home / "backups" / f"fd-guardrails-{timestamp}"
     writes = [
         ("config.toml", config_path, config_bytes, file_mode(config_path, 0o600)),
-        ("AGENTS.md", agents_path, agents_bytes, file_mode(agents_path, 0o644)),
         ("codex_fd_doctor.sh", installed_doctor, doctor_bytes, 0o755),
         ("codex-highfd", installed_highfd, highfd_bytes, 0o755),
         ("codex_process_inventory.py", installed_process_inventory, process_inventory_bytes, 0o755),
         ("validate_wide_wave_manifest.py", installed_manifest_validator, manifest_validator_bytes, 0o755),
         ("trusted-wide-wave-skills.json", installed_trusted_registry, trusted_registry_bytes, 0o600),
-        ("hooks.json", installed_hooks_json, hooks_bytes, 0o600),
-        ("autonomous_policy.py", installed_autonomous_policy, autonomous_policy_bytes, 0o755),
         ("codex_capacity.py", installed_capacity, capacity_bytes, 0o755),
         ("codex_capacity_observer.py", installed_capacity_observer, capacity_observer_bytes, 0o755),
-        *profile_writes,
     ]
     desired_artifacts = {
         target_id: (data, mode)
@@ -1100,7 +1009,6 @@ def main() -> int:
 
         remaining = state_issues(
             config_path=config_path,
-            agents_path=agents_path,
             installed_doctor=installed_doctor,
             source_doctor=source_doctor,
             installed_highfd=installed_highfd,
@@ -1111,14 +1019,10 @@ def main() -> int:
             source_manifest_validator=source_manifest_validator,
             installed_trusted_registry=installed_trusted_registry,
             source_trusted_registry=source_trusted_registry,
-            installed_hooks_json=installed_hooks_json,
-            installed_autonomous_policy=installed_autonomous_policy,
-            source_autonomous_policy=source_autonomous_policy,
             installed_capacity=installed_capacity,
             source_capacity=source_capacity,
             installed_capacity_observer=installed_capacity_observer,
             source_capacity_observer=source_capacity_observer,
-            profile_paths={name: target_paths[f"{name}.config.toml"] for name in PROFILE_CONFIG_NAMES},
         )
         if remaining:
             raise RuntimeError(f"post-apply verification failed: {','.join(remaining)}")
@@ -1135,8 +1039,6 @@ def main() -> int:
         rollback_after_failed_apply(backup=backup, target_paths=target_paths, cause=exc)
     print("status=APPLIED")
     print("issues=none")
-    print(HOOK_TRUST_REVIEW_REQUIRED)
-    print(f"next_action={HOOK_TRUST_REVIEW_ACTION}")
     print(f"backup_dir={backup}")
     if migrated_backup is not None:
         print(f"migrated_backup={migrated_backup}")

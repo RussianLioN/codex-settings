@@ -119,20 +119,20 @@ class CodexCapacityTests(unittest.TestCase):
         return path
 
     def write_trusted_wide_wave_inputs(self, *, wave_size: int = 8) -> tuple[Path, Path, Path]:
-        skill = self.root / "trusted-wide-skill.md"
-        skill.write_text("---\nname: trusted-wide\n---\n", encoding="utf-8")
-        registry = self.root / "trusted-wide-registry.json"
+        skill = self.root / "consilium-skill.md"
+        skill.write_text("---\nname: consilium\n---\n", encoding="utf-8")
+        registry = self.root / "consilium-registry.json"
         registry.write_text(
             json.dumps(
                 {
                     "schema_version": 1,
                     "trusted_skills": [
                         {
-                            "skill_id": "trusted-wide",
+                            "skill_id": "consilium",
                             "sha256": hashlib.sha256(skill.read_bytes()).hexdigest(),
-                            "max_live_wave": 20,
-                            "execution_kind": "wide-wave",
-                            "fallback": "block",
+                            "max_live_wave": 19,
+                            "execution_kind": "flat-trusted-wide-wave",
+                            "fallback": "6+6+6+1",
                         }
                     ],
                 }
@@ -141,12 +141,12 @@ class CodexCapacityTests(unittest.TestCase):
         )
         repo = self.root / "repo"
         repo.mkdir(exist_ok=True)
-        manifest = self.root / "trusted-wide-manifest.json"
+        manifest = self.root / "consilium-manifest.json"
         manifest.write_text(
             json.dumps(
                 {
                     "schema_version": 1,
-                    "skill_id": "trusted-wide",
+                    "skill_id": "consilium",
                     "wave_size": wave_size,
                     "repository_root": str(repo),
                     "base_commit": "1318542fb00df4eaef4fc4e8abfa8cd99e656bb3",
@@ -1325,6 +1325,7 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertEqual("YELLOW", result["observer_status"])
         self.assertEqual(2, result["allowed_wave_size"])
         self.assertEqual("DEGRADED", result["decision"])
+        self.assertEqual("WARN", result["capacity_decision"])
 
     def test_prepare_wave_without_trust_never_allows_more_than_six(self) -> None:
         snapshot = self.write_observer_snapshot()
@@ -1340,6 +1341,7 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertEqual("GREEN", result["observer_status"])
         self.assertEqual(6, result["allowed_wave_size"])
         self.assertEqual("DEGRADED", result["decision"])
+        self.assertEqual("WARN", result["capacity_decision"])
         self.assertEqual(False, result["wide_wave_trusted"])
 
     def test_prepare_wave_subtracts_external_roots_exactly_once(self) -> None:
@@ -1362,19 +1364,19 @@ class CodexCapacityTests(unittest.TestCase):
         snapshot = self.write_observer_snapshot()
         observer_state_dir = self.root / "dynamic-observer"
         self.write_dynamic_green_observer_state(observer_state_dir)
-        skill, registry, manifest = self.write_trusted_wide_wave_inputs(wave_size=8)
+        skill, registry, manifest = self.write_trusted_wide_wave_inputs(wave_size=19)
         test_env = dict(self.env, CODEX_CAPACITY_TEST_MODE="1")
 
         missing = self.read_cli_json(
             "prepare-wave",
             "--wave-size",
-            "8",
+            "19",
             "--observer-snapshot-json",
             str(snapshot),
             "--observer-state-dir",
             str(observer_state_dir),
             "--wide-wave-skill-id",
-            "trusted-wide",
+            "consilium",
             "--wide-wave-skill-file",
             str(skill),
             "--wide-wave-trusted-registry",
@@ -1384,13 +1386,13 @@ class CodexCapacityTests(unittest.TestCase):
         trusted = self.read_cli_json(
             "prepare-wave",
             "--wave-size",
-            "8",
+            "19",
             "--observer-snapshot-json",
             str(snapshot),
             "--observer-state-dir",
             str(observer_state_dir),
             "--wide-wave-skill-id",
-            "trusted-wide",
+            "consilium",
             "--wide-wave-skill-file",
             str(skill),
             "--wide-wave-manifest",
@@ -1404,8 +1406,39 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertEqual(0, missing["allowed_wave_size"])
         self.assertEqual("wide_wave_requires_trust_manifest", missing["wide_wave_trust_reason"])
         self.assertEqual("ALLOW", trusted["decision"], trusted)
-        self.assertEqual(8, trusted["allowed_wave_size"])
+        self.assertEqual("ALLOW", trusted["capacity_decision"], trusted)
+        self.assertEqual(19, trusted["allowed_wave_size"])
         self.assertEqual(True, trusted["wide_wave_trusted"])
+
+    def test_prepare_wave_rejects_trusted_non_nineteen_wide_wave(self) -> None:
+        snapshot = self.write_observer_snapshot()
+        observer_state_dir = self.root / "dynamic-observer"
+        self.write_dynamic_green_observer_state(observer_state_dir, effective_capacity=20)
+        skill, registry, manifest = self.write_trusted_wide_wave_inputs(wave_size=8)
+        test_env = dict(self.env, CODEX_CAPACITY_TEST_MODE="1")
+
+        result = self.read_cli_json(
+            "prepare-wave",
+            "--wave-size",
+            "8",
+            "--observer-snapshot-json",
+            str(snapshot),
+            "--observer-state-dir",
+            str(observer_state_dir),
+            "--wide-wave-skill-id",
+            "consilium",
+            "--wide-wave-skill-file",
+            str(skill),
+            "--wide-wave-manifest",
+            str(manifest),
+            "--wide-wave-trusted-registry",
+            str(registry),
+            env=test_env,
+        )
+
+        self.assertEqual("BLOCK", result["capacity_decision"], result)
+        self.assertEqual(0, result["allowed_wave_size"])
+        self.assertEqual("wide_wave_requires_exact_nineteen", result["wide_wave_trust_reason"])
 
     def test_prepare_wave_validator_uses_exact_requested_wave_size(self) -> None:
         snapshot = self.write_observer_snapshot()
@@ -1423,7 +1456,7 @@ class CodexCapacityTests(unittest.TestCase):
             "--observer-state-dir",
             str(observer_state_dir),
             "--wide-wave-skill-id",
-            "trusted-wide",
+            "consilium",
             "--wide-wave-skill-file",
             str(skill),
             "--wide-wave-manifest",
@@ -1454,7 +1487,7 @@ class CodexCapacityTests(unittest.TestCase):
             "--observer-state-dir",
             str(observer_state_dir),
             "--wide-wave-skill-id",
-            "trusted-wide",
+            "consilium",
             "--wide-wave-skill-file",
             str(skill),
             "--wide-wave-manifest",
@@ -1486,7 +1519,7 @@ class CodexCapacityTests(unittest.TestCase):
             "--observer-state-dir",
             str(observer_state_dir),
             "--wide-wave-skill-id",
-            "trusted-wide",
+            "consilium",
             "--wide-wave-skill-file",
             str(skill),
             "--wide-wave-manifest",
@@ -1497,7 +1530,36 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertEqual("BLOCK", result["decision"])
         self.assertEqual(0, result["allowed_wave_size"])
         self.assertEqual("wide_wave_manifest_untrusted", result["wide_wave_trust_reason"])
-        self.assertIn("unknown_skill", result["wide_wave_validator_reasons"])
+        self.assertIn("skill_hash_mismatch", result["wide_wave_validator_reasons"])
+
+    def test_prepare_wave_reports_full_capacity_decision_for_trusted_nineteen_role_wave(self) -> None:
+        snapshot = self.write_observer_snapshot()
+        observer_state_dir = self.root / "dynamic-observer"
+        self.write_dynamic_green_observer_state(observer_state_dir, effective_capacity=20)
+        skill, registry, manifest = self.write_trusted_wide_wave_inputs(wave_size=19)
+        test_env = dict(self.env, CODEX_CAPACITY_TEST_MODE="1")
+
+        result = self.read_cli_json(
+            "prepare-wave",
+            "--wave-size",
+            "19",
+            "--observer-snapshot-json",
+            str(snapshot),
+            "--observer-state-dir",
+            str(observer_state_dir),
+            "--wide-wave-skill-id",
+            "consilium",
+            "--wide-wave-skill-file",
+            str(skill),
+            "--wide-wave-manifest",
+            str(manifest),
+            "--wide-wave-trusted-registry",
+            str(registry),
+            env=test_env,
+        )
+
+        self.assertEqual("ALLOW", result["capacity_decision"], result)
+        self.assertEqual(19, result["allowed_wave_size"])
 
     def test_cli_and_store_accept_absolute_operation_budget(self) -> None:
         store = self.capacity.CapacityStore(home=self.home, max_operation_seconds=0)

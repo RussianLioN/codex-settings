@@ -32,14 +32,13 @@ FD_GUARDRAILS_TARGETS_V1 = (
     ("validate_wide_wave_manifest.py", "validate_wide_wave_manifest.py"),
     ("trusted-wide-wave-skills.json", "trusted-wide-wave-skills.json"),
 )
-FD_GUARDRAILS_TARGETS = (
+FD_GUARDRAILS_TARGETS_V2_LEGACY_BASE = (
     *FD_GUARDRAILS_TARGETS_V1[:3],
     ("codex_process_inventory.py", "codex_process_inventory.py"),
     *FD_GUARDRAILS_TARGETS_V1[3:],
 )
-FD_GUARDRAILS_TARGETS_V2_BASE = FD_GUARDRAILS_TARGETS
-FD_GUARDRAILS_TARGETS_V2_FULL = (
-    *FD_GUARDRAILS_TARGETS_V2_BASE,
+FD_GUARDRAILS_TARGETS_V2_LEGACY_FULL = (
+    *FD_GUARDRAILS_TARGETS_V2_LEGACY_BASE,
     ("hooks.json", "hooks.json"),
     ("autonomous_policy.py", "autonomous_policy.py"),
     ("codex_capacity.py", "codex_capacity.py"),
@@ -56,20 +55,42 @@ PROFILE_THREAD_CAPS = {
     "wide-readers": 8,
 }
 PROFILE_CONFIG_NAMES = tuple(PROFILE_THREAD_CAPS)
-FD_GUARDRAILS_TARGETS_V2_PROFILES = (
-    *FD_GUARDRAILS_TARGETS_V2_FULL,
+FD_GUARDRAILS_TARGETS_V2_LEGACY_PROFILES = (
+    *FD_GUARDRAILS_TARGETS_V2_LEGACY_FULL,
     *((f"{name}.config.toml", f"{name}.config.toml") for name in PROFILE_CONFIG_NAMES),
 )
-FD_GUARDRAILS_TARGETS_V2_WITH_HIGHFD = (
-    *FD_GUARDRAILS_TARGETS_V2_PROFILES,
+FD_GUARDRAILS_TARGETS_V2_LEGACY_WITH_HIGHFD = (
+    *FD_GUARDRAILS_TARGETS_V2_LEGACY_PROFILES,
     ("codex-highfd", "codex-highfd"),
 )
-FD_GUARDRAILS_TARGETS = FD_GUARDRAILS_TARGETS_V2_WITH_HIGHFD
+FD_GUARDRAILS_TARGETS = (
+    ("config.toml", "config.toml"),
+    ("codex_fd_doctor.sh", "codex_fd_doctor.sh"),
+    ("codex-highfd", "codex-highfd"),
+    ("codex_process_inventory.py", "codex_process_inventory.py"),
+    ("validate_wide_wave_manifest.py", "validate_wide_wave_manifest.py"),
+    ("trusted-wide-wave-skills.json", "trusted-wide-wave-skills.json"),
+    ("codex_capacity.py", "codex_capacity.py"),
+    ("codex_capacity_observer.py", "codex_capacity_observer.py"),
+)
+FD_GUARDRAILS_TARGETS_V2_PRE_HIGHFD = tuple(
+    target for target in FD_GUARDRAILS_TARGETS if target[0] != "codex-highfd"
+)
+FD_GUARDRAILS_TARGETS_V2_PRE_CAPACITY = (
+    ("config.toml", "config.toml"),
+    ("codex_fd_doctor.sh", "codex_fd_doctor.sh"),
+    ("codex_process_inventory.py", "codex_process_inventory.py"),
+    ("validate_wide_wave_manifest.py", "validate_wide_wave_manifest.py"),
+    ("trusted-wide-wave-skills.json", "trusted-wide-wave-skills.json"),
+)
 FD_GUARDRAILS_TARGET_SETS_V2 = (
-    FD_GUARDRAILS_TARGETS_V2_BASE,
-    FD_GUARDRAILS_TARGETS_V2_FULL,
-    FD_GUARDRAILS_TARGETS_V2_PROFILES,
-    FD_GUARDRAILS_TARGETS_V2_WITH_HIGHFD,
+    FD_GUARDRAILS_TARGETS,
+    FD_GUARDRAILS_TARGETS_V2_PRE_HIGHFD,
+    FD_GUARDRAILS_TARGETS_V2_PRE_CAPACITY,
+    FD_GUARDRAILS_TARGETS_V2_LEGACY_BASE,
+    FD_GUARDRAILS_TARGETS_V2_LEGACY_FULL,
+    FD_GUARDRAILS_TARGETS_V2_LEGACY_PROFILES,
+    FD_GUARDRAILS_TARGETS_V2_LEGACY_WITH_HIGHFD,
 )
 
 
@@ -138,10 +159,10 @@ def main() -> int:
         args.installed_autonomous_policy
         or codex_home / "hooks" / "autonomous_policy.py"
     )
-    installed_capacity = args.installed_capacity or codex_home / "hooks" / "codex_capacity.py"
+    installed_capacity = args.installed_capacity or installed_manifest_validator.parent / "codex_capacity.py"
     installed_capacity_observer = (
         args.installed_capacity_observer
-        or codex_home / "hooks" / "codex_capacity_observer.py"
+        or installed_manifest_validator.parent / "codex_capacity_observer.py"
     )
 
     backup = args.backup or latest_backup(codex_home)
@@ -205,9 +226,9 @@ def handle_runtime_backup(
                 installed_autonomous_policy=installed_autonomous_policy
                 or codex_home / "hooks" / "autonomous_policy.py",
                 installed_capacity=installed_capacity
-                or codex_home / "hooks" / "codex_capacity.py",
+                or doctor.parent / "codex_capacity.py",
                 installed_capacity_observer=installed_capacity_observer
-                or codex_home / "hooks" / "codex_capacity_observer.py",
+                or doctor.parent / "codex_capacity_observer.py",
             ),
             fail_after_action=fail_after_fd_guardrails_action,
             fail_compensation=fail_fd_guardrails_compensation,
@@ -313,9 +334,9 @@ def fd_guardrails_target_paths(
         "autonomous_policy.py": installed_autonomous_policy
         or codex_home / "hooks" / "autonomous_policy.py",
         "codex_capacity.py": installed_capacity
-        or codex_home / "hooks" / "codex_capacity.py",
+        or installed_doctor.parent / "codex_capacity.py",
         "codex_capacity_observer.py": installed_capacity_observer
-        or codex_home / "hooks" / "codex_capacity_observer.py",
+        or installed_doctor.parent / "codex_capacity_observer.py",
         **{f"{name}.config.toml": codex_home / f"{name}.config.toml" for name in PROFILE_CONFIG_NAMES},
     }
 
@@ -337,7 +358,7 @@ def handle_fd_guardrails_backup(
     validate_fd_guardrails_apply_targets(manifest, target_paths)
     snapshot = capture_target_snapshot(manifest, target_paths)
     try:
-        for index, entry in enumerate(manifest["targets"], start=1):
+        for index, entry in enumerate(fd_guardrails_compensation_targets(manifest), start=1):
             target = target_paths[entry["id"]]
             if entry["existed"]:
                 atomic_write_file(target, (backup / entry["backup"]).read_bytes(), int(entry["mode"], 8))
@@ -371,13 +392,20 @@ def fd_guardrails_actions(
 ) -> list[str]:
     actions: list[str] = []
     validate_fd_guardrails_targets(manifest, target_paths)
-    for entry in manifest["targets"]:
+    for entry in fd_guardrails_compensation_targets(manifest):
         target = target_paths[entry["id"]]
         if entry["existed"]:
             actions.append(f"restore {entry['backup']} -> {target}")
         else:
             actions.append(f"remove absent-before-install target {target}")
     return actions
+
+
+def fd_guardrails_compensation_targets(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    targets = manifest["targets"]
+    if targets and "compensation_order" in targets[0]:
+        return sorted(targets, key=lambda entry: entry["compensation_order"])
+    return list(targets)
 
 
 def read_fd_guardrails_manifest(backup: Path) -> dict[str, Any]:
@@ -423,7 +451,7 @@ def validate_fd_guardrails_manifest_document(backup: Path, document: Any) -> Non
             "created_at",
             "targets",
         }
-        expected_target_fields = {
+        legacy_v2_target_fields = {
             "id",
             "backup",
             "existed",
@@ -472,7 +500,23 @@ def validate_fd_guardrails_manifest_document(backup: Path, document: Any) -> Non
     if len(targets) != len(expected_targets):
         raise SystemExit("fd-guardrails manifest has incomplete targets")
     expected = dict(expected_targets)
+    uses_compensation_metadata = False
+    if version == FD_GUARDRAILS_MANIFEST_VERSION:
+        metadata_fields = {"source_sha256", "compensation_order"}
+        observed_field_sets = {frozenset(entry) for entry in targets if isinstance(entry, dict)}
+        if len(observed_field_sets) != 1 or not all(isinstance(entry, dict) for entry in targets):
+            raise SystemExit("fd-guardrails manifest target has unexpected fields")
+        observed_fields = next(iter(observed_field_sets))
+        extended_fields = legacy_v2_target_fields | metadata_fields
+        if observed_fields == extended_fields:
+            uses_compensation_metadata = True
+            expected_target_fields = extended_fields
+        elif observed_fields == legacy_v2_target_fields and expected_targets != FD_GUARDRAILS_TARGETS:
+            expected_target_fields = legacy_v2_target_fields
+        else:
+            raise SystemExit("fd-guardrails manifest target has unexpected fields")
     observed_ids: set[str] = set()
+    compensation_orders: list[int] = []
     expected_files = {FD_GUARDRAILS_MANIFEST}
     for entry in targets:
         if not isinstance(entry, dict) or set(entry) != expected_target_fields:
@@ -496,6 +540,14 @@ def validate_fd_guardrails_manifest_document(backup: Path, document: Any) -> Non
                 r"[0-9a-f]{64}", entry["installed_sha256"]
             ):
                 raise SystemExit("fd-guardrails manifest installed sha256 is invalid")
+            if uses_compensation_metadata:
+                if not isinstance(entry["source_sha256"], str) or not re.fullmatch(
+                    r"[0-9a-f]{64}", entry["source_sha256"]
+                ):
+                    raise SystemExit("fd-guardrails manifest source sha256 is invalid")
+                if type(entry["compensation_order"]) is not int:
+                    raise SystemExit("fd-guardrails manifest compensation order is invalid")
+                compensation_orders.append(entry["compensation_order"])
         if entry["existed"]:
             if not isinstance(entry["mode"], str) or not re.fullmatch(r"0o[0-7]{3,4}", entry["mode"]):
                 raise SystemExit("fd-guardrails manifest mode is invalid")
@@ -523,6 +575,8 @@ def validate_fd_guardrails_manifest_document(backup: Path, document: Any) -> Non
                 raise SystemExit("fd-guardrails manifest absent target sha256 must be null")
     if observed_ids != set(expected):
         raise SystemExit("fd-guardrails manifest target set is incomplete")
+    if uses_compensation_metadata and sorted(compensation_orders) != list(range(1, len(targets) + 1)):
+        raise SystemExit("fd-guardrails manifest compensation order is invalid")
     actual_files = {entry.name for entry in backup.iterdir()}
     if actual_files != expected_files:
         raise SystemExit("fd-guardrails backup contains unexpected files")
@@ -532,9 +586,13 @@ def validate_fd_guardrails_targets(
     manifest: dict[str, Any],
     target_paths: dict[str, Path],
 ) -> None:
-    supported_ids = {target_id for target_id, _ in FD_GUARDRAILS_TARGETS}
+    supported_ids = {
+        target_id
+        for target_set in (FD_GUARDRAILS_TARGETS_V1, *FD_GUARDRAILS_TARGET_SETS_V2)
+        for target_id, _ in target_set
+    }
     manifest_ids = {entry["id"] for entry in manifest["targets"]}
-    if set(target_paths) - supported_ids or not manifest_ids.issubset(target_paths):
+    if not manifest_ids.issubset(supported_ids) or not manifest_ids.issubset(target_paths):
         raise SystemExit("fd-guardrails rollback target paths are incomplete")
     for entry in manifest["targets"]:
         target = target_paths[entry["id"]]
