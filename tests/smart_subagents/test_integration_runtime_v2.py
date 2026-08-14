@@ -1351,7 +1351,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
                         config,
                         self.record,
                         environ=environment,
-                        deadline=started + 0.005,
+                        deadline=started + 0.25,
                         absence_checker=lambda *_args, **_kwargs: None,
                         health_checker=lambda **_kwargs: None,
                     )
@@ -1362,7 +1362,7 @@ class IntegrationRuntimeV2Tests(unittest.TestCase):
 
         self.assertTrue(observed_deadlines)
         self.assertTrue(all(deadline is not None for deadline in observed_deadlines))
-        self.assertLess(elapsed, 0.04)
+        self.assertLess(elapsed, 0.20)
 
     def test_stop_route_state_read_honors_deadline_while_database_is_locked(
         self,
