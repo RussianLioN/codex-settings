@@ -33,6 +33,11 @@ REQUIRED_MANIFEST_FIELDS = {
     "participants",
 }
 REQUIRED_PARTICIPANT_FIELDS = {"id", "access", "owned_write_scope"}
+TRUSTED_EXECUTION_CONTRACTS = {
+    "consilium": ("flat-trusted-wide-wave", "6+6+6+1"),
+    "expert-consilium": ("flat-trusted-wide-wave", "6+6+1"),
+    "consilium-lean": ("flat-trusted-wide-wave", "chunks<=6"),
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -216,9 +221,10 @@ def validate_trust(
         reasons.append("trusted_max_live_wave_invalid")
     elif type(manifest.get("wave_size")) is int and manifest["wave_size"] > max_live_wave:
         reasons.append("wave_size_exceeds_trusted_max")
-    if not isinstance(entry.get("execution_kind"), str) or not entry["execution_kind"]:
+    contract = TRUSTED_EXECUTION_CONTRACTS.get(skill_id)
+    if contract is None or entry.get("execution_kind") != contract[0]:
         reasons.append("trusted_execution_kind_invalid")
-    if not isinstance(entry.get("fallback"), str) or not entry["fallback"]:
+    if contract is None or entry.get("fallback") != contract[1]:
         reasons.append("trusted_fallback_invalid")
 
 

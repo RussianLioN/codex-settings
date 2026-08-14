@@ -21,7 +21,7 @@ class WideWaveManifestTests(unittest.TestCase):
         self.repo = self.root / "repo"
         self.repo.mkdir()
         self.skill = self.root / "SKILL.md"
-        self.skill.write_text("---\nname: trusted-wide\n---\n", encoding="utf-8")
+        self.skill.write_text("---\nname: consilium\n---\n", encoding="utf-8")
         self.registry = self.root / "trusted.json"
         self.manifest = self.root / "manifest.json"
         self.default_participants = [
@@ -36,11 +36,11 @@ class WideWaveManifestTests(unittest.TestCase):
         ]
         self.write_registry(
             {
-                "skill_id": "trusted-wide",
+                "skill_id": "consilium",
                 "sha256": hashlib.sha256(self.skill.read_bytes()).hexdigest(),
-                "max_live_wave": 12,
-                "execution_kind": "wide-wave",
-                "fallback": "block",
+                "max_live_wave": 19,
+                "execution_kind": "flat-trusted-wide-wave",
+                "fallback": "6+6+6+1",
             }
         )
         self.write_manifest()
@@ -57,7 +57,7 @@ class WideWaveManifestTests(unittest.TestCase):
     def write_manifest(self, **overrides: object) -> None:
         payload = {
             "schema_version": 1,
-            "skill_id": "trusted-wide",
+            "skill_id": "consilium",
             "wave_size": 8,
             "repository_root": str(self.repo),
             "base_commit": "1318542fb00df4eaef4fc4e8abfa8cd99e656bb3",
@@ -73,7 +73,7 @@ class WideWaveManifestTests(unittest.TestCase):
                 "--manifest",
                 str(self.manifest),
                 "--skill-id",
-                "trusted-wide",
+                "consilium",
                 "--skill-file",
                 str(self.skill),
                 "--trusted-registry",
@@ -109,13 +109,21 @@ class WideWaveManifestTests(unittest.TestCase):
         self.assertIn("unknown_skill", completed.stdout)
 
     def test_blocks_hash_mismatch(self) -> None:
+        self.skill.write_bytes(self.skill.read_bytes() + b"mutated-byte\n")
+
+        completed = self.run_validator()
+
+        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("skill_hash_mismatch", completed.stdout)
+
+    def test_blocks_registry_hash_mismatch(self) -> None:
         self.write_registry(
             {
-                "skill_id": "trusted-wide",
+                "skill_id": "consilium",
                 "sha256": "0" * 64,
-                "max_live_wave": 12,
-                "execution_kind": "wide-wave",
-                "fallback": "block",
+                "max_live_wave": 19,
+                "execution_kind": "flat-trusted-wide-wave",
+                "fallback": "6+6+6+1",
             }
         )
 
@@ -124,21 +132,51 @@ class WideWaveManifestTests(unittest.TestCase):
         self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("skill_hash_mismatch", completed.stdout)
 
-    def test_blocks_wave_above_trusted_maximum(self) -> None:
-        self.write_registry(
-            {
-                "skill_id": "trusted-wide",
-                "sha256": hashlib.sha256(self.skill.read_bytes()).hexdigest(),
-                "max_live_wave": 7,
-                "execution_kind": "wide-wave",
-                "fallback": "block",
-            }
+    def test_blocks_consilium_wave_above_trusted_maximum(self) -> None:
+        self.write_manifest(
+            wave_size=20,
+            participants=[
+                {"id": f"reader-{index}", "access": "read-only", "owned_write_scope": []}
+                for index in range(1, 21)
+            ],
         )
 
         completed = self.run_validator()
 
         self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("wave_size_exceeds_trusted_max", completed.stdout)
+
+    def test_blocks_unknown_execution_kind_for_known_skill(self) -> None:
+        self.write_registry(
+            {
+                "skill_id": "consilium",
+                "sha256": hashlib.sha256(self.skill.read_bytes()).hexdigest(),
+                "max_live_wave": 19,
+                "execution_kind": "unknown-execution-kind",
+                "fallback": "6+6+6+1",
+            }
+        )
+
+        completed = self.run_validator()
+
+        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("trusted_execution_kind_invalid", completed.stdout)
+
+    def test_blocks_unknown_fallback_for_known_skill(self) -> None:
+        self.write_registry(
+            {
+                "skill_id": "consilium",
+                "sha256": hashlib.sha256(self.skill.read_bytes()).hexdigest(),
+                "max_live_wave": 19,
+                "execution_kind": "flat-trusted-wide-wave",
+                "fallback": "unknown-fallback",
+            }
+        )
+
+        completed = self.run_validator()
+
+        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("trusted_fallback_invalid", completed.stdout)
 
     def test_blocks_expected_wave_size_mismatch(self) -> None:
         completed = self.run_validator("--expected-wave-size", "20")
