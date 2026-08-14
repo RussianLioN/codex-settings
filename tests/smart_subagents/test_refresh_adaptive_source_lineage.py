@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import importlib.util
 import json
 import sys
@@ -145,6 +147,30 @@ class RefreshAdaptiveSourceLineageTests(unittest.TestCase):
             )
 
         self.assertEqual("SOURCE_ROOT_INVALID", captured.exception.code)
+
+    def test_main_reports_digest_failures_as_one_safe_json(self) -> None:
+        refresh = load_script()
+        self.write_lineage(generation=8, digest="a" * 64)
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            code = refresh.main(
+                [
+                    "--source-root",
+                    str(self.source_root.resolve()),
+                    "--check",
+                ]
+            )
+
+        lines = stdout.getvalue().splitlines()
+        self.assertEqual(1, code)
+        self.assertEqual(1, len(lines))
+        response = json.loads(lines[0])
+        self.assertEqual("error", response["status"])
+        self.assertEqual("SOURCE_DIGEST_FAILED", response["code"])
+        self.assertIn("message", response)
+        self.assertNotIn(str(self.source_root.resolve()), lines[0])
+        self.assertNotIn("Traceback", lines[0])
 
 
 if __name__ == "__main__":

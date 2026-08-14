@@ -132,7 +132,15 @@ def refresh_source_lineage(
     layout = _layout_for_source_root(source_root)
     path = layout.source_lineage_source
     current = _load_lineage(path)
-    observed = digest_func(layout)
+    try:
+        observed = digest_func(layout)
+    except LineageRefreshError:
+        raise
+    except Exception as exc:
+        raise LineageRefreshError(
+            "SOURCE_DIGEST_FAILED",
+            "не удалось вычислить канонический отпечаток реализации",
+        ) from exc
     if not isinstance(observed, str) or SHA256_PATTERN.fullmatch(observed) is None:
         raise LineageRefreshError(
             "SOURCE_DIGEST_INVALID",
@@ -204,21 +212,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             write=args.write,
         )
     except LineageRefreshError as exc:
-        print(
-            json.dumps(
-                {
-                    "status": "error",
-                    "code": exc.code,
-                    "message": str(exc),
-                    "path": str(
-                        args.source_root.expanduser()
-                        / LINEAGE_RELATIVE
-                    ),
-                },
-                ensure_ascii=False,
-                sort_keys=True,
+        response = {
+            "status": "error",
+            "code": exc.code,
+            "message": str(exc),
+        }
+        if exc.code != "SOURCE_DIGEST_FAILED":
+            response["path"] = str(
+                args.source_root.expanduser()
+                / LINEAGE_RELATIVE
             )
-        )
+        print(json.dumps(response, ensure_ascii=False, sort_keys=True))
         return 1
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0
