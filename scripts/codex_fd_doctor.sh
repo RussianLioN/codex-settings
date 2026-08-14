@@ -308,7 +308,10 @@ if (( wave_size > DEFAULT_WAVE_SIZE )); then
 fi
 
 if (( wave_size > DEFAULT_WAVE_SIZE )) && (( wide_wave_manifest_trusted == 1 )); then
-  capacity_script=${CODEX_FD_DOCTOR_CAPACITY_SCRIPT:-$script_dir/codex_capacity.py}
+  capacity_script=$script_dir/codex_capacity.py
+  if [[ "$test_mode" == 1 ]]; then
+    capacity_script=${CODEX_FD_DOCTOR_CAPACITY_SCRIPT:-$capacity_script}
+  fi
   if [[ ! -f "$capacity_script" ]]; then
     block "capacity_preflight_unavailable"
   else
@@ -356,6 +359,9 @@ if [[ "$doctor_status" == BLOCK ]]; then
   capacity_decision=BLOCK
 elif [[ "$doctor_status" == WARN && "$capacity_decision" == ALLOW ]]; then
   capacity_decision=WARN
+  if (( wave_size > DEFAULT_WAVE_SIZE )); then
+    allowed_wave_size=$DEFAULT_WAVE_SIZE
+  fi
 fi
 
 reason_text=none

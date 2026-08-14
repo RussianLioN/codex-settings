@@ -387,6 +387,88 @@ class FdDoctorProcessInventoryTests(unittest.TestCase):
         self.assertIn("allowed_wave_size=19", completed.stdout)
         self.assertIn("capacity_decision=ALLOW", completed.stdout)
 
+    def test_trusted_wide_wave_warning_clamps_admission_to_fallback_size(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="fd-doctor-wide-") as temporary:
+            root = Path(temporary)
+            skill, registry, manifest = self.write_trusted_wide_wave_inputs(root)
+            snapshot = self.write_observer_snapshot(root)
+            observer_state_dir = self.write_dynamic_green_observer_state(root, effective_capacity=20)
+            environment = self.base_environment()
+            environment.update(
+                {
+                    "HOME": str(root / "home"),
+                    "CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT": "1",
+                    "CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT": "1",
+                    "CODEX_FD_DOCTOR_ORPHAN_NODE_REPL_COUNT": "1",
+                    "CODEX_FD_DOCTOR_TRUSTED_REGISTRY": str(registry),
+                    "CODEX_FD_DOCTOR_CAPACITY_OBSERVER_SNAPSHOT": str(snapshot),
+                    "CODEX_FD_DOCTOR_CAPACITY_OBSERVER_STATE_DIR": str(observer_state_dir),
+                }
+            )
+
+            completed = self.run_doctor(
+                environment,
+                "--wave-size",
+                "19",
+                "--skill-id",
+                "consilium",
+                "--skill-file",
+                str(skill),
+                "--manifest",
+                str(manifest),
+            )
+
+        self.assertEqual(1, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("status=WARN", completed.stdout)
+        self.assertIn("allowed_wave_size=6", completed.stdout)
+        self.assertIn("capacity_decision=WARN", completed.stdout)
+        self.assertIn("orphan_candidate_node_repl_processes", completed.stdout)
+
+    def test_non_test_capacity_script_override_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="fd-doctor-capacity-override-") as temporary:
+            root = Path(temporary)
+            skill, registry, manifest = self.write_trusted_wide_wave_inputs(root)
+            codex_home = root / "codex-home"
+            registry_path = codex_home / "config" / "trusted-wide-wave-skills.json"
+            registry_path.parent.mkdir(parents=True)
+            registry_path.write_bytes(registry.read_bytes())
+            fake_capacity = root / "fake_capacity.py"
+            fake_capacity.write_text(
+                "import json\n"
+                "print(json.dumps({'allowed_wave_size': 19, 'capacity_decision': 'ALLOW', "
+                "'observer_reasons': ['fake_capacity_script_used']}))\n",
+                encoding="utf-8",
+            )
+            environment = self.base_environment()
+            environment.pop("CODEX_FD_DOCTOR_TEST_MODE")
+            environment.update(
+                {
+                    "HOME": str(root / "home"),
+                    "CODEX_HOME": str(codex_home),
+                    "CODEX_FD_DOCTOR_CAPACITY_SCRIPT": str(fake_capacity),
+                }
+            )
+
+            completed = subprocess.run(
+                [
+                    str(FD_DOCTOR),
+                    "--wave-size",
+                    "19",
+                    "--skill-id",
+                    "consilium",
+                    "--skill-file",
+                    str(skill),
+                    "--manifest",
+                    str(manifest),
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment,
+            )
+
+        self.assertNotIn("fake_capacity_script_used", completed.stdout + completed.stderr)
+
     def test_untrusted_wide_wave_blocks_with_zero_allowed_capacity(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp", prefix="fd-doctor-wide-") as temporary:
             root = Path(temporary)
