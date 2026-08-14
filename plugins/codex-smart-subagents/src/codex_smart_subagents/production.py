@@ -178,10 +178,14 @@ class LiveChildRunnerFactory:
         work_request: ChildWorkRequest,
         _runtime: object,
     ) -> ChildRunner:
-        relative = _first_snapshot_file(snapshot.root)
-        snapshot_file = snapshot.root / relative
-        source_file = work_request.repository / relative
         git_head = work_request.repository / ".git" / "HEAD"
+        relative = _first_snapshot_file(snapshot.root)
+        if relative is None:
+            snapshot_file = snapshot.root
+            source_file = git_head
+        else:
+            snapshot_file = snapshot.root / relative
+            source_file = work_request.repository / relative
         auth_file = self.codex_home / "auth.json"
         targets = CanaryProbeTargets(
             snapshot_root=snapshot.root,
@@ -755,14 +759,11 @@ def install_signal_handlers(runtime: ProductionRuntime) -> None:
     signal.signal(signal.SIGHUP, stop)
 
 
-def _first_snapshot_file(root: Path) -> Path:
+def _first_snapshot_file(root: Path) -> Path | None:
     for candidate in sorted(root.rglob("*"), key=lambda item: os.fspath(item)):
         if candidate.is_file() and not candidate.is_symlink():
             return candidate.relative_to(root)
-    raise ControllerStartError(
-        "SNAPSHOT_EMPTY",
-        "permission canary requires at least one committed regular file",
-    )
+    return None
 
 
 def _required_auth_file(codex_home: Path) -> Path:

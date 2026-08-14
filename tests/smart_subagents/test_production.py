@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import socket
 import stat
 import subprocess
 import sys
@@ -10,6 +11,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -22,14 +24,23 @@ from codex_smart_subagents.daemon import (  # noqa: E402
     ControllerProcessConfig,
 )
 from codex_smart_subagents.production import (  # noqa: E402
+    LiveChildRunnerFactory,
     build_production_runtime,
     materialize_boundary_permission_snapshot,
     materialize_reader_schema,
 )
+from codex_smart_subagents.child_runner import (  # noqa: E402
+    PermissionProfileDefinition,
+)
 from codex_smart_subagents.catalog import Catalog  # noqa: E402
 from codex_smart_subagents.identity import RequestContext  # noqa: E402
 from codex_smart_subagents.service import SmartService  # noqa: E402
+from codex_smart_subagents.snapshot import (  # noqa: E402
+    SnapshotResult,
+    SourceManifest,
+)
 from codex_smart_subagents.state import RouteState  # noqa: E402
+from codex_smart_subagents.worker import ChildWorkRequest  # noqa: E402
 from tests.smart_subagents.fixtures import valid_plan  # noqa: E402
 
 
@@ -313,6 +324,95 @@ class ProductionCompositionTests(unittest.TestCase):
             ],
         )
 
+    def test_live_child_runner_uses_snapshot_root_for_empty_snapshot_canary(
+        self,
+    ) -> None:
+        repository = self._source_repository()
+        snapshot = self._snapshot_result("empty-snapshot", files=())
+        profile = PermissionProfileDefinition.reader(
+            name="adaptive_reader",
+            snapshot_root=snapshot.root,
+        )
+        captured: list[dict[str, object]] = []
+
+        class CapturingCanary:
+            def __init__(self, **kwargs: object) -> None:
+                captured.append(kwargs)
+
+        listener = self._controller_listener()
+        try:
+            with mock.patch(
+                "codex_smart_subagents.production.LivePermissionCanary",
+                CapturingCanary,
+            ):
+                runner = self._runner_factory(listener)(
+                    profile,
+                    snapshot,
+                    self._work_request(repository),
+                    object(),
+                )
+        finally:
+            listener.close()
+
+        self.assertIsNotNone(runner)
+        self.assertEqual(1, len(captured))
+        targets = captured[0]["targets"]
+        self.assertEqual(snapshot.root.resolve(), targets.snapshot_read_file)
+        self.assertEqual(snapshot.root.resolve(), targets.snapshot_write_file)
+        self.assertEqual(
+            (repository / ".git" / "HEAD").resolve(),
+            targets.source_worktree_write_file,
+        )
+
+    def test_live_child_runner_keeps_nonempty_snapshot_relative_source_pair(
+        self,
+    ) -> None:
+        repository = self._source_repository({"nested/readme.txt": "source\n"})
+        snapshot = self._snapshot_result(
+            "nonempty-snapshot",
+            files=(("nested/readme.txt", "snapshot\n"),),
+        )
+        profile = PermissionProfileDefinition.reader(
+            name="adaptive_reader",
+            snapshot_root=snapshot.root,
+        )
+        captured: list[dict[str, object]] = []
+
+        class CapturingCanary:
+            def __init__(self, **kwargs: object) -> None:
+                captured.append(kwargs)
+
+        listener = self._controller_listener()
+        try:
+            with mock.patch(
+                "codex_smart_subagents.production.LivePermissionCanary",
+                CapturingCanary,
+            ):
+                runner = self._runner_factory(listener)(
+                    profile,
+                    snapshot,
+                    self._work_request(repository),
+                    object(),
+                )
+        finally:
+            listener.close()
+
+        self.assertIsNotNone(runner)
+        self.assertEqual(1, len(captured))
+        targets = captured[0]["targets"]
+        self.assertEqual(
+            (snapshot.root / "nested" / "readme.txt").resolve(),
+            targets.snapshot_read_file,
+        )
+        self.assertEqual(
+            (snapshot.root / "nested" / "readme.txt").resolve(),
+            targets.snapshot_write_file,
+        )
+        self.assertEqual(
+            (repository / "nested" / "readme.txt").resolve(),
+            targets.source_worktree_write_file,
+        )
+
     def test_builds_controller_executor_and_closes_owned_socket(self) -> None:
         runtime = build_production_runtime(self.config)
         socket_path = self.config.paths.socket_path
@@ -355,6 +455,100 @@ class ProductionCompositionTests(unittest.TestCase):
         finally:
             runtime.close()
         self.assertFalse(os.path.lexists(socket_path))
+
+    def _runner_factory(self, listener: socket.socket) -> LiveChildRunnerFactory:
+        store = SimpleNamespace(path=self.root / "state.sqlite3")
+        store.path.write_text("sqlite\n", encoding="utf-8")
+        store.path.chmod(0o600)
+        return LiveChildRunnerFactory(
+            codex_executable=self.codex,
+            codex_home=self.codex_home,
+            canary_runtime_parent=self.root / "canary-runtime",
+            managed_config_inspector=object(),
+            store=store,
+            controller_socket=Path(listener.getsockname()),
+        )
+
+    def _controller_listener(self) -> socket.socket:
+        listener = socket.socket(socket.AF_UNIX)
+        sequence = len(list(self.root.glob("controller-*.sock")))
+        path = self.root / f"controller-{sequence}.sock"
+        listener.bind(os.fspath(path))
+        listener.listen(1)
+        return listener
+
+    def _source_repository(
+        self,
+        files: dict[str, str] | None = None,
+    ) -> Path:
+        sequence = len(list(self.root.glob("source-*")))
+        repository = self.root / f"source-{sequence}"
+        (repository / ".git").mkdir(parents=True)
+        head = repository / ".git" / "HEAD"
+        head.write_text("ref: refs/heads/main\n", encoding="utf-8")
+        head.chmod(0o600)
+        for relative, contents in (files or {}).items():
+            path = repository / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(contents, encoding="utf-8")
+            path.chmod(0o600)
+        return repository
+
+    def _snapshot_result(
+        self,
+        name: str,
+        *,
+        files: tuple[tuple[str, str], ...],
+    ) -> SnapshotResult:
+        root = self.root / name
+        root.mkdir(mode=0o700)
+        total = 0
+        for relative, contents in files:
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(contents, encoding="utf-8")
+            path.chmod(0o444)
+            total += len(contents.encode("utf-8"))
+        for directory in sorted(
+            (item for item in root.rglob("*") if item.is_dir()),
+            key=lambda item: len(item.parts),
+            reverse=True,
+        ):
+            directory.chmod(0o555)
+        root.chmod(0o500)
+        manifest = SourceManifest(
+            head_sha="a" * 40,
+            status_sha256="b" * 64,
+            refs_sha256="c" * 64,
+            worktrees_sha256="d" * 64,
+            git_control_sha256="e" * 64,
+        )
+        return SnapshotResult(
+            root=root,
+            base_sha="a" * 40,
+            file_count=len(files),
+            total_bytes=total,
+            manifest_sha256="f" * 64,
+            source_before=manifest,
+            source_after=manifest,
+        )
+
+    def _work_request(self, repository: Path) -> ChildWorkRequest:
+        return ChildWorkRequest(
+            repository=repository,
+            base_sha="a" * 40,
+            runtime_root=self.root / "child-runtime",
+            codex_executable=self.codex,
+            codex_version="0.144.4",
+            model="gpt-5.6-luna",
+            reasoning_effort="low",
+            permission_profile_name="adaptive_reader",
+            managed_config_sha256="b" * 64,
+            output_schema=self.root / "schema.json",
+            prompt="Проверь снимок.",
+            timeout_seconds=30,
+            max_output_bytes=4096,
+        )
 
     def test_boundary_plan_runs_one_production_reclassification(self) -> None:
         runtime = build_production_runtime(self.config)
