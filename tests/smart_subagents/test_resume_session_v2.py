@@ -630,7 +630,8 @@ class RootSessionLeaseStoreV2Tests(unittest.TestCase):
 
     def test_candidate_discovery_selects_newest_route_for_same_codex_session(self) -> None:
         database = self.state_home / "routes.sqlite3"
-        with sqlite3.connect(database) as connection:
+        connection = sqlite3.connect(database)
+        try:
             connection.executescript(
                 "create table routes (route_id text, shell_session_id text, "
                 "session_id text, turn_id text, state text, disposition text, "
@@ -657,6 +658,9 @@ class RootSessionLeaseStoreV2Tests(unittest.TestCase):
                     "insert into nodes values (?,?,0)",
                     (route_id, "node2_" + suffix * 32),
                 )
+            connection.commit()
+        finally:
+            connection.close()
 
         candidate = discover_resume_candidate_v2(
             database,
@@ -672,7 +676,8 @@ class RootSessionLeaseStoreV2Tests(unittest.TestCase):
     ) -> None:
         database = self.state_home / "routes.sqlite3"
         route_id = "route2_" + "1" * 32
-        with sqlite3.connect(database) as connection:
+        connection = sqlite3.connect(database)
+        try:
             connection.executescript(
                 "create table routes (route_id text, shell_session_id text, "
                 "session_id text, turn_id text, state text, disposition text, "
@@ -697,6 +702,9 @@ class RootSessionLeaseStoreV2Tests(unittest.TestCase):
                 "insert into nodes values (?,?,0)",
                 (route_id, "node2_" + "1" * 32),
             )
+            connection.commit()
+        finally:
+            connection.close()
         observed_deadlines = []
         real_connect = sqlite_deadline_v2.connect_sqlite_with_deadline_v2
 
