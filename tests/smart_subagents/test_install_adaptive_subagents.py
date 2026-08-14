@@ -2724,7 +2724,7 @@ class InstallerV2RepeatTests(_InstallerBase):
             }
         }
 
-        self.assertEqual(7, lineage["generation"])
+        self.assertEqual(8, lineage["generation"])
         self.installer._require_monotonic_source_lineage_v2(
             previous,
             lineage,
