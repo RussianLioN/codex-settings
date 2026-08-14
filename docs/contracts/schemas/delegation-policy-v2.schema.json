@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/delegation-policy-v2.schema.json",
+  "title": "delegation-policy-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "policyId",
+    "decisionOrder",
+    "hardBanReasons",
+    "delegateRequirements",
+    "accountEvidence",
+    "pairAvailability",
+    "reassessment"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "contractVersion": {
+      "const": "codex-delegation-policy-v2"
+    },
+    "policyId": {
+      "const": "codex-delegation-policy-v2/default"
+    },
+    "decisionOrder": {
+      "const": [
+        "clarify",
+        "direct",
+        "delegate"
+      ]
+    },
+    "hardBanReasons": {
+      "type": "array"
+    },
+    "delegateRequirements": {
+      "type": "object"
+    },
+    "accountEvidence": {
+      "type": "object"
+    },
+    "pairAvailability": {
+      "type": "object"
+    },
+    "reassessment": {
+      "type": "object"
+    }
+  },
+  "const": {
+    "schemaVersion": 2,
+    "contractVersion": "codex-delegation-policy-v2",
+    "policyId": "codex-delegation-policy-v2/default",
+    "decisionOrder": [
+      "clarify",
+      "direct",
+      "delegate"
+    ],
+    "hardBanReasons": [
+      {
+        "reason": "authority-conflict",
+        "decision": "clarify"
+      },
+      {
+        "reason": "owner-decision-required",
+        "decision": "clarify"
+      },
+      {
+        "reason": "required-fact-unavailable",
+        "decision": "clarify"
+      },
+      {
+        "reason": "delegation-explicitly-forbidden",
+        "decision": "direct"
+      },
+      {
+        "reason": "delegation-not-explicitly-allowed",
+        "decision": "direct"
+      },
+      {
+        "reason": "no-objectively-verifiable-unit",
+        "decision": "direct"
+      },
+      {
+        "reason": "no-independent-work-unit",
+        "decision": "direct"
+      }
+    ],
+    "delegateRequirements": {
+      "permission": "allow",
+      "objectivelyVerifiable": true,
+      "minimumIndependentWorkUnits": 1,
+      "missingFactDecision": "direct"
+    },
+    "accountEvidence": {
+      "directRequired": false,
+      "clarifyRequired": false,
+      "smartPlanRequired": false,
+      "nodeAttemptRequired": true,
+      "fullCollectionJobsPerAttempt": 1,
+      "processesPerFullCollection": 5,
+      "cacheAcrossAttempts": false,
+      "hiddenRetry": false,
+      "missingAttemptEvidenceError": "ACCOUNT_EVIDENCE_REQUIRED"
+    },
+    "pairAvailability": {
+      "selection": "exact-atomic-pair",
+      "smartPlanSources": [
+        "policyPairs",
+        "bundledSnapshotPairs"
+      ],
+      "nodeAttemptSources": [
+        "policyPairs",
+        "bundledSnapshotPairs",
+        "accountPairs"
+      ],
+      "unavailable": "reject",
+      "errorCode": "ROUTING_PAIR_UNAVAILABLE",
+      "fallback": "forbidden"
+    },
+    "reassessment": {
+      "mode": "promote-only",
+      "explicitPolicyRequired": true,
+      "missingPolicyError": "REASSESSMENT_POLICY_REQUIRED",
+      "unavailableCandidate": "reject"
+    }
+  }
+}

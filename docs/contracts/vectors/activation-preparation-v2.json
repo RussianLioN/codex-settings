@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 2,
+  "fixtureSeed": {
+    "root": "/var/lib/codex-smart",
+    "installationId": "ins2_1234567890abcdef1234567890abcdef",
+    "operationId": "op2_1234567890abcdef1234567890abcdef",
+    "databaseId": "db2_1234567890abcdef1234567890abcdef",
+    "schemaSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "compatibilityFingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+    "routingPolicyFingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+    "schemaFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "schemaArtifactSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "activationBindingNonce": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "snapshotSha256": "8888888888888888888888888888888888888888888888888888888888888888",
+    "createdAt": "2026-07-19T11:59:00Z",
+    "intentAt": "2026-07-19T12:00:00Z",
+    "activationCompletedAt": "2026-07-19T12:00:01Z",
+    "databaseCompletedAt": "2026-07-19T12:00:02Z",
+    "frozenAt": "2026-07-19T12:00:03Z",
+    "receiptCompletedAt": "2026-07-19T12:00:04Z"
+  },
+  "expectedFingerprints": {
+    "activationIntent": "36a2fe0a564932b259c8d62e23790dd4ddd91d02d4202b84b3706f797a4e4fe6",
+    "definition": "9166460c8c5ce0cdf49498a45d4f599ac1925a2df235a22de189e18088f10748",
+    "activationTreeStep": "27ee8b0213ecb62299e2567363fbb0456fac23a9e007a05ceb5b92bd06944282",
+    "databaseInodeStep": "842ab7fd38be341472f872eae68c8d863b7fbfc0d142f0245721638c6aff9ecf",
+    "frozenJournal": "5bdd76b94b5a69004612b2a582fadc417947db1c2be7264b1b464d70f8f6598c",
+    "journal": "c7ea05faf6ef399d17b27bad81ec8001d4e76ba10b2fd7d657c8e863001a3ba7",
+    "receipt": "618645caa52e8e1b20088041003b12fde41cbcceb90ca1643bee6dadf5fdf0a1"
+  },
+  "negativeCases": [
+    {
+      "name": "journal-unknown-field",
+      "target": "journal",
+      "operation": "add",
+      "path": "/unexpected",
+      "value": true,
+      "rehash": false,
+      "expectedLayer": "schema"
+    },
+    {
+      "name": "receipt-unknown-field",
+      "target": "receipt",
+      "operation": "add",
+      "path": "/unexpected",
+      "value": true,
+      "rehash": false,
+      "expectedLayer": "schema"
+    },
+    {
+      "name": "step-id-not-derived-from-operation",
+      "target": "journal",
+      "operation": "replace",
+      "path": "/steps/0/stepId",
+      "value": "pst2_ffffffffffffffffffffffffffffffff",
+      "rehash": true,
+      "expectedLayer": "semantic",
+      "expectedCode": "STEP_ID_BINDING"
+    },
+    {
+      "name": "interface-evidence-not-bound",
+      "target": "journal",
+      "operation": "replace",
+      "path": "/definition/activationIntent/interfaceEvidence/compatibilityFingerprint",
+      "value": "9999999999999999999999999999999999999999999999999999999999999999",
+      "rehash": true,
+      "expectedLayer": "semantic",
+      "expectedCode": "INTERFACE_EVIDENCE_BINDING"
+    },
+    {
+      "name": "receipt-database-inode-not-bound",
+      "target": "receipt",
+      "operation": "replace",
+      "path": "/databaseBindingTarget/value/inode",
+      "value": 999,
+      "rehash": true,
+      "expectedLayer": "semantic",
+      "expectedCode": "DATABASE_TARGET_PHYSICAL_BINDING"
+    },
+    {
+      "name": "receipt-frozen-journal-not-bound",
+      "target": "receipt",
+      "operation": "replace",
+      "path": "/frozenJournalFingerprint",
+      "value": "7777777777777777777777777777777777777777777777777777777777777777",
+      "rehash": true,
+      "expectedLayer": "semantic",
+      "expectedCode": "RECEIPT_FROZEN_JOURNAL_BINDING"
+    },
+    {
+      "name": "desired-omits-snapshot",
+      "target": "receipt",
+      "operation": "replace",
+      "path": "/desired/fileObjects",
+      "value": [],
+      "rehash": true,
+      "expectedLayer": "semantic",
+      "expectedCode": "DESIRED_SNAPSHOT_BINDING"
+    },
+    {
+      "name": "desired-activation-file-differs",
+      "target": "receipt",
+      "operation": "replace",
+      "path": "/desired/activation/value/activationFile/inode",
+      "value": 999,
+      "rehash": true,
+      "expectedLayer": "semantic",
+      "expectedCode": "DESIRED_ACTIVATION_BINDING"
+    },
+    {
+      "name": "prepared-database-not-empty",
+      "target": "receipt",
+      "operation": "replace",
+      "path": "/databaseEmptyFile/value/size",
+      "value": 1,
+      "rehash": true,
+      "expectedLayer": "semantic",
+      "expectedCode": "DATABASE_EMPTY_FILE"
+    }
+  ]
+}

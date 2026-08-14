@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/routing-input-v2.schema.json",
+  "title": "routing-input-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "semanticVersion",
+    "phase",
+    "taskFacts",
+    "delegationPolicyRef",
+    "contextBundle",
+    "roleTemplateId",
+    "catalogs",
+    "accountEvidenceJobs",
+    "reassessment"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "contractVersion": {
+      "const": "codex-routing-input-v2"
+    },
+    "semanticVersion": {
+      "const": "q+p+v+o-v2"
+    },
+    "phase": {
+      "enum": [
+        "smart-plan",
+        "node-attempt"
+      ]
+    },
+    "taskFacts": {
+      "$ref": "task-facts-v1.schema.json"
+    },
+    "delegationPolicyRef": {
+      "const": "codex-delegation-policy-v2/default"
+    },
+    "contextBundle": {
+      "$ref": "context-bundle-v1.schema.json"
+    },
+    "roleTemplateId": {
+      "type": "string",
+      "pattern": "^(researcher|diagnostician|validator|risk_auditor|implementer)-v1$"
+    },
+    "catalogs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyPairs",
+        "bundledSnapshotPairs",
+        "accountPairs"
+      ],
+      "properties": {
+        "policyPairs": {
+          "$ref": "#/$defs/pairs"
+        },
+        "bundledSnapshotPairs": {
+          "$ref": "#/$defs/pairs"
+        },
+        "accountPairs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/pairs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "accountEvidenceJobs": {
+      "type": "array",
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/$defs/accountEvidenceJob"
+      }
+    },
+    "reassessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "currentPair",
+        "explicitPolicyAllowed"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "initial",
+            "promote-only"
+          ]
+        },
+        "currentPair": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/pair"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "explicitPolicyAllowed": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "const": "smart-plan"
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "properties": {
+          "catalogs": {
+            "properties": {
+              "accountPairs": {
+                "type": "null"
+              }
+            }
+          },
+          "accountEvidenceJobs": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "const": "node-attempt"
+          }
+        },
+        "required": [
+          "phase"
+        ]
+      },
+      "then": {
+        "properties": {
+          "catalogs": {
+            "properties": {
+              "accountPairs": {
+                "$ref": "#/$defs/pairs"
+              }
+            }
+          },
+          "accountEvidenceJobs": {
+            "minItems": 1,
+            "maxItems": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "reasoningEffort"
+      ],
+      "properties": {
+        "model": {
+          "enum": [
+            "gpt-5.6-luna",
+            "gpt-5.6-terra",
+            "gpt-5.6-sol"
+          ]
+        },
+        "reasoningEffort": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        }
+      }
+    },
+    "pairs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/pair"
+      }
+    },
+    "accountEvidenceJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "collectionJobId",
+        "attemptId",
+        "fullCollection",
+        "processCount",
+        "cacheHit",
+        "hiddenRetry"
+      ],
+      "properties": {
+        "collectionJobId": {
+          "type": "string",
+          "pattern": "^aej2_[0-9a-f]{32}$"
+        },
+        "attemptId": {
+          "type": "string",
+          "pattern": "^att2_[0-9a-f]{32}$"
+        },
+        "fullCollection": {
+          "const": true
+        },
+        "processCount": {
+          "const": 5
+        },
+        "cacheHit": {
+          "const": false
+        },
+        "hiddenRetry": {
+          "const": false
+        }
+      }
+    }
+  }
+}

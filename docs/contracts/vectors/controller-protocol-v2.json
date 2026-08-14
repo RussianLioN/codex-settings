@@ -1,0 +1,389 @@
+{
+  "schemaVersion": 2,
+  "contractVersion": "codex-protocol-vector-suite-v2",
+  "protocol": "controller-protocol-v2",
+  "positiveCases": [
+    {
+      "name": "health-request",
+      "method": "health",
+      "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0",
+        "codexHomeHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "shellSessionId": "shell-1", "controllerIdentity": null, "instanceId": null,
+        "controllerStartId": null, "commandId": null, "expectedControlEpoch": null,
+        "operationId": null, "method": "health", "params": {},
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "extensions": {}
+      }
+    },
+    {
+      "name": "health-response", "method": "health", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "method": "health",
+        "responseKind": "HEALTH", "commandId": null,
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+        "controlEpoch": 7,
+        "payload": {
+          "namespace": "codex-smart-subagents-v2",
+          "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "pid": 1001, "processStartMarker": "pid-1001-start-7", "processGroupId": 1001,
+          "state": "ACCEPTING", "maintenanceMode": null, "operationId": null,
+          "acceptingNewRoutes": true, "quiescent": false,
+          "activationFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "compatibilityFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "routingPolicyFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "bundledCatalogFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "databaseSchemaVersion": 2,
+          "coordinatorSelection": {
+            "selection": "first-verified-available",
+            "status": "SELECTED",
+            "reasonCode": "COORDINATOR_PAIR_SELECTED",
+            "selectedPair": {"model": "gpt-5.6-sol", "reasoningEffort": "medium"},
+            "candidateIndex": 0,
+            "accountCatalogFingerprint": "5555555555555555555555555555555555555555555555555555555555555555",
+            "accountContextFingerprint": "6666666666666666666666666666666666666666666666666666666666666666"
+          },
+          "workCounts": {
+            "nonterminalRoutes": 1, "nonterminalNodes": 1, "activeAttempts": 0,
+            "activeLeases": 0, "openIntents": 1, "inflightLaunchPermits": 0,
+            "activeRuntimeArtifacts": 0, "pendingCandidatePublications": 0,
+            "activeEvidenceJobs": 1, "queuedEvidenceJobs": 1
+          }
+        },
+        "responseFingerprint": "2222222222222222222222222222222222222222222222222222222222222222", "extensions": {}
+      }
+    },
+    {
+      "name": "maintenance-begin-request", "method": "maintenance_begin", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0",
+        "codexHomeHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "shellSessionId": "shell-1",
+        "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "commandId": "cc2_cccccccccccccccccccccccccccccccc", "expectedControlEpoch": 7,
+        "operationId": "op2_dddddddddddddddddddddddddddddddd", "method": "maintenance_begin",
+        "params": {"reasonCode": "apply"},
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "extensions": {}
+      }
+    },
+    {
+      "name": "maintenance-begin-response", "method": "maintenance_begin", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "method": "maintenance_begin",
+        "responseKind": "SUCCESS", "commandId": "cc2_cccccccccccccccccccccccccccccccc",
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "controlEpoch": 8,
+        "payload": {"status": "MAINTENANCE_BEGUN", "previousControlEpoch": 7, "newControlEpoch": 8,
+          "commandReceipt": {"commandId": "cc2_cccccccccccccccccccccccccccccccc", "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "resultFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "controlEpoch": 8}},
+        "responseFingerprint": "2222222222222222222222222222222222222222222222222222222222222222", "extensions": {}
+      }
+    },
+    {
+      "name": "maintenance-strengthen-request", "method": "maintenance_strengthen", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0",
+        "codexHomeHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "shellSessionId": "shell-1",
+        "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "commandId": "cc2_cccccccccccccccccccccccccccccccc", "expectedControlEpoch": 8,
+        "operationId": "op2_dddddddddddddddddddddddddddddddd", "method": "maintenance_strengthen",
+        "params": {"mode": "freeze"},
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "extensions": {}
+      }
+    },
+    {
+      "name": "maintenance-strengthen-response", "method": "maintenance_strengthen", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "method": "maintenance_strengthen",
+        "responseKind": "SUCCESS", "commandId": "cc2_cccccccccccccccccccccccccccccccc",
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "controlEpoch": 9,
+        "payload": {"status": "MAINTENANCE_STRENGTHENED", "previousControlEpoch": 8, "newControlEpoch": 9,
+          "commandReceipt": {"commandId": "cc2_cccccccccccccccccccccccccccccccc", "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "resultFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "controlEpoch": 9}},
+        "responseFingerprint": "2222222222222222222222222222222222222222222222222222222222222222", "extensions": {}
+      }
+    },
+    {
+      "name": "maintenance-status-request", "method": "maintenance_status", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0",
+        "codexHomeHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "shellSessionId": "shell-1",
+        "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "commandId": null, "expectedControlEpoch": 9, "operationId": null, "method": "maintenance_status", "params": {},
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "extensions": {}
+      }
+    },
+    {
+      "name": "maintenance-status-response", "method": "maintenance_status", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "method": "maintenance_status",
+        "responseKind": "SUCCESS", "commandId": null,
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "controlEpoch": 9,
+        "payload": {"state": "MAINTENANCE", "maintenanceMode": "freeze", "operationId": "op2_dddddddddddddddddddddddddddddddd", "quiescent": true},
+        "responseFingerprint": "2222222222222222222222222222222222222222222222222222222222222222", "extensions": {}
+      }
+    },
+    {
+      "name": "shutdown-request", "method": "shutdown", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0",
+        "codexHomeHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "shellSessionId": "shell-1",
+        "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "commandId": "cc2_cccccccccccccccccccccccccccccccc", "expectedControlEpoch": 9,
+        "operationId": "op2_dddddddddddddddddddddddddddddddd", "method": "shutdown", "params": {},
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "extensions": {}
+      }
+    },
+    {
+      "name": "shutdown-response", "method": "shutdown", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "method": "shutdown",
+        "responseKind": "SUCCESS", "commandId": "cc2_cccccccccccccccccccccccccccccccc",
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "controlEpoch": 10,
+        "payload": {"status": "SHUTDOWN_COMMITTED", "previousControlEpoch": 9, "newControlEpoch": 10,
+          "socketIntent": {"path": "/tmp/codex-as-501-a/controller.sock", "device": 1, "inode": 2, "ownerUid": 501, "ownerGid": 20, "mode": "0600", "controllerPid": 1001, "controllerStartMarker": "pid-1001-start-7", "controllerProcessGroupId": 1001, "lockPath": "/tmp/codex-as-501-a/controller.lock", "processExitRequired": true, "exclusiveLockRequired": true},
+          "commandReceipt": {"commandId": "cc2_cccccccccccccccccccccccccccccccc", "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "resultFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "controlEpoch": 10}},
+        "responseFingerprint": "2222222222222222222222222222222222222222222222222222222222222222", "extensions": {}
+      }
+    },
+    {
+      "name": "shutdown-replay-response", "method": "shutdown", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "method": "shutdown",
+        "responseKind": "REPLAY_RECEIPT", "commandId": "cc2_cccccccccccccccccccccccccccccccc",
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "controlEpoch": 10,
+        "payload": {
+          "commandReceipt": {"commandId": "cc2_cccccccccccccccccccccccccccccccc", "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "resultFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "controlEpoch": 10},
+          "originalControlEpoch": 10,
+          "originalPayload": {
+            "status": "SHUTDOWN_COMMITTED", "previousControlEpoch": 9, "newControlEpoch": 10,
+            "socketIntent": {"path": "/tmp/codex-as-501-a/controller.sock", "device": 1, "inode": 2, "ownerUid": 501, "ownerGid": 20, "mode": "0600", "controllerPid": 1001, "controllerStartMarker": "pid-1001-start-7", "controllerProcessGroupId": 1001, "lockPath": "/tmp/codex-as-501-a/controller.lock", "processExitRequired": true, "exclusiveLockRequired": true},
+            "commandReceipt": {"commandId": "cc2_cccccccccccccccccccccccccccccccc", "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "resultFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "controlEpoch": 10}
+          },
+          "originalResponseFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
+        },
+        "responseFingerprint": "4444444444444444444444444444444444444444444444444444444444444444", "extensions": {}
+      }
+    },
+    {
+      "name": "controller-accept-request", "method": "controller_accept", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0",
+        "codexHomeHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "shellSessionId": "shell-1",
+        "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "instanceId": null,
+        "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "commandId": "cc2_cccccccccccccccccccccccccccccccc",
+        "expectedControlEpoch": 10, "operationId": "op2_dddddddddddddddddddddddddddddddd", "method": "controller_accept",
+        "params": {"activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "pid": 1002, "processStartMarker": "pid-1002-start-10", "processGroupId": 1002, "expectedOrphanOperationId": null},
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "extensions": {}
+      }
+    },
+    {
+      "name": "controller-accept-rollback-rebind-request", "method": "controller_accept", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0",
+        "codexHomeHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "shellSessionId": "shell-rollback",
+        "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "instanceId": null,
+        "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "commandId": "cc2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "expectedControlEpoch": 10, "operationId": "op2_dddddddddddddddddddddddddddddddd", "method": "controller_accept",
+        "params": {"activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "pid": 1004, "processStartMarker": "pid-1004-start-10", "processGroupId": 1004, "expectedOrphanOperationId": "op2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
+        "requestFingerprint": "5555555555555555555555555555555555555555555555555555555555555555", "extensions": {}
+      }
+    },
+    {
+      "name": "controller-accept-response", "method": "controller_accept", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "method": "controller_accept",
+        "responseKind": "SUCCESS", "commandId": "cc2_cccccccccccccccccccccccccccccccc",
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "controlEpoch": 11,
+        "payload": {"status": "CONTROLLER_ACCEPTED", "previousControlEpoch": 10, "newControlEpoch": 11,
+          "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "commandReceipt": {"commandId": "cc2_cccccccccccccccccccccccccccccccc", "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "resultFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "controlEpoch": 11}},
+        "responseFingerprint": "2222222222222222222222222222222222222222222222222222222222222222", "extensions": {}
+      }
+    },
+    {
+      "name": "controller-recover-request", "method": "controller_recover", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0",
+        "codexHomeHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "shellSessionId": "shell-1",
+        "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "instanceId": null,
+        "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "commandId": "cc2_cccccccccccccccccccccccccccccccc",
+        "expectedControlEpoch": 11, "operationId": "op2_dddddddddddddddddddddddddddddddd", "method": "controller_recover",
+        "params": {"activationId": "act2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "databaseId": "db2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "pid": 1003, "processStartMarker": "pid-1003-start-11", "processGroupId": 1003},
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "extensions": {}
+      }
+    },
+    {
+      "name": "controller-recover-response", "method": "controller_recover", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "method": "controller_recover",
+        "responseKind": "SUCCESS", "commandId": "cc2_cccccccccccccccccccccccccccccccc",
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "controlEpoch": 12,
+        "payload": {"status": "CONTROLLER_RECOVERED", "previousControlEpoch": 11, "newControlEpoch": 12,
+          "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "commandReceipt": {"commandId": "cc2_cccccccccccccccccccccccccccccccc", "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "resultFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "controlEpoch": 12}},
+        "responseFingerprint": "2222222222222222222222222222222222222222222222222222222222222222", "extensions": {}
+      }
+    },
+    {
+      "name": "maintenance-resume-request", "method": "maintenance_resume", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0",
+        "codexHomeHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "shellSessionId": "shell-1",
+        "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "commandId": "cc2_cccccccccccccccccccccccccccccccc", "expectedControlEpoch": 12,
+        "operationId": "op2_dddddddddddddddddddddddddddddddd", "method": "maintenance_resume", "params": {},
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "extensions": {}
+      }
+    },
+    {
+      "name": "maintenance-resume-response", "method": "maintenance_resume", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "method": "maintenance_resume",
+        "responseKind": "SUCCESS", "commandId": "cc2_cccccccccccccccccccccccccccccccc",
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "controlEpoch": 13,
+        "payload": {"status": "MAINTENANCE_RESUMED", "previousControlEpoch": 12, "newControlEpoch": 13,
+          "commandReceipt": {"commandId": "cc2_cccccccccccccccccccccccccccccccc", "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "resultFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "controlEpoch": 13}},
+        "responseFingerprint": "2222222222222222222222222222222222222222222222222222222222222222", "extensions": {}
+      }
+    },
+    {
+      "name": "admit-node-request", "method": "admit_node", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0",
+        "codexHomeHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "shellSessionId": "shell-1",
+        "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "commandId": null, "expectedControlEpoch": 13, "operationId": null, "method": "admit_node",
+        "params": {"startRequestId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "routeId": "route2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "nodeId": "node2_cccccccccccccccccccccccccccccccc", "evidenceJobId": "aej2_dddddddddddddddddddddddddddddddd",
+          "activationGate": {"manifestSemanticFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "activationReceiptFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "journalAbsenceProof": {"schemaId": "absence-proof-v2", "schemaSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "value": {"proofId": "ap2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "installationId": "ins2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "operationId": "op2_cccccccccccccccccccccccccccccccc", "entries": [{"path": "/tmp/codex/install.transaction.json", "basename": "install.transaction.json", "parentDevice": 1, "parentInode": 2, "absent": true}], "directorySyncCompleted": true, "proofFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}, "valueFingerprint": "1111111111111111111111111111111111111111111111111111111111111111"},
+            "gateFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"}},
+        "requestFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "extensions": {}
+      }
+    },
+    {
+      "name": "admit-node-response", "method": "admit_node", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "method": "admit_node", "responseKind": "SUCCESS", "commandId": null,
+        "requestFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "controlEpoch": 13,
+        "payload": {"status": "ADMITTED", "startRequestId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "evidenceJobId": "aej2_dddddddddddddddddddddddddddddddd", "admissionId": "adm2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "activationGateFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"},
+        "responseFingerprint": "4444444444444444444444444444444444444444444444444444444444444444", "extensions": {}
+      }
+    },
+    {
+      "name": "smart-status-request", "method": "smart_status", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0",
+        "codexHomeHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "shellSessionId": "shell-1",
+        "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "commandId": null, "expectedControlEpoch": 13, "operationId": null, "method": "smart_status",
+        "params": {"startRequestId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "extensions": {}
+      }
+    },
+    {
+      "name": "smart-status-response", "method": "smart_status", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "method": "smart_status", "responseKind": "SUCCESS", "commandId": null,
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "controlEpoch": 13,
+        "payload": {"startRequestId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "evidenceJobId": "aej2_dddddddddddddddddddddddddddddddd", "admissionId": "adm2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "status": "ADMITTED", "terminalProblem": null},
+        "responseFingerprint": "2222222222222222222222222222222222222222222222222222222222222222", "extensions": {}
+      }
+    },
+    {
+      "name": "reserve-launch-permit-request", "method": "reserve_launch_permit", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0",
+        "codexHomeHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "shellSessionId": "shell-1",
+        "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "commandId": null, "expectedControlEpoch": 13, "operationId": null, "method": "reserve_launch_permit",
+        "params": {"admissionId": "adm2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "activationGate": {"manifestSemanticFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "activationReceiptFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "journalAbsenceProof": {"schemaId": "absence-proof-v2", "schemaSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "value": {"proofId": "ap2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "installationId": "ins2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "operationId": "op2_cccccccccccccccccccccccccccccccc", "entries": [{"path": "/tmp/codex/install.transaction.json", "basename": "install.transaction.json", "parentDevice": 1, "parentInode": 2, "absent": true}], "directorySyncCompleted": true, "proofFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}, "valueFingerprint": "1111111111111111111111111111111111111111111111111111111111111111"},
+            "gateFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"}},
+        "requestFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "extensions": {}
+      }
+    },
+    {
+      "name": "reserve-launch-permit-response", "method": "reserve_launch_permit", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "method": "reserve_launch_permit", "responseKind": "SUCCESS", "commandId": null,
+        "requestFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "controlEpoch": 13,
+        "payload": {"status": "RESERVED", "permitId": "lp2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "activationGateFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"},
+        "responseFingerprint": "4444444444444444444444444444444444444444444444444444444444444444", "extensions": {}
+      }
+    },
+    {
+      "name": "commit-launch-permit-request", "method": "commit_launch_permit", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0",
+        "codexHomeHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "shellSessionId": "shell-1",
+        "controllerIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "instanceId": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "controllerStartId": "cs2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "commandId": null, "expectedControlEpoch": 13, "operationId": null, "method": "commit_launch_permit",
+        "params": {"permitId": "lp2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "guardPid": 2001, "guardStartMarker": "pid-2001-start-13", "oneTimeTokenHash": "5555555555555555555555555555555555555555555555555555555555555555", "argvFingerprint": "6666666666666666666666666666666666666666666666666666666666666666", "snapshotIdentityFingerprint": "7777777777777777777777777777777777777777777777777777777777777777",
+          "activationGate": {"manifestSemanticFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "activationReceiptFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "journalAbsenceProof": {"schemaId": "absence-proof-v2", "schemaSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "value": {"proofId": "ap2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "installationId": "ins2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "operationId": "op2_cccccccccccccccccccccccccccccccc", "entries": [{"path": "/tmp/codex/install.transaction.json", "basename": "install.transaction.json", "parentDevice": 1, "parentInode": 2, "absent": true}], "directorySyncCompleted": true, "proofFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}, "valueFingerprint": "1111111111111111111111111111111111111111111111111111111111111111"},
+            "gateFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"}},
+        "requestFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "extensions": {}
+      }
+    },
+    {
+      "name": "commit-launch-permit-response", "method": "commit_launch_permit", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "method": "commit_launch_permit", "responseKind": "SUCCESS", "commandId": null,
+        "requestFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "controlEpoch": 13,
+        "payload": {"status": "COMMIT_AUTHORIZED", "permitId": "lp2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "guardPid": 2001, "guardStartMarker": "pid-2001-start-13", "activationGateFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"},
+        "responseFingerprint": "4444444444444444444444444444444444444444444444444444444444444444", "extensions": {}
+      }
+    }
+  ],
+  "negativeCases": [
+    {"name": "health-live-fence-rejected", "method": "health", "direction": "request", "baseCase": "health-request", "mutation": {"operation": "replace", "pointer": "/controllerIdentity", "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, "expectedViolation": "SCHEMA_REJECT"},
+    {"name": "health-without-coordinator-selection-rejected", "method": "health", "direction": "response", "baseCase": "health-response", "mutation": {"operation": "remove", "pointer": "/payload/coordinatorSelection"}, "expectedViolation": "SCHEMA_REJECT"},
+    {"name": "maintenance-begin-without-command-rejected", "method": "maintenance_begin", "direction": "request", "baseCase": "maintenance-begin-request", "mutation": {"operation": "replace", "pointer": "/commandId", "value": null}, "expectedViolation": "IDEMPOTENCY_REJECT"},
+    {"name": "maintenance-strengthen-drain-rejected", "method": "maintenance_strengthen", "direction": "request", "baseCase": "maintenance-strengthen-request", "mutation": {"operation": "replace", "pointer": "/params/mode", "value": "drain"}, "expectedViolation": "STATE_ORDER_REJECT"},
+    {"name": "maintenance-status-command-rejected", "method": "maintenance_status", "direction": "request", "baseCase": "maintenance-status-request", "mutation": {"operation": "replace", "pointer": "/commandId", "value": "cc2_cccccccccccccccccccccccccccccccc"}, "expectedViolation": "SCHEMA_REJECT"},
+    {"name": "shutdown-without-operation-rejected", "method": "shutdown", "direction": "request", "baseCase": "shutdown-request", "mutation": {"operation": "replace", "pointer": "/operationId", "value": null}, "expectedViolation": "IDEMPOTENCY_REJECT"},
+    {"name": "shutdown-replay-without-original-payload-rejected", "method": "shutdown", "direction": "response", "baseCase": "shutdown-replay-response", "mutation": {"operation": "remove", "pointer": "/payload/originalPayload"}, "expectedViolation": "IDEMPOTENCY_REJECT"},
+    {"name": "controller-accept-existing-instance-rejected", "method": "controller_accept", "direction": "request", "baseCase": "controller-accept-request", "mutation": {"operation": "replace", "pointer": "/instanceId", "value": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "expectedViolation": "STATE_ORDER_REJECT"},
+    {"name": "controller-recover-existing-instance-rejected", "method": "controller_recover", "direction": "request", "baseCase": "controller-recover-request", "mutation": {"operation": "replace", "pointer": "/instanceId", "value": "ci2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "expectedViolation": "STATE_ORDER_REJECT"},
+    {"name": "controller-recover-orphan-rebind-rejected", "method": "controller_recover", "direction": "request", "baseCase": "controller-recover-request", "mutation": {"operation": "add", "pointer": "/params/expectedOrphanOperationId", "value": "op2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}, "expectedViolation": "SCHEMA_REJECT"},
+    {"name": "maintenance-resume-without-command-rejected", "method": "maintenance_resume", "direction": "request", "baseCase": "maintenance-resume-request", "mutation": {"operation": "replace", "pointer": "/commandId", "value": null}, "expectedViolation": "IDEMPOTENCY_REJECT"},
+    {"name": "admit-node-without-start-request-rejected", "method": "admit_node", "direction": "request", "baseCase": "admit-node-request", "mutation": {"operation": "remove", "pointer": "/params/startRequestId"}, "expectedViolation": "STATE_ORDER_REJECT"},
+    {"name": "smart-status-by-admission-rejected", "method": "smart_status", "direction": "request", "baseCase": "smart-status-request", "mutation": {"operation": "replace", "pointer": "/params/startRequestId", "value": "adm2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}, "expectedViolation": "STATE_ORDER_REJECT"},
+    {"name": "reserve-without-admission-rejected", "method": "reserve_launch_permit", "direction": "request", "baseCase": "reserve-launch-permit-request", "mutation": {"operation": "remove", "pointer": "/params/admissionId"}, "expectedViolation": "STATE_ORDER_REJECT"},
+    {"name": "commit-without-snapshot-rejected", "method": "commit_launch_permit", "direction": "request", "baseCase": "commit-launch-permit-request", "mutation": {"operation": "remove", "pointer": "/params/snapshotIdentityFingerprint"}, "expectedViolation": "ATTESTATION_REJECT"}
+  ],
+  "attestationPositiveCases": [],
+  "attestationNegativeCases": [],
+  "errorCodeCategoryCases": [
+    {"code": "COMMAND_REPLAY_CONFLICT", "category": "CONFLICT"},
+    {"code": "CONTROL_EPOCH_MISMATCH", "category": "STALE"},
+    {"code": "CONTROLLER_INSTANCE_MISMATCH", "category": "STALE"},
+    {"code": "CONTROLLER_OPERATION_CONFLICT", "category": "CONFLICT"},
+    {"code": "INVALID_TRANSITION", "category": "INVALID"},
+    {"code": "ADAPTIVE_ACTIVATION_UNCOMMITTED", "category": "UNAVAILABLE"},
+    {"code": "ACCOUNT_EVIDENCE_UNAVAILABLE", "category": "UNAVAILABLE"},
+    {"code": "ACCOUNT_EVIDENCE_NOT_SUCCEEDED", "category": "INVALID"},
+    {"code": "ACCOUNT_CONTEXT_CHANGED", "category": "STALE"},
+    {"code": "ACTIVATION_GATE_CHANGED", "category": "STALE"},
+    {"code": "START_REQUEST_STALE", "category": "STALE"},
+    {"code": "START_REQUEST_OWNERSHIP_MISMATCH", "category": "INVALID"},
+    {"code": "EXTERNAL_PROCESS_STILL_RUNNING", "category": "UNAVAILABLE"},
+    {"code": "INTERNAL_ERROR", "category": "INTERNAL"}
+  ],
+  "semanticChecks": [
+    "internal-admit-node-only",
+    "start-request-before-admission",
+    "activation-gate-identical-at-three-boundaries",
+    "evidence-work-counts-exact",
+    "every-method-has-request-response-negative-vector",
+    "replay-reconstructs-original-success-proof",
+    "normal-accept-has-no-orphan-rebind",
+    "rollback-accept-rebinds-exact-orphan"
+  ]
+}

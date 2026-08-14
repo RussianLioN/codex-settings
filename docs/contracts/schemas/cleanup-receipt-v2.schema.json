@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/cleanup-receipt-v2.schema.json",
+  "title": "cleanup-receipt-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "receiptKind", "cleanupId", "installationId", "frozenJournalFingerprint", "baseCommitReceipt", "removedObjects", "absenceProof", "receiptFingerprint", "completedAt"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "receiptKind": {"const": "cleanup"},
+    "cleanupId": {"type": "string", "pattern": "^cl2_[0-9a-f]{32}$"},
+    "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"},
+    "frozenJournalFingerprint": {"$ref": "#/$defs/sha256"},
+    "baseCommitReceipt": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "receipt-object-v2"}, "value": {"properties": {"receiptKind": {"const": "activation-commit"}}}}},
+    "removedObjects": {"type": "array", "maxItems": 127, "items": {"$ref": "lifecycle-projection-v2.schema.json"}},
+    "absenceProof": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "absence-proof-v2"}}},
+    "receiptFingerprint": {"$ref": "#/$defs/sha256"},
+    "completedAt": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

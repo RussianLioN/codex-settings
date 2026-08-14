@@ -1,0 +1,73 @@
+schema_version = 2
+algorithm_version = "route-v1"
+minimum_codex_version = "0.144.4"
+supported_platforms = ["darwin-arm64"]
+
+[coordinator]
+selection = "first-verified-available"
+candidates = [
+  { model = "gpt-5.6-sol", reasoning_effort = "medium" },
+  { model = "gpt-5.6-terra", reasoning_effort = "medium" },
+]
+
+[models."gpt-5.6-luna"]
+rank = 0
+reasoning_efforts = ["low", "medium"]
+
+[models."gpt-5.6-terra"]
+rank = 1
+reasoning_efforts = ["medium", "high", "xhigh"]
+
+[models."gpt-5.6-sol"]
+rank = 2
+reasoning_efforts = ["medium", "high", "xhigh", "max"]
+
+[limits]
+global_processes = 20
+root_processes = 6
+sol_processes = 2
+queue_nodes = 100
+lease_seconds = 45
+heartbeat_seconds = 10
+recover_after_seconds = 60
+max_nodes = 20
+max_edges = 60
+max_depth = 4
+max_split_generation = 2
+snapshot_max_files = 20000
+snapshot_max_file_bytes = 8388608
+snapshot_max_total_bytes = 268435456
+child_timeout_seconds = 900
+child_max_output_bytes = 8388608
+min_free_disk_bytes = 1073741824
+min_available_memory_bytes = 536870912
+min_available_fds = 128
+validation_timeout_seconds = 300
+validation_max_output_bytes = 8388608
+validation_max_address_space_bytes = 2147483648
+validation_max_processes = 64
+validation_max_file_bytes = 268435456
+validation_max_open_files = 256
+validation_max_growth_bytes = 268435456
+
+[profiles.reader]
+permission_profile = "adaptive_reader"
+writer = false
+network = false
+
+[profiles.writer]
+permission_profile = "adaptive_writer"
+writer = true
+network = false
+
+[retention]
+success_days = 30
+failure_days = 90
+
+[validation.none]
+commands = []
+
+[validation.python]
+commands = [
+  ["/usr/bin/env", "python3", "-m", "unittest", "discover", "-v"],
+]

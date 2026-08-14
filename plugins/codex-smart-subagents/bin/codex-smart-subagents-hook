@@ -1,0 +1,447 @@
+#!/usr/bin/env -S python3 -S
+"""Executable dispatcher for bundled Codex lifecycle hooks."""
+
+from __future__ import annotations
+
+import os
+import signal
+import sys
+import time
+
+
+_EARLY_STOP_STARTED_NS = (
+    time.monotonic_ns()
+    if len(sys.argv) == 2 and sys.argv[1] == "stop"
+    else None
+)
+
+
+STOP_HOOK_BUDGET_NS = 1_500_000_000
+STOP_HOOK_STARTED_MONOTONIC_NS_ENV = "CODEX_SMART_HOOK_STARTED_MONOTONIC_NS"
+STOP_HOOK_DEADLINE_MONOTONIC_NS_ENV = "CODEX_SMART_HOOK_DEADLINE_MONOTONIC_NS"
+WORKER_MAGIC = b"codex-smart-stop-worker-v1\n"
+MAX_WORKER_STDOUT_BYTES = 64 * 1024
+PARENT_RESPONSE_RESERVE_NS = 200_000_000
+
+
+def _plugin_root() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _target(event: str) -> str:
+    return os.path.join(_plugin_root(), "hooks", event)
+
+
+def _json_string(value: str) -> str:
+    escaped: list[str] = []
+    for character in value:
+        codepoint = ord(character)
+        if character == "\\":
+            escaped.append("\\\\")
+        elif character == '"':
+            escaped.append('\\"')
+        elif character == "\b":
+            escaped.append("\\b")
+        elif character == "\f":
+            escaped.append("\\f")
+        elif character == "\n":
+            escaped.append("\\n")
+        elif character == "\r":
+            escaped.append("\\r")
+        elif character == "\t":
+            escaped.append("\\t")
+        elif codepoint < 0x20:
+            escaped.append(f"\\u{codepoint:04x}")
+        else:
+            escaped.append(character)
+    return '"' + "".join(escaped) + '"'
+
+
+def _write_deferred(reason: str) -> None:
+    system_message = "SMART_HOOK_DEFERRED: " + reason
+    line = (
+        '{"continue":true,"systemMessage":'
+        + _json_string(system_message)
+        + "}\n"
+    )
+    try:
+        os.write(1, line.encode("utf-8"))
+    except Exception:
+        pass
+
+
+def _remaining_seconds(deadline_ns: int) -> float:
+    return max(0.0, (deadline_ns - time.monotonic_ns()) / 1_000_000_000)
+
+
+def _valid_worker_stdout(stdout: bytes) -> bool:
+    if not stdout:
+        return True
+    if len(stdout) > MAX_WORKER_STDOUT_BYTES:
+        return False
+    try:
+        text = stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) != 1:
+        return False
+    return _looks_like_single_json_object(lines[0])
+
+
+def _looks_like_single_json_object(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped or stripped[0] != "{" or stripped[-1] != "}":
+        return False
+    depth = 0
+    in_string = False
+    escaped = False
+    for index, character in enumerate(stripped):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth == 0 and index != len(stripped) - 1:
+                return False
+            if depth < 0:
+                return False
+    return depth == 0 and not in_string and not escaped
+
+
+def _collect_worker(
+    pid: int,
+    stdout_fd: int,
+    stderr_fd: int,
+    deadline_ns: int,
+) -> int:
+    stdout_chunks: list[bytes] = []
+    stdout_size = 0
+    open_fds = {stdout_fd, stderr_fd}
+    status: int | None = None
+    timed_out = False
+    timeout_reason = "истёк общий срок Stop worker"
+    stdout_too_large = False
+    try:
+        os.set_blocking(stdout_fd, False)
+        os.set_blocking(stderr_fd, False)
+        while open_fds:
+            made_progress = False
+            if status is None:
+                try:
+                    observed_pid, observed_status = os.waitpid(pid, os.WNOHANG)
+                except ChildProcessError:
+                    status = 0
+                else:
+                    if observed_pid == pid:
+                        status = observed_status
+            effective_deadline_ns = deadline_ns
+            remaining = _remaining_seconds(effective_deadline_ns)
+            if remaining <= 0 and status is None:
+                timed_out = True
+                _kill_worker_tree(pid)
+                _wait_for_child(pid)
+                break
+            for descriptor in list(open_fds):
+                while True:
+                    try:
+                        data = os.read(descriptor, 8192)
+                    except BlockingIOError:
+                        break
+                    except OSError:
+                        open_fds.discard(descriptor)
+                        made_progress = True
+                        try:
+                            os.close(descriptor)
+                        except OSError:
+                            pass
+                        break
+                    if not data:
+                        open_fds.discard(descriptor)
+                        made_progress = True
+                        try:
+                            os.close(descriptor)
+                        except OSError:
+                            pass
+                        break
+                    made_progress = True
+                    if descriptor == stdout_fd:
+                        stdout_size += len(data)
+                        if stdout_size > MAX_WORKER_STDOUT_BYTES:
+                            stdout_too_large = True
+                            _kill_worker_tree(pid)
+                            _wait_for_child(pid)
+                            status = 0
+                            for open_descriptor in list(open_fds):
+                                try:
+                                    os.close(open_descriptor)
+                                except OSError:
+                                    pass
+                            open_fds.clear()
+                            break
+                        stdout_chunks.append(data)
+                if stdout_too_large:
+                    break
+            if stdout_too_large:
+                break
+            if status is not None and not made_progress:
+                for descriptor in list(open_fds):
+                    try:
+                        os.close(descriptor)
+                    except OSError:
+                        pass
+                open_fds.clear()
+                break
+            if not made_progress:
+                time.sleep(min(_remaining_seconds(effective_deadline_ns), 0.01))
+        if status is None and not timed_out:
+            _pid, status = os.waitpid(pid, 0)
+    finally:
+        for descriptor in list(open_fds):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+    stdout = b"".join(stdout_chunks)
+    if timed_out:
+        _write_deferred(timeout_reason)
+        return 0
+    if stdout_too_large:
+        _write_deferred("worker Stop превысил предел stdout")
+        return 0
+    if status is None or not os.WIFEXITED(status):
+        _write_deferred("worker Stop завершился ошибкой")
+        return 0
+    exit_status = os.WEXITSTATUS(status)
+    if exit_status == 3:
+        _write_deferred("worker Stop вернул некорректный JSON")
+        return 0
+    if exit_status == 4:
+        _write_deferred("worker Stop превысил предел stdout")
+        return 0
+    if exit_status != 0:
+        _write_deferred("worker Stop завершился ошибкой")
+        return 0
+    if not _valid_worker_stdout(stdout):
+        _write_deferred("worker Stop вернул некорректный JSON")
+        return 0
+    if stdout:
+        sys.stdout.buffer.write(stdout)
+        sys.stdout.flush()
+    return 0
+
+
+def _wait_for_child(pid: int) -> None:
+    while True:
+        try:
+            os.waitpid(pid, 0)
+            return
+        except ChildProcessError:
+            return
+        except InterruptedError:
+            continue
+
+
+def _isolate_worker_process_group() -> None:
+    try:
+        os.setsid()
+    except (AttributeError, OSError):
+        pass
+
+
+def _kill_worker_tree(pid: int) -> None:
+    killed_group = False
+    try:
+        worker_group = os.getpgid(pid)
+        parent_group = os.getpgrp()
+    except (AttributeError, ProcessLookupError, OSError):
+        worker_group = None
+        parent_group = None
+    if worker_group is not None and worker_group != parent_group:
+        try:
+            os.killpg(worker_group, signal.SIGKILL)
+            killed_group = True
+        except (AttributeError, ProcessLookupError, OSError):
+            pass
+    if not killed_group:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def _supervise_stop() -> int:
+    started_ns = _EARLY_STOP_STARTED_NS or time.monotonic_ns()
+    deadline_ns = started_ns + STOP_HOOK_BUDGET_NS
+    environment = dict(getattr(os, "environ"))
+    environment[STOP_HOOK_STARTED_MONOTONIC_NS_ENV] = str(started_ns)
+    environment[STOP_HOOK_DEADLINE_MONOTONIC_NS_ENV] = str(deadline_ns)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    os.environ.update(environment)
+    pipe_descriptors: list[int] = []
+    try:
+        control_read, control_write = os.pipe()
+        pipe_descriptors.extend((control_read, control_write))
+        stdout_read, stdout_write = os.pipe()
+        pipe_descriptors.extend((stdout_read, stdout_write))
+        stderr_read, stderr_write = os.pipe()
+        pipe_descriptors.extend((stderr_read, stderr_write))
+    except OSError:
+        for descriptor in pipe_descriptors:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        _write_deferred("worker Stop не запустился")
+        return 0
+    try:
+        os.write(control_write, WORKER_MAGIC)
+    finally:
+        os.close(control_write)
+    try:
+        pid = os.fork()
+    except OSError:
+        for descriptor in (
+            control_read,
+            stdout_read,
+            stdout_write,
+            stderr_read,
+            stderr_write,
+        ):
+            os.close(descriptor)
+        _write_deferred("worker Stop не запустился")
+        return 0
+    if pid == 0:
+        try:
+            _isolate_worker_process_group()
+            os.close(stdout_read)
+            os.close(stderr_read)
+            os.dup2(stdout_write, 1)
+            os.dup2(stderr_write, 2)
+            for descriptor in (stdout_write, stderr_write):
+                if descriptor > 2:
+                    os.close(descriptor)
+            os.set_inheritable(control_read, True)
+            worker_status = _run_stop_worker(control_read)
+            os._exit(worker_status)
+        except BaseException:
+            os._exit(127)
+    os.close(control_read)
+    os.close(stdout_write)
+    os.close(stderr_write)
+    parent_deadline_ns = max(started_ns, deadline_ns - PARENT_RESPONSE_RESERVE_NS)
+    try:
+        return _collect_worker(
+            pid,
+            stdout_read,
+            stderr_read,
+            parent_deadline_ns,
+        )
+    except Exception:
+        _kill_worker_tree(pid)
+        _wait_for_child(pid)
+        _write_deferred("ошибка родительского надзора Stop")
+        return 0
+
+
+def _run_stop_worker(control_fd: int) -> int:
+    try:
+        observed = os.read(control_fd, len(WORKER_MAGIC))
+    finally:
+        os.close(control_fd)
+    if observed != WORKER_MAGIC:
+        return 2
+    import io
+
+    captured_stdout = io.StringIO()
+    original_stdout = sys.stdout
+    json_module = None
+    worker_status = 0
+    output_fd = os.dup(1)
+    null_fd = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(null_fd, 1)
+    os.close(null_fd)
+    try:
+        sys.stdout = captured_stdout
+        try:
+            _initialize_site()
+            import json as loaded_json
+            import runpy
+        except BaseException:
+            worker_status = 127
+        else:
+            json_module = loaded_json
+            target = _target("stop.py")
+            sys.argv = [target]
+            try:
+                runpy.run_path(target, run_name="__main__")
+            except SystemExit as exc:
+                worker_status = exc.code if type(exc.code) is int else 0
+    finally:
+        sys.stdout = original_stdout
+        os.dup2(output_fd, 1)
+        os.close(output_fd)
+    output = captured_stdout.getvalue()
+    if worker_status != 0:
+        return worker_status
+    validation_status = _worker_captured_stdout_status(output, json_module)
+    if validation_status != 0:
+        return validation_status
+    if output:
+        os.write(1, output.encode("utf-8"))
+    return 0
+
+
+def _initialize_site() -> None:
+    import site
+
+    site.main()
+
+
+def _worker_captured_stdout_status(output: str, json_module: object) -> int:
+    if not output:
+        return 0 if json_module is not None else 3
+    if len(output.encode("utf-8")) > MAX_WORKER_STDOUT_BYTES:
+        return 4
+    lines = [line for line in output.splitlines() if line.strip()]
+    if len(lines) != 1 or json_module is None:
+        return 3
+    try:
+        decoded = json_module.loads(lines[0])
+    except Exception:
+        return 3
+    return 0 if isinstance(decoded, dict) else 3
+
+
+if len(sys.argv) == 2 and sys.argv[1] == "stop":
+    raise SystemExit(_supervise_stop())
+
+_initialize_site()
+
+import runpy
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+TARGETS = {
+    "session-start": ROOT / "hooks" / "session_start.py",
+    "user-prompt-submit": ROOT / "hooks" / "user_prompt_submit.py",
+    "session-end": ROOT / "hooks" / "session_end.py",
+}
+
+if len(sys.argv) != 2 or sys.argv[1] not in TARGETS:
+    sys.stderr.write("codex-smart-subagents-hook: неизвестное событие\n")
+    raise SystemExit(2)
+
+target = TARGETS[sys.argv[1]]
+sys.argv = [str(target)]
+runpy.run_path(str(target), run_name="__main__")

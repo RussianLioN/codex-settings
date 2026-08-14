@@ -1,0 +1,374 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "codex-task-facts-vector-v1",
+  "normalizationCases": [
+    {
+      "name": "unproved-false-becomes-unknown",
+      "value": {
+        "schemaVersion": 1,
+        "contractVersion": "codex-task-facts-v1",
+        "taskText": "Проверить один локальный факт без изменения состояния.",
+        "evidence": [
+          {
+            "evidenceRefId": "request",
+            "kind": "user-request",
+            "statement": "Нужна проверка одного локального факта.",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "workShape": {
+          "scopeUnits": {
+            "value": 1,
+            "evidenceRefIds": [
+              "request"
+            ]
+          },
+          "workUnits": {
+            "value": 1,
+            "evidenceRefIds": [
+              "request"
+            ]
+          },
+          "boundaries": {
+            "value": 1,
+            "evidenceRefIds": [
+              "request"
+            ]
+          },
+          "workstreams": {
+            "value": 1,
+            "evidenceRefIds": [
+              "request"
+            ]
+          }
+        },
+        "factorClaims": {
+          "q": {
+            "q1-dependent-chain": {
+              "state": "false",
+              "evidenceRefIds": []
+            }
+          },
+          "v": {},
+          "o": {}
+        },
+        "delegation": {
+          "permission": {
+            "value": "unspecified",
+            "evidenceRefIds": []
+          },
+          "objectivelyVerifiable": {
+            "value": null,
+            "evidenceRefIds": []
+          },
+          "independentWorkUnits": {
+            "value": null,
+            "evidenceRefIds": []
+          }
+        },
+        "hardFloorReasons": [],
+        "hardBanReasons": []
+      },
+      "expected": {
+        "schemaVersion": 1,
+        "contractVersion": "codex-task-facts-v1",
+        "taskText": "Проверить один локальный факт без изменения состояния.",
+        "evidence": [
+          {
+            "evidenceRefId": "request",
+            "kind": "user-request",
+            "statement": "Нужна проверка одного локального факта.",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "workShape": {
+          "scopeUnits": {
+            "value": 1,
+            "evidenceRefIds": [
+              "request"
+            ]
+          },
+          "workUnits": {
+            "value": 1,
+            "evidenceRefIds": [
+              "request"
+            ]
+          },
+          "boundaries": {
+            "value": 1,
+            "evidenceRefIds": [
+              "request"
+            ]
+          },
+          "workstreams": {
+            "value": 1,
+            "evidenceRefIds": [
+              "request"
+            ]
+          }
+        },
+        "factorClaims": {
+          "q": {
+            "q1-dependent-chain": {
+              "state": "unknown",
+              "evidenceRefIds": []
+            }
+          },
+          "v": {},
+          "o": {}
+        },
+        "delegation": {
+          "permission": {
+            "value": "unspecified",
+            "evidenceRefIds": []
+          },
+          "objectivelyVerifiable": {
+            "value": null,
+            "evidenceRefIds": []
+          },
+          "independentWorkUnits": {
+            "value": null,
+            "evidenceRefIds": []
+          }
+        },
+        "hardFloorReasons": [],
+        "hardBanReasons": []
+      }
+    },
+    {
+      "name": "counts-compute-p2",
+      "value": {
+        "schemaVersion": 1,
+        "contractVersion": "codex-task-facts-v1",
+        "taskText": "Изменить семь файлов в двух независимых потоках.",
+        "evidence": [
+          {
+            "evidenceRefId": "scope",
+            "kind": "repository-file",
+            "statement": "В области работы семь файлов и два независимых потока.",
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          {
+            "evidenceRefId": "allow",
+            "kind": "explicit-policy",
+            "statement": "Политика явно разрешает делегирование.",
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        ],
+        "workShape": {
+          "scopeUnits": {
+            "value": 7,
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "workUnits": {
+            "value": 7,
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "boundaries": {
+            "value": 1,
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "workstreams": {
+            "value": 2,
+            "evidenceRefIds": [
+              "scope"
+            ]
+          }
+        },
+        "factorClaims": {
+          "q": {},
+          "v": {},
+          "o": {}
+        },
+        "delegation": {
+          "permission": {
+            "value": "allow",
+            "evidenceRefIds": [
+              "allow"
+            ]
+          },
+          "objectivelyVerifiable": {
+            "value": true,
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "independentWorkUnits": {
+            "value": 2,
+            "evidenceRefIds": [
+              "scope"
+            ]
+          }
+        },
+        "hardFloorReasons": [],
+        "hardBanReasons": []
+      },
+      "expectedPStates": {
+        "p1-scope-2-to-5": "false",
+        "p2-scope-6-plus": "true",
+        "p2-boundaries-2-plus": "false",
+        "p2-workstreams-2-plus": "true"
+      }
+    },
+    {
+      "name": "counts-compute-p1",
+      "value": {
+        "schemaVersion": 1,
+        "contractVersion": "codex-task-facts-v1",
+        "taskText": "Проверить три схемы в одном потоке.",
+        "evidence": [
+          {
+            "evidenceRefId": "scope",
+            "kind": "repository-file",
+            "statement": "В области работы три схемы в одной границе.",
+            "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          }
+        ],
+        "workShape": {
+          "scopeUnits": {
+            "value": 3,
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "workUnits": {
+            "value": 3,
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "boundaries": {
+            "value": 1,
+            "evidenceRefIds": [
+              "scope"
+            ]
+          },
+          "workstreams": {
+            "value": 1,
+            "evidenceRefIds": [
+              "scope"
+            ]
+          }
+        },
+        "factorClaims": {
+          "q": {},
+          "v": {},
+          "o": {}
+        },
+        "delegation": {
+          "permission": {
+            "value": "unspecified",
+            "evidenceRefIds": []
+          },
+          "objectivelyVerifiable": {
+            "value": null,
+            "evidenceRefIds": []
+          },
+          "independentWorkUnits": {
+            "value": null,
+            "evidenceRefIds": []
+          }
+        },
+        "hardFloorReasons": [],
+        "hardBanReasons": []
+      },
+      "expectedPStates": {
+        "p1-scope-2-to-5": "true",
+        "p2-scope-6-plus": "false",
+        "p2-boundaries-2-plus": "false",
+        "p2-workstreams-2-plus": "false"
+      }
+    }
+  ],
+  "mutations": [
+    {
+      "name": "unknown-root-field",
+      "baseCase": "counts-compute-p2",
+      "operation": {
+        "kind": "add",
+        "path": "/unexpected",
+        "value": true
+      },
+      "expectedError": "TASK_FACTS_UNKNOWN_FIELD"
+    },
+    {
+      "name": "duplicate-evidence-ref-id",
+      "baseCase": "counts-compute-p2",
+      "operation": {
+        "kind": "append-copy",
+        "path": "/evidence/0"
+      },
+      "expectedError": "DUPLICATE_EVIDENCE_REF_ID"
+    },
+    {
+      "name": "dangling-evidence-reference",
+      "baseCase": "counts-compute-p2",
+      "operation": {
+        "kind": "replace",
+        "path": "/workShape/scopeUnits/evidenceRefIds",
+        "value": [
+          "missing"
+        ]
+      },
+      "expectedError": "EVIDENCE_REFERENCE_UNRESOLVED"
+    },
+    {
+      "name": "unproved-true-is-rejected",
+      "baseCase": "counts-compute-p2",
+      "operation": {
+        "kind": "replace",
+        "path": "/factorClaims/q",
+        "value": {
+          "q1-dependent-chain": {
+            "state": "true",
+            "evidenceRefIds": []
+          }
+        }
+      },
+      "expectedError": "UNPROVED_TRUE"
+    },
+    {
+      "name": "conflict-needs-two-references",
+      "baseCase": "counts-compute-p2",
+      "operation": {
+        "kind": "replace",
+        "path": "/factorClaims/q",
+        "value": {
+          "q1-dependent-chain": {
+            "state": "conflict",
+            "evidenceRefIds": [
+              "scope"
+            ]
+          }
+        }
+      },
+      "expectedError": "CONFLICT_EVIDENCE_INSUFFICIENT"
+    },
+    {
+      "name": "known-counter-needs-evidence",
+      "baseCase": "counts-compute-p2",
+      "operation": {
+        "kind": "replace",
+        "path": "/workShape/workUnits/evidenceRefIds",
+        "value": []
+      },
+      "expectedError": "COUNT_EVIDENCE_REQUIRED"
+    },
+    {
+      "name": "allow-needs-explicit-source",
+      "baseCase": "counts-compute-p2",
+      "operation": {
+        "kind": "replace",
+        "path": "/evidence/1/kind",
+        "value": "repository-file"
+      },
+      "expectedError": "DELEGATION_ALLOW_NOT_EXPLICIT"
+    }
+  ]
+}

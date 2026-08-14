@@ -1,0 +1,358 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "codex-account-evidence-vectors-v1",
+  "domains": {
+    "requirements": "codex-smart/requirements/v1",
+    "accountCatalog": "codex-smart/account-catalog/v1",
+    "accountEnvironment": "codex-smart/account-environment/v1",
+    "accountProcess": "codex-smart/account-process/v1",
+    "accountCollection": "codex-smart/account-collection/v1",
+    "accountContext": "codex-smart/account-context/v1",
+    "accountRecord": "codex-smart/account-record/v1"
+  },
+  "base": {
+    "schemaVersion": 1,
+    "contractVersion": "codex-account-v1",
+    "subject": {
+      "snapshotPath": "/private/codex",
+      "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "subjectFingerprint": "6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723"
+    },
+    "codexHome": "/private/codex-home",
+    "requirements": null,
+    "availablePairs": [
+      {
+        "model": "gpt-5.6-luna",
+        "reasoningEffort": "low"
+      },
+      {
+        "model": "gpt-5.6-luna",
+        "reasoningEffort": "medium"
+      },
+      {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      }
+    ],
+    "compatibilityFingerprint": "dea943398aa809670a1026b01667e85a7c23846ebea61aaf87f68c2c182f64cd",
+    "requirementsFingerprint": "a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4",
+    "accountCatalogFingerprint": "18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29",
+    "accountContextFingerprint": "f5954a71b6ea6c2e6e1b5e22793356d7634c1e84862243ba417c3d0c3587fd2a",
+    "collection": {
+      "rootReferences": {
+        "executablePath": "#/subject/snapshotPath",
+        "subjectFingerprint": "#/subject/subjectFingerprint",
+        "compatibilityFingerprint": "#/compatibilityFingerprint",
+        "requirementsResult": "#/requirementsFingerprint",
+        "catalogResult": "#/accountCatalogFingerprint"
+      },
+      "argv": [
+        "app-server",
+        "--strict-config",
+        "--listen",
+        "stdio://"
+      ],
+      "environment": {
+        "CODEX_HOME": "/private/codex-home",
+        "HOME": "/private/home",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "NO_COLOR": "1",
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "TMPDIR": "/private/tmp"
+      },
+      "environmentFingerprint": "df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268",
+      "processes": [
+        {
+          "ordinal": 1,
+          "stage": "requirements-a",
+          "resultFingerprintRef": "#/requirementsFingerprint",
+          "processFingerprint": "b9244bbefc4665cffafeb5dc66829717664e72e57e5aa1229e9087a327e6a8f7"
+        },
+        {
+          "ordinal": 2,
+          "stage": "catalog-a",
+          "resultFingerprintRef": "#/accountCatalogFingerprint",
+          "processFingerprint": "d6ed8645a5625b7fafc1ac2d77b37638129cb79cf223747379f2b7548fb037f0"
+        },
+        {
+          "ordinal": 3,
+          "stage": "requirements-b",
+          "resultFingerprintRef": "#/requirementsFingerprint",
+          "processFingerprint": "44b5f9a36fd265597b27282bfd8000daef6a5dd219797ee0508f72b9f3dad6ca"
+        },
+        {
+          "ordinal": 4,
+          "stage": "catalog-b",
+          "resultFingerprintRef": "#/accountCatalogFingerprint",
+          "processFingerprint": "2eb9836787c1e5de955ba3033cc8adc1e9e5779881b6bc505d5fea5195044d1a"
+        },
+        {
+          "ordinal": 5,
+          "stage": "requirements-c",
+          "resultFingerprintRef": "#/requirementsFingerprint",
+          "processFingerprint": "3d8138a4c82dcf0503f47289968f9a745943bd1ffc74fda74238ae3f25f5c6c4"
+        }
+      ],
+      "collectionFingerprint": "bb0abe6c1e23deee805f19b6f17c9ac5dca2b943e80b8791e3046114aa6c56ac"
+    },
+    "recordFingerprint": "0b71b17021f396d6f9ae9e590ec6958d7664b23c427bad5c89cba7ecd066fc89"
+  },
+  "canonical": {
+    "requirementsUtf8": "null",
+    "accountCatalogUtf8": "[{\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"low\"},{\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"medium\"},{\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":\"medium\"}]",
+    "environmentUtf8": "{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"}",
+    "processUtf8": [
+      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":1,\"resultFingerprintRef\":\"#/requirementsFingerprint\",\"stage\":\"requirements-a\"},\"resolved\":{\"compatibilityFingerprint\":\"dea943398aa809670a1026b01667e85a7c23846ebea61aaf87f68c2c182f64cd\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"subjectFingerprint\":\"6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723\"}}",
+      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":2,\"resultFingerprintRef\":\"#/accountCatalogFingerprint\",\"stage\":\"catalog-a\"},\"resolved\":{\"compatibilityFingerprint\":\"dea943398aa809670a1026b01667e85a7c23846ebea61aaf87f68c2c182f64cd\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29\",\"subjectFingerprint\":\"6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723\"}}",
+      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":3,\"resultFingerprintRef\":\"#/requirementsFingerprint\",\"stage\":\"requirements-b\"},\"resolved\":{\"compatibilityFingerprint\":\"dea943398aa809670a1026b01667e85a7c23846ebea61aaf87f68c2c182f64cd\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"subjectFingerprint\":\"6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723\"}}",
+      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":4,\"resultFingerprintRef\":\"#/accountCatalogFingerprint\",\"stage\":\"catalog-b\"},\"resolved\":{\"compatibilityFingerprint\":\"dea943398aa809670a1026b01667e85a7c23846ebea61aaf87f68c2c182f64cd\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29\",\"subjectFingerprint\":\"6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723\"}}",
+      "{\"argv\":[\"app-server\",\"--strict-config\",\"--listen\",\"stdio://\"],\"environment\":{\"CODEX_HOME\":\"/private/codex-home\",\"HOME\":\"/private/home\",\"LANG\":\"C\",\"LC_ALL\":\"C\",\"NO_COLOR\":\"1\",\"PATH\":\"/usr/bin:/bin:/usr/sbin:/sbin\",\"TMPDIR\":\"/private/tmp\"},\"environmentFingerprint\":\"df7e9ca0676e12d10ee8f6d06e2d94ad695fa573144769bcc1edb2b4e8ab2268\",\"record\":{\"ordinal\":5,\"resultFingerprintRef\":\"#/requirementsFingerprint\",\"stage\":\"requirements-c\"},\"resolved\":{\"compatibilityFingerprint\":\"dea943398aa809670a1026b01667e85a7c23846ebea61aaf87f68c2c182f64cd\",\"executablePath\":\"/private/codex\",\"resultFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"subjectFingerprint\":\"6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723\"}}"
+    ],
+    "collectionUtf8": "{\"processFingerprints\":[\"b9244bbefc4665cffafeb5dc66829717664e72e57e5aa1229e9087a327e6a8f7\",\"d6ed8645a5625b7fafc1ac2d77b37638129cb79cf223747379f2b7548fb037f0\",\"44b5f9a36fd265597b27282bfd8000daef6a5dd219797ee0508f72b9f3dad6ca\",\"2eb9836787c1e5de955ba3033cc8adc1e9e5779881b6bc505d5fea5195044d1a\",\"3d8138a4c82dcf0503f47289968f9a745943bd1ffc74fda74238ae3f25f5c6c4\"]}",
+    "accountContextUtf8": "{\"accountCatalogFingerprint\":\"18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29\",\"codexHome\":\"/private/codex-home\",\"collectionFingerprint\":\"bb0abe6c1e23deee805f19b6f17c9ac5dca2b943e80b8791e3046114aa6c56ac\",\"compatibilityFingerprint\":\"dea943398aa809670a1026b01667e85a7c23846ebea61aaf87f68c2c182f64cd\",\"requirementsFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"subjectFingerprint\":\"6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723\"}",
+    "recordUtf8": "{\"accountCatalogFingerprint\":\"18c08d78440c08d144f62753f9d7884c1ed2a618792e4a8f4879470efda70c29\",\"accountContextFingerprint\":\"f5954a71b6ea6c2e6e1b5e22793356d7634c1e84862243ba417c3d0c3587fd2a\",\"collectionFingerprint\":\"bb0abe6c1e23deee805f19b6f17c9ac5dca2b943e80b8791e3046114aa6c56ac\",\"compatibilityFingerprint\":\"dea943398aa809670a1026b01667e85a7c23846ebea61aaf87f68c2c182f64cd\",\"contractVersion\":\"codex-account-v1\",\"requirementsFingerprint\":\"a143972e4f24036e0631d5f0bc4efe31bb4c9ad4aafcca8f6cc03a34b8e3ced4\",\"schemaVersion\":1,\"subjectFingerprint\":\"6ee3a367c846251ca0aeecb3cd168a9bbba09adee2839a8e29b161d44dcfc723\"}"
+  },
+  "mutations": [
+    {
+      "name": "reference-executable-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/collection/rootReferences/executablePath",
+        "value": "#/subject/snapshotSha256"
+      },
+      "expected": "schema-invalid"
+    },
+    {
+      "name": "reference-subject-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/collection/rootReferences/subjectFingerprint",
+        "value": "#/subject/snapshotSha256"
+      },
+      "expected": "schema-invalid"
+    },
+    {
+      "name": "reference-compatibility-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/collection/rootReferences/compatibilityFingerprint",
+        "value": "#/recordFingerprint"
+      },
+      "expected": "schema-invalid"
+    },
+    {
+      "name": "reference-requirements-result-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/collection/rootReferences/requirementsResult",
+        "value": "#/accountCatalogFingerprint"
+      },
+      "expected": "schema-invalid"
+    },
+    {
+      "name": "reference-catalog-result-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/collection/rootReferences/catalogResult",
+        "value": "#/requirementsFingerprint"
+      },
+      "expected": "schema-invalid"
+    },
+    {
+      "name": "environment-value-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/collection/environment/HOME",
+        "value": "/different-home"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "environment-key-removed",
+      "operation": {
+        "kind": "remove",
+        "pointer": "/collection/environment/TMPDIR"
+      },
+      "expected": "schema-invalid"
+    },
+    {
+      "name": "environment-secret-added",
+      "operation": {
+        "kind": "add",
+        "pointer": "/collection/environment/CODEX_TOKEN",
+        "value": "forbidden"
+      },
+      "expected": "schema-invalid"
+    },
+    {
+      "name": "stage-order-changed",
+      "operation": {
+        "kind": "swap-array-items",
+        "pointer": "/collection/processes",
+        "first": 0,
+        "second": 1
+      },
+      "expected": "schema-invalid"
+    },
+    {
+      "name": "fingerprint-subject-snapshot-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/subject/snapshotSha256",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "fingerprint-subject-reference-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/subject/subjectFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "fingerprint-compatibility-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/compatibilityFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "fingerprint-1-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/requirementsFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "fingerprint-2-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/accountCatalogFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "fingerprint-3-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/accountContextFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "fingerprint-4-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/collection/environmentFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "fingerprint-5-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/collection/processes/0/processFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "fingerprint-6-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/collection/processes/1/processFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "fingerprint-7-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/collection/processes/2/processFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "fingerprint-8-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/collection/processes/3/processFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "fingerprint-9-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/collection/processes/4/processFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "fingerprint-10-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/collection/collectionFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "fingerprint-11-changed",
+      "operation": {
+        "kind": "replace",
+        "pointer": "/recordFingerprint",
+        "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "expected": "fingerprint-invalid"
+    },
+    {
+      "name": "available-pairs-reordered-with-recalculated-chain",
+      "operation": {
+        "kind": "swap-array-items-and-recalculate",
+        "pointer": "/availablePairs",
+        "first": 0,
+        "second": 2
+      },
+      "recalculated": {
+        "accountCatalogUtf8": "[{\"model\":\"gpt-5.6-terra\",\"reasoningEffort\":\"medium\"},{\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"medium\"},{\"model\":\"gpt-5.6-luna\",\"reasoningEffort\":\"low\"}]",
+        "accountCatalogFingerprint": "2d0e1fac7409751313b153062f9cacdf31f951e96944710a912e7c6e2948ec9d",
+        "processFingerprints": [
+          "b9244bbefc4665cffafeb5dc66829717664e72e57e5aa1229e9087a327e6a8f7",
+          "665b038d7ac8757d1cd94cdb34d29f38819fe63c47e44e1a508fcf2e4f862187",
+          "44b5f9a36fd265597b27282bfd8000daef6a5dd219797ee0508f72b9f3dad6ca",
+          "31c89c4a612717893178cd931c84de6e50b7827e0230c89f4145edf344f51403",
+          "3d8138a4c82dcf0503f47289968f9a745943bd1ffc74fda74238ae3f25f5c6c4"
+        ],
+        "collectionFingerprint": "fd85a3ad3eae4feab7d659be4879c8afc46d49d01b8e6ab365ad194ba85b46eb",
+        "accountContextFingerprint": "d96666fe83e8c23da5b5f7a609ed82cd9b6989b6d27b5030c1e5f53f9a5bcc49",
+        "recordFingerprint": "773f5b81fc6a90ced2d15f6f2caf456bcbb9fca0baa152c0f6b1e9fc35083dcd"
+      },
+      "expected": "ordering-invalid"
+    },
+    {
+      "name": "started-at-invalid-date-time",
+      "operation": {
+        "kind": "add",
+        "pointer": "/startedAt",
+        "value": "not-a-date"
+      },
+      "expected": "schema-invalid"
+    }
+  ]
+}

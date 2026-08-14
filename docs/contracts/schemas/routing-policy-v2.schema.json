@@ -1,0 +1,342 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/routing-policy-v2.schema.json",
+  "title": "routing-policy-v2",
+  "type": "object",
+  "const": {
+    "schemaVersion": 2,
+    "contractVersion": "codex-routing-policy-v2",
+    "fingerprintDomain": "codex-smart/routing-policy/v2",
+    "coordinator": {
+      "selection": "first-verified-available",
+      "candidates": [
+        {
+          "model": "gpt-5.6-sol",
+          "reasoningEffort": "medium"
+        },
+        {
+          "model": "gpt-5.6-terra",
+          "reasoningEffort": "medium"
+        }
+      ]
+    },
+    "factors": [
+      "q",
+      "p",
+      "v",
+      "o"
+    ],
+    "factorRange": {
+      "min": 0,
+      "max": 2
+    },
+    "scoreRange": {
+      "min": 0,
+      "max": 8
+    },
+    "tiers": [
+      {
+        "name": "luna",
+        "scoreMin": 0,
+        "scoreMax": 2,
+        "model": "gpt-5.6-luna",
+        "minimumEffort": "low"
+      },
+      {
+        "name": "terra",
+        "scoreMin": 3,
+        "scoreMax": 5,
+        "model": "gpt-5.6-terra",
+        "minimumEffort": "medium"
+      },
+      {
+        "name": "sol",
+        "scoreMin": 6,
+        "scoreMax": 8,
+        "model": "gpt-5.6-sol",
+        "minimumEffort": "high"
+      }
+    ],
+    "effortByScore": [
+      {
+        "score": 0,
+        "reasoningEffort": "low"
+      },
+      {
+        "score": 1,
+        "reasoningEffort": "low"
+      },
+      {
+        "score": 2,
+        "reasoningEffort": "medium"
+      },
+      {
+        "score": 3,
+        "reasoningEffort": "medium"
+      },
+      {
+        "score": 4,
+        "reasoningEffort": "medium"
+      },
+      {
+        "score": 5,
+        "reasoningEffort": "high"
+      },
+      {
+        "score": 6,
+        "reasoningEffort": "high"
+      },
+      {
+        "score": 7,
+        "reasoningEffort": "xhigh"
+      },
+      {
+        "score": 8,
+        "reasoningEffort": "max"
+      }
+    ],
+    "effortOrder": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "defaults": {
+      "hardFloor": "none",
+      "intervalPoint": "max",
+      "unavailablePair": "reject",
+      "reassessment": "promote-only"
+    },
+    "factorDefinitions": {
+      "resolution": {
+        "criterionStates": [
+          "false",
+          "true",
+          "unknown",
+          "conflict"
+        ],
+        "missingCriterionState": "unknown",
+        "unknownCriterionId": "reject",
+        "lowerStates": [
+          "true"
+        ],
+        "upperStates": [
+          "true",
+          "unknown",
+          "conflict"
+        ],
+        "identityValue": 0,
+        "lowerOperation": "maximum-criterion-level",
+        "upperOperation": "maximum-of-lower-and-criterion-level",
+        "selectedBound": "max"
+      },
+      "q": {
+        "meaning": "Сложность зависимых рассуждений и согласования ограничений",
+        "level0Rule": "ни один критерий уровня 1 или 2 не доказан",
+        "criteria": [
+          {
+            "id": "q1-dependent-chain",
+            "level": 1,
+            "meaning": "требуются не менее двух зависимых выводов"
+          },
+          {
+            "id": "q1-bounded-tradeoff",
+            "level": 1,
+            "meaning": "сравниваются не менее двух вариантов по не менее чем двум ограничениям внутри одной границы"
+          },
+          {
+            "id": "q2-cross-boundary-invariant",
+            "level": 2,
+            "meaning": "нужно сохранить инвариант через две или более границы"
+          },
+          {
+            "id": "q2-adversarial-concurrency",
+            "level": 2,
+            "meaning": "нужен контрпример для безопасности, доверия, конкурентности, атомарности, восстановления или отката"
+          },
+          {
+            "id": "q2-conflict-synthesis",
+            "level": 2,
+            "meaning": "нужно разрешить конфликт доказательств или нормативных требований"
+          }
+        ]
+      },
+      "p": {
+        "meaning": "Размер адресуемой работы, число границ и независимых потоков",
+        "unitDefinitions": {
+          "scopeUnit": "отдельно адресуемый файл, схема, страница, набор данных, результат команды или выход",
+          "workUnit": "одно независимо проверяемое изменение или исследование",
+          "boundary": "репозиторий, независимо развёртываемый процесс, внешний сервис или учётная среда",
+          "workstream": "независимая ветвь работы до общего синтеза"
+        },
+        "level0Rule": "scopeUnits<=1 и workUnits<=1 и boundaries<=1 и workstreams<=1",
+        "criteria": [
+          {
+            "id": "p1-scope-2-to-5",
+            "level": 1,
+            "meaning": "max(scopeUnits,workUnits) от 2 до 5 при одной границе и одном потоке"
+          },
+          {
+            "id": "p2-scope-6-plus",
+            "level": 2,
+            "meaning": "scopeUnits или workUnits не менее 6"
+          },
+          {
+            "id": "p2-boundaries-2-plus",
+            "level": 2,
+            "meaning": "границ не менее 2"
+          },
+          {
+            "id": "p2-workstreams-2-plus",
+            "level": 2,
+            "meaning": "независимых потоков не менее 2"
+          }
+        ]
+      },
+      "v": {
+        "meaning": "Цена ошибки и сила требуемого доказательства отката",
+        "level0Rule": "только чтение, совет или удаляемый временный результат без внешнего последствия",
+        "criteria": [
+          {
+            "id": "v1-reversible-persistent",
+            "level": 1,
+            "meaning": "изменяется сохраняемое состояние с доказанным откатом"
+          },
+          {
+            "id": "v1-user-visible-isolated",
+            "level": 1,
+            "meaning": "есть изолированное видимое пользователю изменение"
+          },
+          {
+            "id": "v2-shared-or-production",
+            "level": 2,
+            "meaning": "затрагивается совместное или производственное состояние"
+          },
+          {
+            "id": "v2-destructive-or-unproven-rollback",
+            "level": 2,
+            "meaning": "действие разрушительно либо откат не доказан"
+          },
+          {
+            "id": "v2-trust-secret-permission",
+            "level": 2,
+            "meaning": "затрагиваются доверие, секреты или разрешения"
+          },
+          {
+            "id": "v2-high-stakes",
+            "level": 2,
+            "meaning": "ошибка имеет медицинские, юридические, финансовые или иные критические последствия"
+          },
+          {
+            "id": "v2-release-or-migration",
+            "level": 2,
+            "meaning": "выполняется выпуск, публикация или миграция"
+          }
+        ]
+      },
+      "o": {
+        "meaning": "Неопределённость, изменчивость и согласованность доказательств",
+        "level0Rule": "все обязательные факты подтверждены, воспроизводимы и согласованы",
+        "criteria": [
+          {
+            "id": "o1-discoverable-missing-fact",
+            "level": 1,
+            "meaning": "недостающий факт можно получить безопасным чтением"
+          },
+          {
+            "id": "o1-mutable-current-state",
+            "level": 1,
+            "meaning": "решение зависит от изменяемого текущего состояния"
+          },
+          {
+            "id": "o1-explicit-reversible-assumption",
+            "level": 1,
+            "meaning": "нужна явно отмеченная обратимая гипотеза"
+          },
+          {
+            "id": "o2-authority-conflict",
+            "level": 2,
+            "meaning": "источники полномочий или требования конфликтуют"
+          },
+          {
+            "id": "o2-undiscoverable-required-fact",
+            "level": 2,
+            "meaning": "обязательный факт недоступен либо требует решения владельца"
+          },
+          {
+            "id": "o2-unreproducible-conflict",
+            "level": 2,
+            "meaning": "конфликт доказательств нельзя воспроизвести и разрешить чтением"
+          },
+          {
+            "id": "o2-uncontracted-interface",
+            "level": 2,
+            "meaning": "решение зависит от незафиксированного интерфейса"
+          }
+        ]
+      }
+    },
+    "hardFloorDefinitions": {
+      "selection": "highest-triggered",
+      "unknownReason": "reject",
+      "levels": [
+        {
+          "name": "none",
+          "minimumTier": "luna",
+          "reasons": []
+        },
+        {
+          "name": "terra",
+          "minimumTier": "terra",
+          "reasons": [
+            "architecture-decision",
+            "public-contract",
+            "risky-migration",
+            "security-sensitive"
+          ]
+        },
+        {
+          "name": "sol",
+          "minimumTier": "sol",
+          "reasons": [
+            "critical-incident",
+            "final-author-review-before-publish",
+            "irreversible-action",
+            "rollback-unproven"
+          ]
+        }
+      ]
+    },
+    "allowedPairs": [
+      {
+        "model": "gpt-5.6-luna",
+        "reasoningEffort": "low"
+      },
+      {
+        "model": "gpt-5.6-luna",
+        "reasoningEffort": "medium"
+      },
+      {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "medium"
+      },
+      {
+        "model": "gpt-5.6-terra",
+        "reasoningEffort": "high"
+      },
+      {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "high"
+      },
+      {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "xhigh"
+      },
+      {
+        "model": "gpt-5.6-sol",
+        "reasoningEffort": "max"
+      }
+    ]
+  }
+}

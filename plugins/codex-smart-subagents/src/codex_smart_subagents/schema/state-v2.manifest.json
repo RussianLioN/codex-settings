@@ -1,0 +1,363 @@
+{
+  "manifestVersion": "codex-state-schema-manifest-v2",
+  "schemaVersion": 2,
+  "applicationId": 1129529650,
+  "projectionVersion": "database-schema-projection-v1",
+  "normalizationVersion": "sqlite-schema-sql-normalization-v1",
+  "stateSqlSha256": "fcd45780ab7d1191784f0c04151764420bad3ff5ea5bd85493af649cde5afa12",
+  "schemaFingerprint": "98f16d640a82e4bce6af60779a838dc039d61062dde47b95f4a0ca8cfa3e2c28",
+  "schemaCanonicalSize": 127144,
+  "sourcePath": "plugins/codex-smart-subagents/src/codex_smart_subagents/store.py",
+  "sourceCommits": {
+    "executionBase": "84520a3e8227ee527959cda31207c0db02028cc4",
+    "runtimeArtifacts": "a1c865e4dde655f293d1ced1677d0f479d90f257",
+    "candidateRegistry": "45bab11502ba8105cd52240942db6d0f2a7e6fde"
+  },
+  "legacyDataPredicates": {
+    "all-application-tables-empty": {
+      "kind": "empty",
+      "scope": "all-existing-application-tables"
+    },
+    "runtime-artifacts-empty": {
+      "kind": "empty",
+      "tables": ["runtime_artifacts"]
+    },
+    "candidate-prefix-empty": {
+      "kind": "empty",
+      "scope": "all-existing-candidate-group-tables"
+    },
+    "legacy-quiescence-v2": {
+      "kind": "external-proof",
+      "schemaId": "quiescence-proof-v2",
+      "proofKind": "legacy-migration"
+    }
+  },
+  "legacyExplicitObjects": [
+    "turn_bindings",
+    "routes",
+    "nodes",
+    "events",
+    "events_route_sequence",
+    "intents",
+    "leases",
+    "attempts",
+    "attempts_route_started",
+    "runtime_artifacts",
+    "runtime_artifacts_route",
+    "quarantine_repositories",
+    "candidate_publication_intents",
+    "candidate_intents_state",
+    "candidate_registry",
+    "candidate_registry_route"
+  ],
+  "legacyShapes": {
+    "userVersion0": [
+      {
+        "name": "v0-empty",
+        "fingerprint": "88f3b204cadff521675bebf66beb1878456608602fa4ad35f2b593f82a16d55e",
+        "canonicalSize": 159,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 0, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["turn_bindings", "routes", "nodes", "events", "events_route_sequence", "intents", "leases", "attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-old-base-p1",
+        "fingerprint": "f9c0f11d0540549378fc7068ce06fa5cd545fda49893e13ca21682f3a5ca16f7",
+        "canonicalSize": 1695,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 1, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["routes", "nodes", "events", "events_route_sequence", "intents", "leases", "attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-old-base-p2",
+        "fingerprint": "79c03c108fd832f6c102a455f6a9be9211baeea557d79db0c81a033f3ecc5d4a",
+        "canonicalSize": 6497,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 2, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["nodes", "events", "events_route_sequence", "intents", "leases", "attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-old-base-p3",
+        "fingerprint": "416d7051caf3f3529e5f5148870bbc2291949b4166a543e480a7f123997970b1",
+        "canonicalSize": 10406,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 3, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["events", "events_route_sequence", "intents", "leases", "attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-old-base-p4",
+        "fingerprint": "743e520cdf49f709400627aacbf16dfb996241cb996eb8d6ba13bc8f28ffc3fd",
+        "canonicalSize": 12172,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 4, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["events_route_sequence", "intents", "leases", "attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-old-base-p5",
+        "fingerprint": "cb627ee60b26dcded25aa30e8664b8a74b491358cb7798f5e8483b82b383eb45",
+        "canonicalSize": 12826,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 5, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["intents", "leases", "attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-old-base-p6",
+        "fingerprint": "bc0fe1e8e09bd0cbe41d6e5b105532515695500556c5ea78bd7f18df5b5922a8",
+        "canonicalSize": 14875,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 6, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["leases", "attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-old-base-p7",
+        "fingerprint": "0affc5b3eb92812d8f79aad379aaefa7b6a7bd703f4416883f303bcb26bc37fc",
+        "canonicalSize": 16951,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 7, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-old-base-p8",
+        "fingerprint": "0c33208df6ded0d62cbde48a72fa6ae9b4b761df2b1a0b0821cf395218872e3a",
+        "canonicalSize": 20085,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 8, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-old-base-p9",
+        "fingerprint": "056368aea93b1062c5b9fe651f7d859030def080f2c40a3b1cf469d1120a4ada",
+        "canonicalSize": 20762,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 9, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-new-base-p1",
+        "fingerprint": "9f8a4f58e2e2e440a128560c4a5930bb58b09d197f08dd1c2e822f4126baed7c",
+        "canonicalSize": 1987,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 1, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["routes", "nodes", "events", "events_route_sequence", "intents", "leases", "attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-new-base-p2",
+        "fingerprint": "f4155808281e7b13e30a0d065dd127326292f89792f5f2f88b1afd6b65156819",
+        "canonicalSize": 6789,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 2, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["nodes", "events", "events_route_sequence", "intents", "leases", "attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-new-base-p3",
+        "fingerprint": "7cdc0f3d8741fb2516c72efc6906246fb2044058ae984f2ddb7444eba2f4de45",
+        "canonicalSize": 10698,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 3, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["events", "events_route_sequence", "intents", "leases", "attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-new-base-p4",
+        "fingerprint": "132ef6f7978caff66dad8c23bb9ae3597d7264e66be52727a3916cb91fda3896",
+        "canonicalSize": 12464,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 4, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["events_route_sequence", "intents", "leases", "attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-new-base-p5",
+        "fingerprint": "84cc55d4379fa3f070555fdd53308c2d39eb83579b146f925ae114ed03a1fb29",
+        "canonicalSize": 13118,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 5, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["intents", "leases", "attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-new-base-p6",
+        "fingerprint": "7b61bef97ef0f49d69bc97d60c7d20c1504afd6843072a955f42133a772da99b",
+        "canonicalSize": 15167,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 6, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["leases", "attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-new-base-p7",
+        "fingerprint": "6283a055f0e9e0ce4dc8f7cce9eae14f580d4acd7fd3aafb4e691ce2e2b31c17",
+        "canonicalSize": 17243,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 7, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["attempts", "attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-new-base-p8",
+        "fingerprint": "091202ea7e98e90b47991c83a4e230cdd343394f99fe7421da354307bd145de9",
+        "canonicalSize": 20377,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 8, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["attempts_route_started", "runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "v0-new-base-p9",
+        "fingerprint": "0e6554319aa3d3c882e825713b5a03a61683471fd3f2bb00fd54a4c3b5af60a1",
+        "canonicalSize": 21054,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 9, "setUserVersion": 0, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      }
+    ],
+    "userVersion1": [
+      {
+        "name": "execution-v1",
+        "fingerprint": "ddd502469ab1c0ec513cd6e3d0673cd7ab30ea6071a7daf29432d2f7c3042b35",
+        "canonicalSize": 20762,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 9, "setUserVersion": 1, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "legacy-quiescence-v2"
+      },
+      {
+        "name": "execution-alter-binding-v1",
+        "fingerprint": "f54a699f426ca4fbec314feee4765950dbd3b933a1eb8c9d0557ae675653c637",
+        "canonicalSize": 21054,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 9, "setUserVersion": 1, "alterBinding": true, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "legacy-quiescence-v2"
+      },
+      {
+        "name": "artifacts-table-only-v1",
+        "fingerprint": "af55b0279ffd185a33683305ea6f249cf2a626849043732b804ead8a44fea11b",
+        "canonicalSize": 23859,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 9, "setUserVersion": 1, "alterBinding": false, "runtimePrefix": 1, "candidatePrefix": 0},
+        "missingObjects": ["runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "runtime-artifacts-empty"
+      },
+      {
+        "name": "artifacts-v1",
+        "fingerprint": "660f25fea873615b3ac507fffa969761d7bd1080579127e411aaaf0d2f650904",
+        "canonicalSize": 24595,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 9, "setUserVersion": 1, "alterBinding": false, "runtimePrefix": 2, "candidatePrefix": 0},
+        "missingObjects": ["quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "legacy-quiescence-v2"
+      },
+      {
+        "name": "artifacts-table-only-alter-binding-v1",
+        "fingerprint": "7c8a6dd4c92f3ac7b2332301031d4fd2b2607a4953bb09daab5f74323afbc1b4",
+        "canonicalSize": 24151,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 9, "setUserVersion": 1, "alterBinding": true, "runtimePrefix": 1, "candidatePrefix": 0},
+        "missingObjects": ["runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "runtime-artifacts-empty"
+      },
+      {
+        "name": "artifacts-alter-binding-v1",
+        "fingerprint": "fa1fdf8a1a0f54c2018fbef4762570bda6f1c72757d2719b259866367f89882d",
+        "canonicalSize": 24887,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 9, "setUserVersion": 1, "alterBinding": true, "runtimePrefix": 2, "candidatePrefix": 0},
+        "missingObjects": ["quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "legacy-quiescence-v2"
+      },
+      {
+        "name": "new-base-embedded-binding-v1",
+        "fingerprint": "12a47fe9c577f89f9c95d7f8722977b8fd3540f93ef3f2c1044ef99ef1036a06",
+        "canonicalSize": 21054,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 9, "setUserVersion": 1, "alterBinding": false, "runtimePrefix": 0, "candidatePrefix": 0},
+        "missingObjects": ["runtime_artifacts", "runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "new-runtime-table-only-embedded-binding-v1",
+        "fingerprint": "44015016f581105606faa13c4a385b9e3dcf9d8799c93f4d1cfa85236e1898cb",
+        "canonicalSize": 24151,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 9, "setUserVersion": 1, "alterBinding": false, "runtimePrefix": 1, "candidatePrefix": 0},
+        "missingObjects": ["runtime_artifacts_route", "quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "new-runtime-embedded-binding-v1",
+        "fingerprint": "e7c00704c21420e10066ea28bf8ca42146bb4f46c45eeb62d71d0c5de61b26c0",
+        "canonicalSize": 24887,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 9, "setUserVersion": 1, "alterBinding": false, "runtimePrefix": 2, "candidatePrefix": 0},
+        "missingObjects": ["quarantine_repositories", "candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "candidate-alter-p1",
+        "fingerprint": "a31c9181b4d9045c06d988c89988ba92f4e6e511059aabf9e0baf58c6405d936",
+        "canonicalSize": 28028,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 9, "setUserVersion": 1, "alterBinding": true, "runtimePrefix": 2, "candidatePrefix": 1},
+        "missingObjects": ["candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "candidate-prefix-empty"
+      },
+      {
+        "name": "candidate-alter-p2",
+        "fingerprint": "4e2eaa53062aace794be8f5e87796193d654284793cace02cfc00cf83ec60dcb",
+        "canonicalSize": 33278,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 9, "setUserVersion": 1, "alterBinding": true, "runtimePrefix": 2, "candidatePrefix": 2},
+        "missingObjects": ["candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "candidate-prefix-empty"
+      },
+      {
+        "name": "candidate-alter-p3",
+        "fingerprint": "81e3b2b864b4363587db07f3330a57bc9b9efd8059f0096090edfd06b7c6a122",
+        "canonicalSize": 34082,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 9, "setUserVersion": 1, "alterBinding": true, "runtimePrefix": 2, "candidatePrefix": 3},
+        "missingObjects": ["candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "candidate-prefix-empty"
+      },
+      {
+        "name": "candidate-alter-p4",
+        "fingerprint": "e8f58eac2e7383afa4c381b84a36982fedf804d59cee2d204e4f0aeda07df4f5",
+        "canonicalSize": 40899,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 9, "setUserVersion": 1, "alterBinding": true, "runtimePrefix": 2, "candidatePrefix": 4},
+        "missingObjects": ["candidate_registry_route"],
+        "dataPredicate": "candidate-prefix-empty"
+      },
+      {
+        "name": "candidate-alter-p5",
+        "fingerprint": "bdacdbc4ce27b98edbbd3bb3c035e1927a081c00990093888373db630717f498",
+        "canonicalSize": 41648,
+        "recipe": {"baseSource": "executionBase", "basePrefix": 9, "setUserVersion": 1, "alterBinding": true, "runtimePrefix": 2, "candidatePrefix": 5},
+        "missingObjects": [],
+        "dataPredicate": "legacy-quiescence-v2"
+      },
+      {
+        "name": "candidate-embedded-p1",
+        "fingerprint": "1d72cb917d18a83d6c994e196ee92dd6d2cb500db92e4e55bed3c47d51d5cd52",
+        "canonicalSize": 28028,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 9, "setUserVersion": 1, "alterBinding": false, "runtimePrefix": 2, "candidatePrefix": 1},
+        "missingObjects": ["candidate_publication_intents", "candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "candidate-embedded-p2",
+        "fingerprint": "54d6abc9bab55c9f822a0dc8877886e23b33587d19b460cb598ebc5cf1a2b129",
+        "canonicalSize": 33278,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 9, "setUserVersion": 1, "alterBinding": false, "runtimePrefix": 2, "candidatePrefix": 2},
+        "missingObjects": ["candidate_intents_state", "candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "candidate-embedded-p3",
+        "fingerprint": "ecc8d5237dccfc1baa740238d07db4ce45f430ebf9c14a4d477477e1f1886c96",
+        "canonicalSize": 34082,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 9, "setUserVersion": 1, "alterBinding": false, "runtimePrefix": 2, "candidatePrefix": 3},
+        "missingObjects": ["candidate_registry", "candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "candidate-embedded-p4",
+        "fingerprint": "3fdd5eae038ddb977485e332b465bc941eba1e0091a9bab1b4e7eb0036e82000",
+        "canonicalSize": 40899,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 9, "setUserVersion": 1, "alterBinding": false, "runtimePrefix": 2, "candidatePrefix": 4},
+        "missingObjects": ["candidate_registry_route"],
+        "dataPredicate": "all-application-tables-empty"
+      },
+      {
+        "name": "candidate-embedded-p5",
+        "fingerprint": "a65cc307783faf71a9e0eaabd12889c129c1be5ee8c4de4947149ad8bab7b36c",
+        "canonicalSize": 41648,
+        "recipe": {"baseSource": "candidateRegistry", "basePrefix": 9, "setUserVersion": 1, "alterBinding": false, "runtimePrefix": 2, "candidatePrefix": 5},
+        "missingObjects": [],
+        "dataPredicate": "all-application-tables-empty"
+      }
+    ]
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/activation-commit-receipt-v2.schema.json",
+  "title": "activation-commit-receipt-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "receiptKind", "installationId", "operationId", "frozenJournalFingerprint", "manifest", "manifestDocument", "transitionLineage", "activation", "databaseBinding", "journalAbsenceTarget", "controllerIdentity", "completedStepIds", "receiptFingerprint", "completedAt"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "receiptKind": {"const": "activation-commit"},
+    "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"},
+    "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"},
+    "frozenJournalFingerprint": {"$ref": "#/$defs/sha256"},
+    "manifest": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "manifest-v2"}}},
+    "manifestDocument": {"$ref": "manifest-document-v2.schema.json"},
+    "transitionLineage": {"$ref": "#/$defs/transitionLineage"},
+    "activation": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "activation-v2"}}},
+    "databaseBinding": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "database-binding-v2"}}},
+    "journalAbsenceTarget": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "absence-proof-v2"}}},
+    "controllerIdentity": {"$ref": "#/$defs/sha256"},
+    "completedStepIds": {"type": "array", "maxItems": 128, "uniqueItems": true, "items": {"type": "string", "pattern": "^st2_[0-9a-f]{32}$"}},
+    "receiptFingerprint": {"$ref": "#/$defs/sha256"},
+    "completedAt": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"},
+    "commandId": {"type": "string", "pattern": "^cc2_[0-9a-f]{32}$"},
+    "activationId": {"type": "string", "pattern": "^act2_[0-9a-f]{64}$"},
+    "databaseId": {"type": "string", "pattern": "^db2_[0-9a-f]{32}$"},
+    "sourceReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["receiptKind", "path", "rawSha256", "receiptFingerprint"],
+      "properties": {"receiptKind": {"enum": ["activation-preparation", "rollback-manifest-preparation"]}, "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/"}, "rawSha256": {"$ref": "#/$defs/sha256"}, "receiptFingerprint": {"$ref": "#/$defs/sha256"}}
+    },
+    "shutdownCommandIds": {
+      "type": "object", "additionalProperties": false,
+      "required": ["maintenanceBegin", "maintenanceStrengthen", "shutdown"],
+      "properties": {"maintenanceBegin": {"$ref": "#/$defs/commandId"}, "maintenanceStrengthen": {"$ref": "#/$defs/commandId"}, "shutdown": {"$ref": "#/$defs/commandId"}}
+    },
+    "stoppedController": {
+      "type": "object", "additionalProperties": false,
+      "required": ["operationId", "activationId", "databaseId", "controllerIdentity", "controlEpoch"],
+      "properties": {"operationId": {"$ref": "#/$defs/operationId"}, "activationId": {"$ref": "#/$defs/activationId"}, "databaseId": {"$ref": "#/$defs/databaseId"}, "controllerIdentity": {"$ref": "#/$defs/sha256"}, "controlEpoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}}
+    },
+    "transitionLineage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["transitionKind", "sourceReceipt", "activationProofFingerprint", "shutdownCommandIds", "stoppedController", "lineageFingerprint"],
+      "properties": {"transitionKind": {"enum": ["initial", "update", "rollback"]}, "sourceReceipt": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sourceReceipt"}]}, "activationProofFingerprint": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]}, "shutdownCommandIds": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/shutdownCommandIds"}]}, "stoppedController": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/stoppedController"}]}, "lineageFingerprint": {"$ref": "#/$defs/sha256"}},
+      "oneOf": [
+        {"properties": {"transitionKind": {"const": "initial"}, "sourceReceipt": {"type": "null"}, "activationProofFingerprint": {"type": "null"}, "shutdownCommandIds": {"type": "null"}, "stoppedController": {"type": "null"}}},
+        {"properties": {"transitionKind": {"const": "update"}, "sourceReceipt": {"$ref": "#/$defs/sourceReceipt", "properties": {"receiptKind": {"const": "activation-preparation"}}}, "activationProofFingerprint": {"$ref": "#/$defs/sha256"}, "shutdownCommandIds": {"$ref": "#/$defs/shutdownCommandIds"}, "stoppedController": {"$ref": "#/$defs/stoppedController"}}},
+        {"properties": {"transitionKind": {"const": "rollback"}, "sourceReceipt": {"$ref": "#/$defs/sourceReceipt", "properties": {"receiptKind": {"const": "rollback-manifest-preparation"}}}, "activationProofFingerprint": {"$ref": "#/$defs/sha256"}, "shutdownCommandIds": {"$ref": "#/$defs/shutdownCommandIds"}, "stoppedController": {"$ref": "#/$defs/stoppedController"}}}
+      ]
+    }
+  }
+}

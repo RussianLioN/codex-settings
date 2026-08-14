@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""Executable launcher for the bundled MCP stdio adapter."""
+
+from __future__ import annotations
+
+import runpy
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+TARGET = ROOT / "mcp" / "server.py"
+sys.argv[0] = str(TARGET)
+runpy.run_path(str(TARGET), run_name="__main__")

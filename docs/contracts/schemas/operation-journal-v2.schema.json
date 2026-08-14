@@ -1,0 +1,492 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/operation-journal-v2.schema.json",
+  "title": "operation-journal-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "installationId", "operationId", "operation", "phase", "recoveryPolicy", "executionPlan", "abortPlan", "recoveryPlans", "discoveryBefore", "fencedBefore", "desired", "attempts", "steps", "changes", "terminalDefinitionSnapshot", "terminalDeleteIntent", "createdAt", "updatedAt", "journalFingerprint"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "kind": {"enum": ["activation", "legacy-migration", "rollback", "uninstall"]},
+    "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"},
+    "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"},
+    "operation": {"enum": ["apply", "rollback", "uninstall"]},
+    "phase": {"enum": ["DISCOVERED", "FENCING", "LEGACY_EXIT_PENDING", "FENCED", "APPLYING", "COMMITTING", "ABORTING", "FAILED", "TERMINAL_FROZEN"]},
+    "recoveryPolicy": {"enum": ["REVERSIBLE", "FORWARD_ONLY"]},
+    "executionPlan": {"$ref": "#/$defs/executionPlan"},
+    "abortPlan": {"$ref": "#/$defs/nullableAbortPlan"},
+    "recoveryPlans": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/recoveryPlan"}},
+    "discoveryBefore": {"$ref": "#/$defs/stateBundle"},
+    "fencedBefore": {"$ref": "#/$defs/nullableBundle"},
+    "desired": {"$ref": "#/$defs/nullableBundle"},
+    "attempts": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["attemptId", "startedAt", "finishedAt", "outcome"],
+        "properties": {
+          "attemptId": {"type": "string", "pattern": "^opa2_[0-9a-f]{32}$"},
+          "startedAt": {"type": "string", "format": "date-time"},
+          "finishedAt": {"oneOf": [{"type": "null"}, {"type": "string", "format": "date-time"}]},
+          "outcome": {"enum": ["RUNNING", "SUCCEEDED", "FAILED", "ABORTED"]}
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "prefixItems": [
+        {
+          "$ref": "operation-step-v2.schema.json",
+          "properties": {
+            "ordinal": {"const": 0},
+            "planOrdinal": {"const": 0},
+            "recordCarrier": {"const": "JOURNAL_ATOMIC_BOUNDARY"},
+            "kind": {"const": "gate_close"},
+            "state": {"const": "COMPLETED"}
+          }
+        }
+      ],
+      "items": {"$ref": "operation-step-v2.schema.json", "properties": {"recordCarrier": {"enum": ["JOURNAL_MUTABLE", "JOURNAL_ATOMIC_BOUNDARY"]}}}
+    },
+    "changes": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "beforeFingerprint", "afterFingerprint"],
+        "properties": {
+          "kind": {"enum": ["migrated_manifest", "attested_codex", "staged_generation", "gate_closed", "installed_bootstrap_fence", "drained_controller", "migrated_database", "published_activation", "registered_marketplace", "enabled_plugin", "repaired_launchers", "accepted_controller", "committed_manifest", "gate_opened", "retired_generation", "removed_installation"]},
+          "beforeFingerprint": {"$ref": "#/$defs/nullableSha256"},
+          "afterFingerprint": {"$ref": "#/$defs/nullableSha256"}
+        }
+      }
+    },
+    "terminalDefinitionSnapshot": {"$ref": "#/$defs/nullableTerminalDefinitionSnapshot"},
+    "terminalDeleteIntent": {"$ref": "#/$defs/nullableTerminalDeleteIntent"},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "journalFingerprint": {"$ref": "#/$defs/sha256"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"kind": {"const": "legacy-migration"}}, "required": ["kind"]},
+      "then": {
+        "oneOf": [
+          {
+            "properties": {
+              "phase": {"enum": ["DISCOVERED", "FENCING", "ABORTING", "FAILED", "TERMINAL_FROZEN"]},
+              "fencedBefore": {"type": "null"},
+              "desired": {"type": "null"},
+              "recoveryPolicy": {"const": "REVERSIBLE"}
+            }
+          },
+          {
+            "properties": {
+              "phase": {"const": "LEGACY_EXIT_PENDING"},
+              "fencedBefore": {"type": "null"},
+              "desired": {"type": "null"},
+              "recoveryPolicy": {"const": "FORWARD_ONLY"}
+            }
+          },
+          {
+            "properties": {
+              "phase": {"enum": ["FENCED", "APPLYING", "COMMITTING", "FAILED", "TERMINAL_FROZEN"]},
+              "fencedBefore": {"$ref": "#/$defs/stateBundle"},
+              "desired": {"$ref": "#/$defs/stateBundle"},
+              "recoveryPolicy": {"const": "FORWARD_ONLY"}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {"properties": {"kind": {"enum": ["activation", "rollback", "uninstall"]}}, "required": ["kind"]},
+      "then": {"properties": {"phase": {"enum": ["DISCOVERED", "FENCING", "FENCED", "APPLYING", "COMMITTING", "ABORTING", "FAILED", "TERMINAL_FROZEN"]}, "desired": {"$ref": "#/$defs/stateBundle"}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "activation"}}, "required": ["kind"]},
+      "then": {"properties": {"operation": {"const": "apply"}, "executionPlan": {"properties": {"machineId": {"const": "apply"}}}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "legacy-migration"}}, "required": ["kind"]},
+      "then": {"properties": {"operation": {"const": "apply"}, "executionPlan": {"properties": {"machineId": {"const": "legacyMigration"}}}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "rollback"}}, "required": ["kind"]},
+      "then": {"properties": {"operation": {"const": "rollback"}, "executionPlan": {"properties": {"machineId": {"const": "rollback"}}}}}
+    },
+    {
+      "if": {"properties": {"kind": {"const": "uninstall"}}, "required": ["kind"]},
+      "then": {"properties": {"operation": {"const": "uninstall"}, "executionPlan": {"properties": {"machineId": {"const": "uninstall"}}}}}
+    },
+    {
+      "if": {"properties": {"phase": {"const": "TERMINAL_FROZEN"}}, "required": ["phase"]},
+      "then": {
+        "properties": {
+          "terminalDefinitionSnapshot": {"$ref": "#/$defs/terminalDefinitionSnapshot"},
+          "terminalDeleteIntent": {"$ref": "#/$defs/terminalDeleteIntent"},
+          "steps": {
+            "contains": {
+              "properties": {
+                "kind": {"const": "terminal_journal_freeze"},
+                "state": {"const": "COMPLETED"},
+                "recordCarrier": {"const": "JOURNAL_ATOMIC_BOUNDARY"}
+              },
+              "required": ["kind", "state", "recordCarrier"]
+            },
+            "minContains": 1,
+            "maxContains": 1
+          }
+        },
+        "oneOf": [
+          {
+            "properties": {
+              "recoveryPolicy": {"const": "REVERSIBLE"},
+              "terminalDeleteIntent": {
+                "properties": {
+                  "terminalKind": {"const": "ABORT"},
+                  "receiptKind": {"const": "operation-abort"}
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "kind": {"enum": ["activation", "legacy-migration", "rollback"]},
+              "recoveryPolicy": {"const": "FORWARD_ONLY"},
+              "terminalDeleteIntent": {
+                "properties": {
+                  "terminalKind": {"const": "COMMIT"},
+                  "receiptKind": {"const": "activation-commit"}
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "kind": {"const": "uninstall"},
+              "recoveryPolicy": {"const": "FORWARD_ONLY"},
+              "terminalDeleteIntent": {
+                "properties": {
+                  "terminalKind": {"const": "UNINSTALL"},
+                  "receiptKind": {"const": "installation-uninstall"}
+                }
+              }
+            }
+          }
+        ]
+      },
+      "else": {
+        "properties": {
+          "terminalDeleteIntent": {"type": "null"},
+          "steps": {
+            "not": {
+              "contains": {
+                "properties": {"kind": {"const": "terminal_journal_freeze"}},
+                "required": ["kind"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"phase": {"enum": ["ABORTING", "FAILED", "TERMINAL_FROZEN"]}, "recoveryPolicy": {"const": "REVERSIBLE"}}, "required": ["phase", "recoveryPolicy"]},
+      "then": {"properties": {"abortPlan": {"$ref": "#/$defs/abortPlan"}}},
+      "else": {"properties": {"abortPlan": {"type": "null"}}}
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "nullableSha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+    "projection": {"$ref": "lifecycle-projection-v2.schema.json"},
+    "nullableProjection": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/projection"}]},
+    "typedManifest": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "manifest-v2"}}},
+    "typedActivation": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "activation-v2"}}},
+    "typedDatabase": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "database-object-v2"}}},
+    "typedDatabaseTarget": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "database-binding-target-v2"}}},
+    "typedDatabaseBinding": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "database-binding-v2"}}},
+    "uninstallRetainedData": {
+      "type": "object", "additionalProperties": false,
+      "required": ["databaseBinding", "backupsRoot", "quarantineRoot", "recoveryEntrypoint"],
+      "properties": {
+        "databaseBinding": {"$ref": "#/$defs/typedDatabaseBinding"},
+        "backupsRoot": {"type": "string", "pattern": "^/"},
+        "quarantineRoot": {"type": "string", "pattern": "^/"},
+        "recoveryEntrypoint": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "file-object-v2"}}}
+      }
+    },
+    "typedController": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "controller-state-v2"}}},
+    "typedControllerCandidate": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "controller-candidate-v2"}}},
+    "typedWatchdog": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "watchdog-state-v2"}}},
+    "typedRegistry": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "registry-state-v2"}}},
+    "typedLaunchers": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "launcher-set-v2"}}},
+    "typedLegacyProcesses": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "legacy-process-set-v2"}}},
+    "typedQuiescence": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "quiescence-proof-v2"}}},
+    "typedAbsence": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "absence-proof-v2"}}},
+    "nullableManifest": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedManifest"}]},
+    "nullableActivation": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedActivation"}]},
+    "nullableDatabase": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedDatabase"}, {"$ref": "#/$defs/typedDatabaseTarget"}]},
+    "nullableController": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedController"}]},
+    "nullableRegistry": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedRegistry"}]},
+    "nullableLaunchers": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedLaunchers"}]},
+    "nullableLegacyProcesses": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedLegacyProcesses"}]},
+    "nullableQuiescence": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/typedQuiescence"}]},
+    "projectionArray": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/projection"}},
+    "stateBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fileObjects", "treeObjects", "symlinks", "manifest", "activation", "database", "controller", "controllerCandidates", "watchdogs", "registry", "launchers", "legacyProcesses", "quiescence", "externalCommands", "receipts", "absenceProofs", "bundleFingerprint"],
+      "properties": {
+        "fileObjects": {"type": "array", "maxItems": 4096, "items": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "file-object-v2"}}}},
+        "treeObjects": {"type": "array", "maxItems": 4096, "items": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "tree-object-v2"}}}},
+        "symlinks": {"type": "array", "maxItems": 256, "items": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "symlink-object-v2"}}}},
+        "manifest": {"$ref": "#/$defs/nullableManifest"},
+        "activation": {"$ref": "#/$defs/nullableActivation"},
+        "database": {"$ref": "#/$defs/nullableDatabase"},
+        "controller": {"$ref": "#/$defs/nullableController"},
+        "controllerCandidates": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/typedControllerCandidate"}},
+        "watchdogs": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/typedWatchdog"}},
+        "registry": {"$ref": "#/$defs/nullableRegistry"},
+        "launchers": {"$ref": "#/$defs/nullableLaunchers"},
+        "legacyProcesses": {"$ref": "#/$defs/nullableLegacyProcesses"},
+        "quiescence": {"$ref": "#/$defs/nullableQuiescence"},
+        "externalCommands": {"type": "array", "maxItems": 128, "items": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "external-command-v2"}}}},
+        "receipts": {"type": "array", "maxItems": 128, "items": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "receipt-object-v2"}}}},
+        "absenceProofs": {"type": "array", "maxItems": 128, "items": {"$ref": "#/$defs/typedAbsence"}},
+        "bundleFingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "nullableBundle": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/stateBundle"}]},
+    "executionPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planId", "machineId", "selectedBranchId", "selectionSource", "composedStepKinds", "firstIncompleteOrdinal", "planDefinitionFingerprint"],
+      "properties": {
+        "planId": {"type": "string", "pattern": "^pl2_[0-9a-f]{32}$"},
+        "machineId": {"enum": ["apply", "rollback", "uninstall", "legacyMigration"]},
+        "selectedBranchId": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 128}]},
+        "selectionSource": {"const": "DISCOVERY_BEFORE_FIRST_EFFECT"},
+        "composedStepKinds": {"type": "array", "minItems": 1, "maxItems": 128, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}},
+        "firstIncompleteOrdinal": {"type": "integer", "minimum": 1, "maximum": 128},
+        "planDefinitionFingerprint": {"$ref": "#/$defs/sha256"}
+      },
+      "oneOf": [
+        {"properties": {"machineId": {"const": "apply"}, "selectedBranchId": {"enum": ["fresh-proven-absent", "update-matched-active"]}}},
+        {"properties": {"machineId": {"const": "rollback"}, "selectedBranchId": {"const": "rollback-matched-active"}}},
+        {"properties": {"machineId": {"const": "uninstall"}, "selectedBranchId": {"enum": ["active-matched-controller", "disabled-or-missing-proven"]}}},
+        {"properties": {"machineId": {"const": "legacyMigration"}, "selectedBranchId": {"type": "null"}}}
+      ]
+    },
+    "abortPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planId", "machineId", "selectedBranchId", "selectionSource", "sourceExecutionPlanDefinitionFingerprint", "sourceCompletedForwardStepKinds", "composedStepKinds", "firstIncompleteOrdinal", "planDefinitionFingerprint"],
+      "properties": {
+        "planId": {"type": "string", "pattern": "^pl2_[0-9a-f]{32}$"},
+        "machineId": {"const": "abort"},
+        "selectedBranchId": {"enum": ["fresh-before-stage", "fresh-staged", "fresh-database-prepared", "fresh-activation-linked", "fresh-ambiguous", "standard-gate-closed-before-stage", "standard-old-live-before-maintenance", "standard-old-live-maintenance", "standard-old-shutdown-socket-pending", "standard-old-shutdown-committed", "standard-database-prepared", "standard-activation-linked", "standard-ambiguous", "rollback-gate-closed", "rollback-maintenance", "rollback-shutdown-socket-pending", "rollback-shutdown-committed", "rollback-activation-link-restored", "rollback-ambiguous", "uninstall-active-gate-closed", "uninstall-active-maintenance", "uninstall-active-shutdown-socket-pending", "uninstall-active-shutdown-committed", "uninstall-disabled-gate-only", "uninstall-ambiguous", "legacy-gate-only", "legacy-gateway-fenced", "legacy-bridge-prepared", "legacy-bridge-swapped", "legacy-marketplace-archived", "legacy-watchdog-registered", "legacy-watchdog-armed-before-sigstop", "legacy-target-sigstop-or-quiescent", "legacy-ambiguous"]},
+        "selectionSource": {"const": "DURABLE_FORWARD_PREFIX_BEFORE_FIRST_REVERSE_EFFECT"},
+        "sourceExecutionPlanDefinitionFingerprint": {"$ref": "#/$defs/sha256"},
+        "sourceCompletedForwardStepKinds": {"type": "array", "maxItems": 128, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}},
+        "composedStepKinds": {"type": "array", "minItems": 1, "maxItems": 128, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}},
+        "firstIncompleteOrdinal": {"type": "integer", "minimum": 0, "maximum": 128},
+        "planDefinitionFingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "nullableAbortPlan": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/abortPlan"}]},
+    "recoveryPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planId", "selectedRecoveryBranchId", "selectionSource", "sourcePlanDefinitionFingerprint", "sourceStepState", "firstIncompleteOrdinal", "firstIncompleteKind", "firstIncompleteStepId", "firstIncompleteActionFingerprint", "controllerPrerequisite", "candidateId", "overlayStepKinds", "status", "overlayCursorOrdinal", "planDefinitionFingerprint"],
+      "properties": {
+        "planId": {"type": "string", "pattern": "^pl2_[0-9a-f]{32}$"},
+        "selectedRecoveryBranchId": {"enum": ["external-still-running", "controller-not-applicable", "controller-live", "controller-missing-proven", "current-candidate-registered", "previous-candidate-registered", "mismatched-or-unowned"]},
+        "selectionSource": {"const": "DURABLE_RECOVERY_INSPECTION_BEFORE_FIRST_OVERLAY_EFFECT"},
+        "sourcePlanDefinitionFingerprint": {"$ref": "#/$defs/sha256"},
+        "sourceStepState": {"enum": ["NO_DURABLE_INTENT_YET", "DURABLE_STEP_EXISTS"]},
+        "firstIncompleteOrdinal": {"type": "integer", "minimum": 0, "maximum": 127},
+        "firstIncompleteKind": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "firstIncompleteStepId": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^st2_[0-9a-f]{32}$"}]},
+        "firstIncompleteActionFingerprint": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+        "controllerPrerequisite": {"enum": ["NOT_APPLICABLE", "MATCHED_LIVE", "PROVEN_OLD_ABSENT_LOCK_FREE", "REGISTERED_CANDIDATE_EXACT", "MISMATCHED_OR_UNOWNED"]},
+        "candidateId": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "^cand2_[0-9a-f]{32}$"}]},
+        "overlayStepKinds": {"type": "array", "maxItems": 8, "items": {"enum": ["external_exit_recheck", "recovery_inspect", "controller_candidate_spawn", "controller_recover", "controller_accept", "controller_previous_accept", "recovery_resume_operation"]}},
+        "status": {"enum": ["PLANNED", "ACTIVE", "COMPLETED", "AMBIGUOUS"]},
+        "overlayCursorOrdinal": {"type": "integer", "minimum": 0, "maximum": 8},
+        "planDefinitionFingerprint": {"$ref": "#/$defs/sha256"}
+      },
+      "allOf": [{"oneOf": [
+        {"properties": {"sourceStepState": {"const": "NO_DURABLE_INTENT_YET"}, "firstIncompleteStepId": {"type": "null"}, "firstIncompleteActionFingerprint": {"type": "null"}}},
+        {"properties": {"sourceStepState": {"const": "DURABLE_STEP_EXISTS"}, "firstIncompleteStepId": {"type": "string"}, "firstIncompleteActionFingerprint": {"$ref": "#/$defs/sha256"}}}
+      ]}, {"oneOf": [
+        {"properties": {"selectedRecoveryBranchId": {"const": "external-still-running"}, "controllerPrerequisite": {"const": "NOT_APPLICABLE"}, "candidateId": {"type": "null"}, "overlayStepKinds": {"const": ["external_exit_recheck", "recovery_inspect"]}}},
+        {"properties": {"selectedRecoveryBranchId": {"const": "controller-not-applicable"}, "controllerPrerequisite": {"const": "NOT_APPLICABLE"}, "candidateId": {"type": "null"}, "overlayStepKinds": {"const": ["recovery_resume_operation"]}}},
+        {"properties": {"selectedRecoveryBranchId": {"const": "controller-live"}, "controllerPrerequisite": {"const": "MATCHED_LIVE"}, "candidateId": {"type": "null"}, "overlayStepKinds": {"const": ["recovery_resume_operation"]}}},
+        {"properties": {"selectedRecoveryBranchId": {"const": "controller-missing-proven"}, "controllerPrerequisite": {"const": "PROVEN_OLD_ABSENT_LOCK_FREE"}, "candidateId": {"type": "string"}, "overlayStepKinds": {"const": ["controller_candidate_spawn", "controller_recover", "recovery_resume_operation"]}}},
+        {"properties": {"selectedRecoveryBranchId": {"const": "current-candidate-registered"}, "controllerPrerequisite": {"const": "REGISTERED_CANDIDATE_EXACT"}, "candidateId": {"type": "string"}, "overlayStepKinds": {"const": ["controller_accept", "recovery_resume_operation"]}}},
+        {"properties": {"selectedRecoveryBranchId": {"const": "previous-candidate-registered"}, "controllerPrerequisite": {"const": "REGISTERED_CANDIDATE_EXACT"}, "candidateId": {"type": "string"}, "overlayStepKinds": {"const": ["controller_previous_accept", "recovery_resume_operation"]}}},
+        {"properties": {"selectedRecoveryBranchId": {"const": "mismatched-or-unowned"}, "controllerPrerequisite": {"const": "MISMATCHED_OR_UNOWNED"}, "candidateId": {"type": "null"}, "overlayStepKinds": {"const": []}}}
+      ]}, {"oneOf": [
+        {"properties": {"selectedRecoveryBranchId": {"const": "external-still-running"}}, "$ref": "#/$defs/recoveryOverlayState2"},
+        {"properties": {"selectedRecoveryBranchId": {"const": "controller-not-applicable"}}, "$ref": "#/$defs/recoveryOverlayState1"},
+        {"properties": {"selectedRecoveryBranchId": {"const": "controller-live"}}, "$ref": "#/$defs/recoveryOverlayState1"},
+        {"properties": {"selectedRecoveryBranchId": {"const": "controller-missing-proven"}}, "$ref": "#/$defs/recoveryOverlayState3"},
+        {"properties": {"selectedRecoveryBranchId": {"const": "current-candidate-registered"}}, "$ref": "#/$defs/recoveryOverlayState2"},
+        {"properties": {"selectedRecoveryBranchId": {"const": "previous-candidate-registered"}}, "$ref": "#/$defs/recoveryOverlayState2"},
+        {"properties": {"selectedRecoveryBranchId": {"const": "mismatched-or-unowned"}, "status": {"const": "AMBIGUOUS"}, "overlayCursorOrdinal": {"const": 0}}}
+      ]}]
+    },
+    "recoveryOverlayState1": {
+      "oneOf": [
+        {"properties": {"status": {"const": "PLANNED"}, "overlayCursorOrdinal": {"const": 0}}},
+        {"properties": {"status": {"const": "ACTIVE"}, "overlayCursorOrdinal": {"const": 0}}},
+        {"properties": {"status": {"const": "COMPLETED"}, "overlayCursorOrdinal": {"const": 1}}}
+      ]
+    },
+    "recoveryOverlayState2": {
+      "oneOf": [
+        {"properties": {"status": {"const": "PLANNED"}, "overlayCursorOrdinal": {"const": 0}}},
+        {"properties": {"status": {"const": "ACTIVE"}, "overlayCursorOrdinal": {"enum": [0, 1]}}},
+        {"properties": {"status": {"const": "COMPLETED"}, "overlayCursorOrdinal": {"const": 2}}}
+      ]
+    },
+    "recoveryOverlayState3": {
+      "oneOf": [
+        {"properties": {"status": {"const": "PLANNED"}, "overlayCursorOrdinal": {"const": 0}}},
+        {"properties": {"status": {"const": "ACTIVE"}, "overlayCursorOrdinal": {"enum": [0, 1, 2]}}},
+        {"properties": {"status": {"const": "COMPLETED"}, "overlayCursorOrdinal": {"const": 3}}}
+      ]
+    },
+    "terminalDefinitionSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["terminalKind", "receiptKind", "receiptPath", "freeze", "journalAbsenceTarget", "receiptPayloadStaticIntent", "tombstonePayloadIntent", "postFreezeActionKinds", "snapshotFingerprint"],
+      "properties": {
+        "terminalKind": {"enum": ["COMMIT", "ABORT", "UNINSTALL"]},
+        "receiptKind": {"enum": ["activation-commit", "operation-abort", "installation-uninstall"]},
+        "receiptPath": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/"},
+        "freeze": {"$ref": "#/$defs/terminalFreezeDefinition"},
+        "journalAbsenceTarget": {"$ref": "#/$defs/typedAbsence"},
+        "receiptPayloadStaticIntent": {"$ref": "#/$defs/receiptPayloadStaticIntent"},
+        "tombstonePayloadIntent": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/tombstonePayloadIntent"}]},
+        "postFreezeActionKinds": {
+          "oneOf": [
+            {"const": ["commit_receipt_publish", "gate_open"]},
+            {"const": ["abort_receipt_publish", "abort_journal_close"]},
+            {"const": ["uninstall_receipt_publish", "uninstall_tombstone_publish", "uninstall_journal_close"]}
+          ]
+        },
+        "snapshotFingerprint": {"$ref": "#/$defs/sha256"}
+      },
+      "oneOf": [
+        {"properties": {"terminalKind": {"const": "COMMIT"}, "receiptKind": {"const": "activation-commit"}, "postFreezeActionKinds": {"const": ["commit_receipt_publish", "gate_open"]}, "receiptPayloadStaticIntent": {"properties": {"payloadKind": {"const": "activation-commit"}}}, "tombstonePayloadIntent": {"type": "null"}}},
+        {"properties": {"terminalKind": {"const": "ABORT"}, "receiptKind": {"const": "operation-abort"}, "postFreezeActionKinds": {"const": ["abort_receipt_publish", "abort_journal_close"]}, "receiptPayloadStaticIntent": {"properties": {"payloadKind": {"const": "operation-abort"}}}, "tombstonePayloadIntent": {"type": "null"}}},
+        {"properties": {"terminalKind": {"const": "UNINSTALL"}, "receiptKind": {"const": "installation-uninstall"}, "postFreezeActionKinds": {"const": ["uninstall_receipt_publish", "uninstall_tombstone_publish", "uninstall_journal_close"]}, "receiptPayloadStaticIntent": {"properties": {"payloadKind": {"const": "installation-uninstall"}}}, "tombstonePayloadIntent": {"$ref": "#/$defs/tombstonePayloadIntent"}}}
+      ]
+    },
+    "terminalFreezeDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "commandId", "action", "actionFingerprint", "before", "expectedAfter"],
+      "properties": {
+        "kind": {"const": "terminal_journal_freeze"},
+        "commandId": {"type": "null"},
+        "action": {"$ref": "operation-step-v2.schema.json#/$defs/actionJournal", "properties": {"transition": {"const": "freeze-delete-intent"}}},
+        "actionFingerprint": {"$ref": "#/$defs/sha256"},
+        "before": {"$ref": "operation-step-v2.schema.json#/$defs/journalStateMutable"},
+        "expectedAfter": {"$ref": "operation-step-v2.schema.json#/$defs/journalStateFrozen"}
+      }
+    },
+    "receiptPayloadStaticIntent": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["payloadKind", "manifest", "manifestDocument", "transitionLineage", "activation", "databaseBinding", "journalAbsenceTarget", "controllerIdentity"],
+          "properties": {"payloadKind": {"const": "activation-commit"}, "manifest": {"$ref": "#/$defs/typedManifest"}, "manifestDocument": {"$ref": "manifest-document-v2.schema.json"}, "transitionLineage": {"$ref": "activation-commit-receipt-v2.schema.json#/$defs/transitionLineage"}, "activation": {"$ref": "#/$defs/typedActivation"}, "databaseBinding": {"$ref": "#/$defs/typedDatabaseBinding"}, "journalAbsenceTarget": {"$ref": "#/$defs/typedAbsence"}, "controllerIdentity": {"$ref": "#/$defs/sha256"}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["payloadKind", "restoredState", "journalAbsenceTarget", "reasonCode"],
+          "properties": {"payloadKind": {"const": "operation-abort"}, "restoredState": {"$ref": "#/$defs/stateBundle"}, "journalAbsenceTarget": {"$ref": "#/$defs/typedAbsence"}, "reasonCode": {"type": "string", "minLength": 1, "maxLength": 128}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["payloadKind", "removedState", "restoredOriginalBackup", "absenceProof", "dataRetentionMode", "retainedData", "activationProofFingerprint"],
+          "properties": {"payloadKind": {"const": "installation-uninstall"}, "removedState": {"$ref": "#/$defs/stateBundle"}, "restoredOriginalBackup": {"oneOf": [{"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "file-object-v2"}}}, {"$ref": "#/$defs/typedAbsence"}]}, "absenceProof": {"$ref": "#/$defs/typedAbsence"}, "dataRetentionMode": {"const": "retain-data"}, "retainedData": {"$ref": "#/$defs/uninstallRetainedData"}, "activationProofFingerprint": {"$ref": "#/$defs/sha256"}}
+        }
+      ]
+    },
+    "terminalDeleteIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["terminalKind", "receiptKind", "receiptPath", "terminalStateFingerprint", "completedStepIds", "postFreezeActionKinds", "receiptPayloadIntent", "tombstonePayloadIntent", "journalAbsenceTarget", "frozenAt"],
+      "properties": {
+        "terminalKind": {"enum": ["COMMIT", "ABORT", "UNINSTALL"]},
+        "receiptKind": {"enum": ["activation-commit", "operation-abort", "installation-uninstall"]},
+        "receiptPath": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/"},
+        "terminalStateFingerprint": {"$ref": "#/$defs/sha256"},
+        "completedStepIds": {"type": "array", "maxItems": 128, "uniqueItems": true, "items": {"type": "string", "pattern": "^st2_[0-9a-f]{32}$"}},
+        "postFreezeActionKinds": {
+          "oneOf": [
+            {"const": ["commit_receipt_publish", "gate_open"]},
+            {"const": ["abort_receipt_publish", "abort_journal_close"]},
+            {"const": ["uninstall_receipt_publish", "uninstall_tombstone_publish", "uninstall_journal_close"]}
+          ]
+        },
+        "receiptPayloadIntent": {"$ref": "#/$defs/receiptPayloadIntent"},
+        "tombstonePayloadIntent": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/tombstonePayloadIntent"}]},
+        "journalAbsenceTarget": {"$ref": "#/$defs/typedAbsence"},
+        "frozenAt": {"type": "string", "format": "date-time"}
+      },
+      "oneOf": [
+        {"properties": {"terminalKind": {"const": "COMMIT"}, "receiptKind": {"const": "activation-commit"}, "postFreezeActionKinds": {"const": ["commit_receipt_publish", "gate_open"]}, "receiptPayloadIntent": {"properties": {"payloadKind": {"const": "activation-commit"}}}, "tombstonePayloadIntent": {"type": "null"}}},
+        {"properties": {"terminalKind": {"const": "ABORT"}, "receiptKind": {"const": "operation-abort"}, "postFreezeActionKinds": {"const": ["abort_receipt_publish", "abort_journal_close"]}, "receiptPayloadIntent": {"properties": {"payloadKind": {"const": "operation-abort"}}}, "tombstonePayloadIntent": {"type": "null"}}},
+        {"properties": {"terminalKind": {"const": "UNINSTALL"}, "receiptKind": {"const": "installation-uninstall"}, "postFreezeActionKinds": {"const": ["uninstall_receipt_publish", "uninstall_tombstone_publish", "uninstall_journal_close"]}, "receiptPayloadIntent": {"properties": {"payloadKind": {"const": "installation-uninstall"}}}, "tombstonePayloadIntent": {"$ref": "#/$defs/tombstonePayloadIntent"}}}
+      ]
+    },
+    "receiptPayloadIntent": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["payloadKind", "installationId", "operationId", "manifest", "manifestDocument", "transitionLineage", "activation", "databaseBinding", "journalAbsenceTarget", "controllerIdentity", "completedStepIds", "completedAt"],
+          "properties": {"payloadKind": {"const": "activation-commit"}, "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "manifest": {"$ref": "#/$defs/typedManifest"}, "manifestDocument": {"$ref": "manifest-document-v2.schema.json"}, "transitionLineage": {"$ref": "activation-commit-receipt-v2.schema.json#/$defs/transitionLineage"}, "activation": {"$ref": "#/$defs/typedActivation"}, "databaseBinding": {"$ref": "#/$defs/typedDatabaseBinding"}, "journalAbsenceTarget": {"$ref": "#/$defs/typedAbsence"}, "controllerIdentity": {"$ref": "#/$defs/sha256"}, "completedStepIds": {"type": "array", "maxItems": 128, "uniqueItems": true, "items": {"type": "string", "pattern": "^st2_[0-9a-f]{32}$"}}, "completedAt": {"type": "string", "format": "date-time"}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["payloadKind", "installationId", "operationId", "restoredState", "journalAbsenceTarget", "reasonCode", "completedAt"],
+          "properties": {"payloadKind": {"const": "operation-abort"}, "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "restoredState": {"$ref": "#/$defs/stateBundle"}, "journalAbsenceTarget": {"$ref": "#/$defs/typedAbsence"}, "reasonCode": {"type": "string", "minLength": 1, "maxLength": 128}, "completedAt": {"type": "string", "format": "date-time"}}
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["payloadKind", "installationId", "operationId", "removedState", "restoredOriginalBackup", "absenceProof", "dataRetentionMode", "retainedData", "activationProofFingerprint", "completedAt"],
+          "properties": {"payloadKind": {"const": "installation-uninstall"}, "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"}, "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"}, "removedState": {"$ref": "#/$defs/stateBundle"}, "restoredOriginalBackup": {"oneOf": [{"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "file-object-v2"}}}, {"$ref": "#/$defs/typedAbsence"}]}, "absenceProof": {"$ref": "#/$defs/typedAbsence"}, "dataRetentionMode": {"const": "retain-data"}, "retainedData": {"$ref": "#/$defs/uninstallRetainedData"}, "activationProofFingerprint": {"$ref": "#/$defs/sha256"}, "completedAt": {"type": "string", "format": "date-time"}}
+        }
+      ]
+    },
+    "tombstonePayloadIntent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "before", "replacementAuthorization", "priorInstallationEvidence", "currentReceiptBinding", "reobserveBeforeWrite", "mismatchDisposition"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^/", "maxLength": 4096},
+        "before": {"oneOf": [{"$ref": "#/$defs/typedAbsence"}, {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "file-object-v2"}}}]},
+        "replacementAuthorization": {"enum": ["CREATE_IF_ABSENT", "REPLACE_VERIFIED_STALE_PRIOR_INSTALLATION"]},
+        "priorInstallationEvidence": {"oneOf": [{"type": "null"}, {"type": "object", "additionalProperties": false, "required": ["priorTombstoneSchemaAndFingerprintValid", "priorEmbeddedUninstallReceiptAndImmutableFileValid", "installationIdRelation", "beforeFileProjectionFingerprint"], "properties": {"priorTombstoneSchemaAndFingerprintValid": {"const": true}, "priorEmbeddedUninstallReceiptAndImmutableFileValid": {"const": true}, "installationIdRelation": {"const": "PRIOR_DIFFERS_FROM_CURRENT_INSTALLATION"}, "beforeFileProjectionFingerprint": {"$ref": "#/$defs/sha256"}}}]},
+        "currentReceiptBinding": {"const": "DERIVE_FROM_FROZEN_RECEIPT_PAYLOAD_AND_FROZEN_JOURNAL_FINGERPRINT"},
+        "reobserveBeforeWrite": {"const": true},
+        "mismatchDisposition": {"const": "RECOVERY_STATE_AMBIGUOUS"}
+      },
+      "oneOf": [
+        {"properties": {"before": {"$ref": "#/$defs/typedAbsence"}, "replacementAuthorization": {"const": "CREATE_IF_ABSENT"}, "priorInstallationEvidence": {"type": "null"}}},
+        {"properties": {"before": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "file-object-v2"}}}, "replacementAuthorization": {"const": "REPLACE_VERIFIED_STALE_PRIOR_INSTALLATION"}, "priorInstallationEvidence": {"type": "object"}}}
+      ]
+    },
+    "nullableTerminalDefinitionSnapshot": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/terminalDefinitionSnapshot"}]},
+    "nullableTerminalDeleteIntent": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/terminalDeleteIntent"}]}
+  }
+}

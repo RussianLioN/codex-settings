@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/interface-evidence-mutation-v1.schema.json",
+  "title": "InterfaceEvidence mutation test case v1",
+  "$ref": "#/$defs/case",
+  "$defs": {
+    "jsonPointer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(/([^~/]|~0|~1)*)+$"
+    },
+    "delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["subjectFingerprint", "semanticFingerprint", "compatibilityFingerprint"],
+      "properties": {
+        "subjectFingerprint": {"enum": ["changed", "unchanged"]},
+        "semanticFingerprint": {"enum": ["changed", "unchanged"]},
+        "compatibilityFingerprint": {"enum": ["changed", "unchanged"]}
+      }
+    },
+    "operation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "pointer", "value"],
+          "properties": {
+            "kind": {"const": "add-member"},
+            "pointer": {"$ref": "#/$defs/jsonPointer"},
+            "value": {}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "pointer", "before", "value"],
+          "properties": {
+            "kind": {"const": "replace-value"},
+            "pointer": {"$ref": "#/$defs/jsonPointer"},
+            "before": {},
+            "value": {}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "firstPointer", "secondPointer", "firstBefore", "secondBefore"],
+          "properties": {
+            "kind": {"const": "swap-values"},
+            "firstPointer": {"$ref": "#/$defs/jsonPointer"},
+            "secondPointer": {"$ref": "#/$defs/jsonPointer"},
+            "firstBefore": {},
+            "secondBefore": {}
+          }
+        }
+      ]
+    },
+    "expected": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {"kind": {"const": "schema-invalid"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "fingerprintDelta", "storedFingerprints"],
+          "properties": {
+            "kind": {"const": "schema-valid"},
+            "fingerprintDelta": {"$ref": "#/$defs/delta"},
+            "storedFingerprints": {"enum": ["consistent", "inconsistent"]}
+          }
+        }
+      ]
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "operation", "expected"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "operation": {"$ref": "#/$defs/operation"},
+        "expected": {"$ref": "#/$defs/expected"}
+      }
+    }
+  }
+}

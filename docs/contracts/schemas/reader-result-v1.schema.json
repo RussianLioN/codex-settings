@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/reader-result-v1.schema.json",
+  "title": "reader-result-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "validationState", "artifactId"],
+  "properties": {
+    "summary": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "validationState": {
+      "type": "string",
+      "enum": ["not_applicable", "passed", "failed"]
+    },
+    "artifactId": {"type": "string", "const": ""}
+  }
+}

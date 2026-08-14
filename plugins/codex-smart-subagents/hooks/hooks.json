@@ -1,0 +1,53 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$PLUGIN_ROOT/bin/codex-smart-subagents-hook\" session-start",
+            "timeout": 10,
+            "statusMessage": "Проверка умного сеанса проекта"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$PLUGIN_ROOT/bin/codex-smart-subagents-hook\" user-prompt-submit",
+            "timeout": 5,
+            "statusMessage": "Подготовка умного маршрута"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$PLUGIN_ROOT/bin/codex-smart-subagents-hook\" stop",
+            "timeout": 5,
+            "statusMessage": "Проверка состояния умного маршрута"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$PLUGIN_ROOT/bin/codex-smart-subagents-hook\" session-end",
+            "timeout": 3,
+            "statusMessage": "Освобождение умного сеанса проекта"
+          }
+        ]
+      }
+    ]
+  }
+}

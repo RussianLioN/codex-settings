@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""Conservative wrapper for ordinary interactive Codex launches."""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+
+PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+SOURCE = PLUGIN_ROOT / "src"
+if str(SOURCE) not in sys.path:
+    sys.path.insert(0, str(SOURCE))
+
+from codex_smart_subagents.daemon import (  # noqa: E402
+    ControllerProcessConfig,
+    ensure_controller_running,
+)
+from codex_smart_subagents.activation_gateway_v2 import (  # noqa: E402
+    ActivationResolver,
+    GatewayDecision,
+    GatewayLayout,
+    GatewayState,
+    ManagedLaunchUnavailable,
+    _build_source_reconciliation_request_v1,
+    _run_source_reconciliation_process_v1,
+    _verify_source_reconciliation_acceptance_v1,
+    run_permanent_gateway,
+    v2_gateway_state_present,
+)
+from codex_smart_subagents.controller_supervisor_v2 import (  # noqa: E402
+    ControllerSupervisorV2,
+)
+from codex_smart_subagents.launcher import (  # noqa: E402
+    classify_managed_invocation,
+    clean_ordinary_environment,
+    is_native_ultra_invocation,
+    run_launcher,
+)
+from codex_smart_subagents.source_reconciliation_v1 import (  # noqa: E402
+    SourceReconciliationContinuationProhibitedV1,
+    SourceReconciliationResultV1,
+    reconcile_source_drift_v1,
+)
+
+
+class _PreparedDecisionResolver:
+    """Возвращает уже проверенное решение без нового окна состояния."""
+
+    def __init__(self, decision: GatewayDecision) -> None:
+        self._decision = decision
+
+    def resolve(self) -> GatewayDecision:
+        return self._decision
+
+
+def _prepare_v2_decision(
+    *,
+    gateway_layout: GatewayLayout,
+    codex_home: Path,
+    environment: dict[str, str],
+) -> GatewayDecision:
+    resolver = ActivationResolver(
+        layout=gateway_layout,
+        wrapper=Path(__file__),
+    )
+    try:
+        persisted = resolver.resolve_persisted_activation()
+        binding = persisted.runtime_binding
+        if binding is None or not isinstance(binding.state_home, Path):
+            raise TypeError("persisted activation has no state home")
+        prepared = ControllerSupervisorV2(
+            resolver=resolver,
+            manifest_path=gateway_layout.manifest_path,
+            state_home=binding.state_home,
+            codex_home=codex_home,
+            plugin_root=PLUGIN_ROOT,
+            source_environment=environment,
+        ).ensure()
+        decision = prepared.gateway_decision
+        if not isinstance(decision, GatewayDecision):
+            raise TypeError("supervisor returned another decision type")
+        return decision
+    except Exception:
+        # Сбой частного канала всегда закрывает умный путь, но сохраняет
+        # независимо доказанный обычный исполняемый файл.
+        decision = resolver.resolve()
+        if decision.state is GatewayState.ORDINARY:
+            return decision
+        return GatewayDecision(
+            state=GatewayState.ORDINARY,
+            reason_code="CONTROLLER_SUPERVISOR_FAILED",
+            executable=decision.executable,
+        )
+
+
+def _reconcile_source_drift(
+    *,
+    decision: GatewayDecision,
+    gateway_layout: GatewayLayout,
+    environment: dict[str, str],
+) -> tuple[SourceReconciliationResultV1, Path]:
+    """Согласовать один изменившийся Codex из активной капсулы."""
+
+    request, stable_wrapper = _build_source_reconciliation_request_v1(
+        decision=decision,
+        gateway_layout=gateway_layout,
+        python_executable=Path(sys.executable).resolve(strict=True),
+    )
+    process_environment = clean_ordinary_environment(environment)
+    process_environment["PYTHONPATH"] = ""
+    process_environment["PYTHONNOUSERSITE"] = "1"
+    process_environment["NO_COLOR"] = "1"
+
+    def verify_accepted():
+        return _verify_source_reconciliation_acceptance_v1(
+            gateway_layout=gateway_layout,
+            wrapper=Path(__file__).absolute(),
+        )
+
+    def run_process(argv, *, timeout_seconds, max_output_bytes):
+        return _run_source_reconciliation_process_v1(
+            argv,
+            timeout_seconds=timeout_seconds,
+            max_output_bytes=max_output_bytes,
+            environment=process_environment,
+        )
+
+    result = reconcile_source_drift_v1(
+        request,
+        verify_accepted=verify_accepted,
+        run_process=run_process,
+    )
+    return result, stable_wrapper
+
+
+def main() -> int:
+    environment = dict(os.environ)
+    environment.setdefault("CODEX_HOME", str(Path.home() / ".codex"))
+    codex_home = Path(environment["CODEX_HOME"]).expanduser().absolute()
+    gateway_layout = GatewayLayout.for_codex_home(codex_home)
+    arguments = sys.argv[1:]
+    if is_native_ultra_invocation(arguments):
+        return run_permanent_gateway(
+            arguments,
+            resolver=None,
+            wrapper=Path(__file__),
+            environment=environment,
+            managed_required=False,
+        )
+    invocation = classify_managed_invocation(arguments)
+    # Устаревший пользовательский маркер не может сделать обычный
+    # интерактивный запуск строгим. Строгий режим остаётся только у
+    # внутренних вызовов run_permanent_gateway.
+    managed_required = False
+    try:
+        if v2_gateway_state_present(gateway_layout):
+            if not invocation.adaptive:
+                resolver = ActivationResolver(
+                    layout=gateway_layout,
+                    wrapper=Path(__file__),
+                )
+                return run_permanent_gateway(
+                    arguments,
+                    resolver=resolver,
+                    wrapper=Path(__file__),
+                    environment=environment,
+                    managed_required=False,
+                )
+            try:
+                decision = _prepare_v2_decision(
+                    gateway_layout=gateway_layout,
+                    codex_home=codex_home,
+                    environment=environment,
+                )
+            except Exception:
+                return run_permanent_gateway(
+                    arguments,
+                    resolver=None,
+                    wrapper=Path(__file__),
+                    environment=environment,
+                    managed_required=False,
+                )
+            if decision.source_drift is not None:
+                if environment.get("CODEX_SMART_RECONCILED_V1") != "1":
+                    try:
+                        result, stable_wrapper = _reconcile_source_drift(
+                            decision=decision,
+                            gateway_layout=gateway_layout,
+                            environment=environment,
+                        )
+                    except SourceReconciliationContinuationProhibitedV1:
+                        print(
+                            "codex-smart: SOURCE_UPDATE_CLEANUP_REQUIRED; "
+                            "используется последний проверенный снимок",
+                            file=sys.stderr,
+                        )
+                    except Exception:
+                        print(
+                            "codex-smart: SOURCE_UPDATE_RETRY_AFTER; "
+                            "используется последний проверенный снимок",
+                            file=sys.stderr,
+                        )
+                    else:
+                        if result.restart:
+                            restarted = clean_ordinary_environment(environment)
+                            restarted["CODEX_SMART_RECONCILED_V1"] = "1"
+                            os.execve(
+                                str(stable_wrapper),
+                                [str(stable_wrapper), *arguments],
+                                restarted,
+                            )
+                            raise AssertionError("execve unexpectedly returned")
+                        print(
+                            f"codex-smart: SOURCE_UPDATE_{result.outcome}; "
+                            "используется последний проверенный снимок",
+                            file=sys.stderr,
+                        )
+                else:
+                    print(
+                        "codex-smart: SOURCE_UPDATE_RESTART_GUARD; "
+                        "используется последний проверенный снимок",
+                        file=sys.stderr,
+                    )
+            return run_permanent_gateway(
+                arguments,
+                resolver=_PreparedDecisionResolver(decision),
+                wrapper=Path(__file__),
+                environment=environment,
+                managed_required=managed_required,
+            )
+    except ManagedLaunchUnavailable:
+        return run_permanent_gateway(
+            arguments,
+            resolver=None,
+            wrapper=Path(__file__),
+            environment=environment,
+            managed_required=False,
+        )
+    environment.setdefault(
+        "CODEX_ADAPTIVE_CATALOG",
+        str(PLUGIN_ROOT / "config" / "adaptive-subagents.toml"),
+    )
+    config = ControllerProcessConfig.from_environ(
+        environment,
+        plugin_root=PLUGIN_ROOT,
+    )
+
+    def ensure(adaptive_environment):
+        ensure_controller_running(
+            config,
+            shell_session_id=adaptive_environment["CODEX_ADAPTIVE_SESSION_ID"],
+            environ=adaptive_environment,
+        )
+
+    return run_launcher(
+        arguments,
+        real_binary=config.real_codex,
+        wrapper=Path(__file__),
+        environment=environment,
+        ensure_controller=ensure,
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

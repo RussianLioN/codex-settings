@@ -1,0 +1,248 @@
+{
+  "schemaVersion": 2,
+  "contractVersion": "codex-protocol-vector-suite-v2",
+  "protocol": "smart-turn-protocol-v2",
+  "positiveCases": [
+    {
+      "name": "issue-turn-binding-request", "method": "issue_turn_binding", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0",
+        "requestId": "strq2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "turnBinding": null, "idempotencyKey": "idem2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "requestDeadlineAt": "2026-07-18T12:00:05Z", "method": "issue_turn_binding",
+        "params": {"requestContext": {"schemaVersion": 2, "shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "codexHome": "/Users/test/.codex", "repoRoot": "/Users/test/repo", "baseSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "worktreeFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "activationFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "compatibilityFingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "issuedControlEpoch": 13}, "ttlSeconds": 120},
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "extensions": {}
+      }
+    },
+    {
+      "name": "issue-turn-binding-response", "method": "issue_turn_binding", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "method": "issue_turn_binding", "responseKind": "SUCCESS",
+        "requestFingerprint": "1111111111111111111111111111111111111111111111111111111111111111",
+        "payload": {"status": "ISSUED", "turnBinding": {"bindingId": "tb2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "contextFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "issuedControlEpoch": 13, "issuedAt": "2026-07-18T12:00:00Z", "expiresAt": "2026-07-18T12:02:00Z", "state": "ACTIVE"},
+          "effect": {"operation": "TRANSITION", "transactionMode": "BEGIN_IMMEDIATE", "transitions": [{"table": "turn_bindings", "entityId": "tb2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "beforeState": null, "afterState": "ACTIVE"}], "completedAt": "2026-07-18T12:00:00Z", "result": {"resultKind": "TURN_BINDING", "resultId": "tb2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resultFingerprint": "1212121212121212121212121212121212121212121212121212121212121212"}}},
+        "responseFingerprint": "2222222222222222222222222222222222222222222222222222222222222222", "extensions": {}
+      }
+    },
+    {
+      "name": "smart-plan-request", "method": "smart_plan", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "turnBinding": {"bindingId": "tb2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "contextFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "issuedControlEpoch": 13, "issuedAt": "2026-07-18T12:00:00Z", "expiresAt": "2026-07-18T12:02:00Z", "state": "ACTIVE"},
+        "idempotencyKey": "idem2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "requestDeadlineAt": "2026-07-18T12:00:05Z", "method": "smart_plan",
+        "params": {"nodes": [{"clientNodeId": "reader_a", "dependencyIds": [], "routingInput": {
+          "taskFacts": {"taskText": "Проверить два независимых файла.", "evidence": [{"evidenceRefId": "request", "kind": "user-request", "statement": "Нужна проверка двух файлов.", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}], "workShape": {"scopeUnits": {"value": 2, "evidenceRefIds": ["request"]}, "workUnits": {"value": 2, "evidenceRefIds": ["request"]}, "boundaries": {"value": 1, "evidenceRefIds": ["request"]}, "workstreams": {"value": 2, "evidenceRefIds": ["request"]}}, "factorClaims": {"q": {}, "v": {}, "o": {}}, "delegation": {"objectivelyVerifiable": {"value": true, "evidenceRefIds": ["request"]}, "independentWorkUnits": {"value": 2, "evidenceRefIds": ["request"]}}, "hardFloorReasons": [], "hardBanReasons": []},
+          "contextBundle": {"schemaVersion": 1, "contractVersion": "codex-context-bundle-v1", "bundleId": "bundle-one", "maxBytes": 64, "totalBytes": 4, "entries": [{"contextRefId": "request", "kind": "task-request", "required": true, "sourceEvidenceRefs": [{"evidenceRefId": "request", "evidenceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}], "sha256": "0ebb429fa86d481c2630fac53db1c91cffed5d4d41d1021c179444eb67e7ee0b", "byteLength": 4, "content": "task"}]}, "roleTemplateId": "researcher-v1"}}]},
+        "requestFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "extensions": {}
+      }
+    },
+    {
+      "name": "smart-plan-response", "method": "smart_plan", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "method": "smart_plan", "responseKind": "SUCCESS", "requestFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+        "payload": {"status": "PLANNED", "routeId": "route2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "disposition": "DELEGATE", "nodeDecisions": [{"clientNodeId": "reader_a", "nodeId": "node2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "dependencyNodeIds": [], "disposition": "DELEGATE", "selectedPair": {"model": "gpt-5.6-luna", "reasoningEffort": "medium"}, "score": 2, "factors": {"q": 1, "p": 1, "v": 0, "o": 0}}], "clarification": null, "planFingerprint": "4444444444444444444444444444444444444444444444444444444444444444",
+          "effect": {"operation": "TRANSITION", "transactionMode": "BEGIN_IMMEDIATE", "transitions": [{"table": "turn_bindings", "entityId": "tb2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "beforeState": "ACTIVE", "afterState": "CONSUMED"}, {"table": "routes", "entityId": "route2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "beforeState": null, "afterState": "PLANNED"}], "completedAt": "2026-07-18T12:00:01Z", "result": {"resultKind": "ROUTE_PLAN", "resultId": "route2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resultFingerprint": "4444444444444444444444444444444444444444444444444444444444444444"}}},
+        "responseFingerprint": "5555555555555555555555555555555555555555555555555555555555555555", "extensions": {}
+      }
+    },
+    {
+      "name": "route-start-request", "method": "route_start", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_cccccccccccccccccccccccccccccccc",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "turnBinding": null, "idempotencyKey": "idem2_cccccccccccccccccccccccccccccccc", "requestDeadlineAt": "2026-07-18T12:00:07Z", "method": "route_start",
+        "params": {"routeId": "route2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "nodeId": "node2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "activationGate": {"manifestSemanticFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "activationReceiptFingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "journalAbsenceProof": {"schemaId": "absence-proof-v2", "schemaSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "value": {"proofId": "ap2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "installationId": "ins2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "operationId": "op2_cccccccccccccccccccccccccccccccc", "entries": [{"path": "/tmp/codex/install.transaction.json", "basename": "install.transaction.json", "parentDevice": 1, "parentInode": 2, "absent": true}], "directorySyncCompleted": true, "proofFingerprint": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}, "valueFingerprint": "1111111111111111111111111111111111111111111111111111111111111111"},
+            "gateFingerprint": "2222222222222222222222222222222222222222222222222222222222222222"}},
+        "requestFingerprint": "6666666666666666666666666666666666666666666666666666666666666666", "extensions": {}
+      }
+    },
+    {
+      "name": "route-start-response", "method": "route_start", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_cccccccccccccccccccccccccccccccc",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "method": "route_start", "responseKind": "SUCCESS", "requestFingerprint": "6666666666666666666666666666666666666666666666666666666666666666",
+        "payload": {"status": "ATTESTING", "routeId": "route2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "nodeId": "node2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "startRequestId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "evidenceJob": {"evidenceJobId": "aej2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state": "QUEUED", "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "queuePosition": 1, "deadlineAt": "2026-07-18T12:03:02Z", "stage": null}, "admissionId": null,
+          "effect": {"operation": "TRANSITION", "transactionMode": "BEGIN_IMMEDIATE", "transitions": [{"table": "start_requests", "entityId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "beforeState": null, "afterState": "ATTESTING"}, {"table": "account_evidence_jobs", "entityId": "aej2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "beforeState": null, "afterState": "QUEUED"}], "completedAt": "2026-07-18T12:00:02Z", "result": {"resultKind": "START_REQUEST", "resultId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resultFingerprint": "7777777777777777777777777777777777777777777777777777777777777777"}}},
+        "responseFingerprint": "8888888888888888888888888888888888888888888888888888888888888888", "extensions": {}
+      }
+    },
+    {
+      "name": "smart-wait-request", "method": "smart_wait", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_dddddddddddddddddddddddddddddddd",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "turnBinding": null, "idempotencyKey": null, "requestDeadlineAt": "2026-07-18T12:00:20Z", "method": "smart_wait",
+        "params": {"startRequestId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cursor": null, "pageSize": 20, "waitDeadlineAt": "2026-07-18T12:00:15Z"},
+        "requestFingerprint": "9999999999999999999999999999999999999999999999999999999999999999", "extensions": {}
+      }
+    },
+    {
+      "name": "smart-wait-response", "method": "smart_wait", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_dddddddddddddddddddddddddddddddd",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "method": "smart_wait", "responseKind": "SUCCESS", "requestFingerprint": "9999999999999999999999999999999999999999999999999999999999999999",
+        "payload": {"startRequestId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state": "ATTESTING", "evidenceJobState": "RUNNING", "admissionId": null, "terminal": false, "terminalResult": null,
+          "page": {"cursor": null, "nextCursor": "cur2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "items": [{"sequence": 1, "eventAt": "2026-07-18T12:00:03Z", "kind": "EVIDENCE_RUNNING", "startState": "ATTESTING", "evidenceJobId": "aej2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "admissionId": null, "attestation": null, "problem": null}]},
+          "effect": {"operation": "READ", "transactionMode": "READ_ONLY", "transitions": [], "completedAt": "2026-07-18T12:00:04Z", "result": {"resultKind": "WAIT_PAGE", "resultId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resultFingerprint": "abababababababababababababababababababababababababababababababab"}}},
+        "responseFingerprint": "acacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacac", "extensions": {}
+      }
+    },
+    {
+      "name": "smart-wait-terminal-response", "method": "smart_wait", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_12121212121212121212121212121212",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "method": "smart_wait", "responseKind": "SUCCESS", "requestFingerprint": "1313131313131313131313131313131313131313131313131313131313131313",
+        "payload": {"startRequestId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state": "SUCCEEDED", "evidenceJobState": "SUCCEEDED", "admissionId": "adm2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "terminal": true,
+          "terminalResult": {"attemptId": "att2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state": "SUCCEEDED", "resultFingerprint": "2020202020202020202020202020202020202020202020202020202020202020", "resultBytes": 95, "inlineResult": {"summary": "Дочерняя задача завершена.", "validationState": "passed", "artifactId": ""}, "resultTruncated": false, "errorCode": null},
+          "page": {"cursor": "cur2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "nextCursor": null, "items": [{"sequence": 2, "eventAt": "2026-07-18T12:00:10Z", "kind": "CHILD_SUCCEEDED", "startState": "SUCCEEDED", "evidenceJobId": "aej2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "admissionId": "adm2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "attestation": null, "problem": null}]},
+          "effect": {"operation": "READ", "transactionMode": "READ_ONLY", "transitions": [], "completedAt": "2026-07-18T12:00:10Z", "result": {"resultKind": "WAIT_PAGE", "resultId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resultFingerprint": "1414141414141414141414141414141414141414141414141414141414141414"}}},
+        "responseFingerprint": "1515151515151515151515151515151515151515151515151515151515151515", "extensions": {}
+      }
+    },
+    {
+      "name": "smart-wait-child-failed-before-start-response", "method": "smart_wait", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_16161616161616161616161616161616",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "method": "smart_wait", "responseKind": "SUCCESS", "requestFingerprint": "1717171717171717171717171717171717171717171717171717171717171717",
+        "payload": {"startRequestId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state": "FAILED", "evidenceJobState": "SUCCEEDED", "admissionId": "adm2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "terminal": true, "terminalResult": null,
+          "page": {"cursor": "cur2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "nextCursor": null, "items": [{"sequence": 3, "eventAt": "2026-07-18T12:00:11Z", "kind": "CHILD_FAILED_BEFORE_START", "startState": "FAILED", "evidenceJobId": "aej2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "admissionId": "adm2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "attestation": null, "problem": {"category": "INTERNAL", "code": "INTERNAL_ERROR", "message": "Дочерний процесс завершён до передачи задания.", "retryable": false}}]},
+          "effect": {"operation": "READ", "transactionMode": "READ_ONLY", "transitions": [], "completedAt": "2026-07-18T12:00:11Z", "result": {"resultKind": "WAIT_PAGE", "resultId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resultFingerprint": "1818181818181818181818181818181818181818181818181818181818181818"}}},
+        "responseFingerprint": "1919191919191919191919191919191919191919191919191919191919191919", "extensions": {}
+      }
+    },
+    {
+      "name": "smart-cancel-request", "method": "smart_cancel", "direction": "request",
+      "message": {
+        "messageType": "request", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "turnBinding": null, "idempotencyKey": "idem2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "requestDeadlineAt": "2026-07-18T12:00:10Z", "method": "smart_cancel",
+        "params": {"startRequestId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "reasonCode": "USER_REQUESTED"},
+        "requestFingerprint": "adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad", "extensions": {}
+      }
+    },
+    {
+      "name": "smart-cancel-response", "method": "smart_cancel", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "method": "smart_cancel", "responseKind": "SUCCESS", "requestFingerprint": "adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad",
+        "payload": {"status": "CANCEL_REQUESTED", "startRequestId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state": "ATTESTING", "terminal": false, "idempotencyKey": "idem2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "idempotencyStatus": "COMMITTED",
+          "effect": {"operation": "TRANSITION", "transactionMode": "BEGIN_IMMEDIATE", "transitions": [{"table": "account_evidence_jobs", "entityId": "aej2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "beforeState": "RUNNING", "afterState": "CANCEL_REQUESTED"}], "completedAt": "2026-07-18T12:00:05Z", "result": {"resultKind": "CANCELLATION", "resultId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resultFingerprint": "aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae"}}},
+        "responseFingerprint": "afafafafafafafafafafafafafafafafafafafafafafafafafafafafafafafaf", "extensions": {}
+      }
+    },
+    {
+      "name": "smart-cancel-replay-response", "method": "smart_cancel", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_ffffffffffffffffffffffffffffffff",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "method": "smart_cancel", "responseKind": "SUCCESS", "requestFingerprint": "adadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadad",
+        "payload": {"status": "CANCEL_REQUESTED", "startRequestId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state": "ATTESTING", "terminal": false, "idempotencyKey": "idem2_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "idempotencyStatus": "REPLAYED",
+          "effect": {"operation": "READ", "transactionMode": "READ_ONLY", "transitions": [], "completedAt": "2026-07-18T12:00:06Z", "result": {"resultKind": "CANCELLATION", "resultId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resultFingerprint": "aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae"}}},
+        "responseFingerprint": "b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6", "extensions": {}
+      }
+    },
+    {
+      "name": "ordinary-response", "method": "smart_plan", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "method": "smart_plan", "responseKind": "ORDINARY", "requestFingerprint": "3333333333333333333333333333333333333333333333333333333333333333",
+        "payload": {"status": "ORDINARY", "reasonCode": "DIRECT_SELECTED", "ordinaryCommand": "codex", "preserveUserRequest": true, "message": "Выполнить запрос в обычном Codex без дочернего запуска.", "effect": {"operation": "TRANSITION", "transactionMode": "BEGIN_IMMEDIATE", "transitions": [{"table": "routes", "entityId": "route2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "beforeState": null, "afterState": "DIRECT"}], "completedAt": "2026-07-18T12:00:01Z", "result": {"resultKind": "ORDINARY_DECISION", "resultId": "route2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resultFingerprint": "b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3"}}},
+        "responseFingerprint": "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0", "extensions": {}
+      }
+    },
+    {
+      "name": "stale-response", "method": "smart_wait", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_dddddddddddddddddddddddddddddddd",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "method": "smart_wait", "responseKind": "STALE", "requestFingerprint": "9999999999999999999999999999999999999999999999999999999999999999",
+        "payload": {"status": "STALE", "problem": {"category": "STALE", "code": "ACCOUNT_CONTEXT_CHANGED", "message": "Учётная среда изменилась после планирования.", "retryable": false}, "effect": {"operation": "TRANSITION", "transactionMode": "BEGIN_IMMEDIATE", "transitions": [{"table": "routes", "entityId": "route2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "beforeState": "PLANNED", "afterState": "STALE"}], "completedAt": "2026-07-18T12:00:06Z", "result": {"resultKind": "PROBLEM", "resultId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resultFingerprint": "b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4"}}},
+        "responseFingerprint": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1", "extensions": {}
+      }
+    },
+    {
+      "name": "unavailable-response", "method": "route_start", "direction": "response",
+      "message": {
+        "messageType": "response", "protocolVersion": 2, "release": "0.2.0", "requestId": "strq2_cccccccccccccccccccccccccccccccc",
+        "owner": {"shellSessionId": "shell-1", "sessionId": "session-1", "turnId": "turn-1", "ownerFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        "method": "route_start", "responseKind": "UNAVAILABLE", "requestFingerprint": "6666666666666666666666666666666666666666666666666666666666666666",
+        "payload": {"status": "UNAVAILABLE", "problem": {"category": "UNAVAILABLE", "code": "ACCOUNT_EVIDENCE_QUEUE_FULL", "message": "Очередь заданий доказательства заполнена.", "retryable": true}, "effect": {"operation": "READ", "transactionMode": "READ_ONLY", "transitions": [], "completedAt": "2026-07-18T12:00:02Z", "result": {"resultKind": "PROBLEM", "resultId": "route2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "resultFingerprint": "b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5"}}},
+        "responseFingerprint": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2", "extensions": {}
+      }
+    }
+  ],
+  "negativeCases": [
+    {"name": "issue-owner-context-mismatch-rejected", "method": "issue_turn_binding", "direction": "request", "baseCase": "issue-turn-binding-request", "mutation": {"operation": "replace", "pointer": "/params/requestContext/turnId", "value": "other-turn"}, "expectedViolation": "OWNERSHIP_REJECT"},
+    {"name": "smart-plan-owner-binding-mismatch-rejected", "method": "smart_plan", "direction": "request", "baseCase": "smart-plan-request", "mutation": {"operation": "replace", "pointer": "/owner/sessionId", "value": "other-session"}, "expectedViolation": "OWNERSHIP_REJECT"},
+    {"name": "smart-plan-expired-binding-rejected", "method": "smart_plan", "direction": "request", "baseCase": "smart-plan-request", "mutation": {"operation": "replace", "pointer": "/turnBinding/state", "value": "EXPIRED"}, "expectedViolation": "STATE_ORDER_REJECT"},
+    {"name": "smart-plan-negative-factor-rejected", "method": "smart_plan", "direction": "response", "baseCase": "smart-plan-response", "mutation": {"operation": "replace", "pointer": "/payload/nodeDecisions/0/factors/o", "value": -1}, "expectedViolation": "SCHEMA_REJECT"},
+    {"name": "smart-plan-negative-score-rejected", "method": "smart_plan", "direction": "response", "baseCase": "smart-plan-response", "mutation": {"operation": "replace", "pointer": "/payload/nodeDecisions/0/score", "value": -1}, "expectedViolation": "SCHEMA_REJECT"},
+    {"name": "smart-plan-score-factor-sum-mismatch-rejected", "method": "smart_plan", "direction": "response", "baseCase": "smart-plan-response", "mutation": {"operation": "replace", "pointer": "/payload/nodeDecisions/0/score", "value": 1}, "expectedViolation": "STATE_ORDER_REJECT"},
+    {"name": "route-start-admission-injection-rejected", "method": "route_start", "direction": "response", "baseCase": "route-start-response", "mutation": {"operation": "replace", "pointer": "/payload/admissionId", "value": "adm2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "expectedViolation": "STATE_ORDER_REJECT"},
+    {"name": "smart-wait-page-over-limit-rejected", "method": "smart_wait", "direction": "request", "baseCase": "smart-wait-request", "mutation": {"operation": "replace", "pointer": "/params/pageSize", "value": 101}, "expectedViolation": "CURSOR_REJECT"},
+    {"name": "smart-wait-deadline-after-request-rejected", "method": "smart_wait", "direction": "request", "baseCase": "smart-wait-request", "mutation": {"operation": "replace", "pointer": "/params/waitDeadlineAt", "value": "2026-07-18T12:00:21Z"}, "expectedViolation": "DEADLINE_REJECT"},
+    {"name": "child-failed-before-start-with-started-state-rejected", "method": "smart_wait", "direction": "response", "baseCase": "smart-wait-child-failed-before-start-response", "mutation": {"operation": "replace", "pointer": "/payload/page/items/0/startState", "value": "STARTED"}, "expectedViolation": "SCHEMA_REJECT"},
+    {"name": "smart-cancel-without-idempotency-rejected", "method": "smart_cancel", "direction": "request", "baseCase": "smart-cancel-request", "mutation": {"operation": "replace", "pointer": "/idempotencyKey", "value": null}, "expectedViolation": "IDEMPOTENCY_REJECT"}
+  ],
+  "attestationPositiveCases": [
+    {
+      "name": "matching-child-attestation",
+      "attestation": {
+        "schemaVersion": 2, "contractVersion": "codex-child-attestation-v2", "attestationId": "ca2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "routeId": "route2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "nodeId": "node2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "startRequestId": "sr2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "evidenceJobId": "aej2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "admissionId": "adm2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "attemptId": "att2_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "requested": {"pair": {"model": "gpt-5.6-luna", "reasoningEffort": "medium"}, "permissionProfileId": "reader-v1", "argvFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "snapshotIdentityFingerprint": "2222222222222222222222222222222222222222222222222222222222222222", "compatibilityFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "accountContextFingerprint": "4444444444444444444444444444444444444444444444444444444444444444"},
+        "observed": {"pair": {"model": "gpt-5.6-luna", "reasoningEffort": "medium"}, "permissionProfileId": "reader-v1", "argvFingerprint": "1111111111111111111111111111111111111111111111111111111111111111", "snapshotIdentityFingerprint": "2222222222222222222222222222222222222222222222222222222222222222", "compatibilityFingerprint": "3333333333333333333333333333333333333333333333333333333333333333", "accountContextFingerprint": "4444444444444444444444444444444444444444444444444444444444444444", "pid": 3001, "processStartMarker": "pid-3001-start", "codexBinarySha256": "5555555555555555555555555555555555555555555555555555555555555555"},
+        "disposition": "MATCH", "problem": null, "observedAt": "2026-07-18T12:00:10Z", "attestationFingerprint": "6666666666666666666666666666666666666666666666666666666666666666", "extensions": {}
+      }
+    }
+  ],
+  "attestationNegativeCases": [
+    {"name": "matching-attestation-with-different-model-rejected", "baseCase": "matching-child-attestation", "mutation": {"operation": "replace", "pointer": "/requested/pair/model", "value": "gpt-5.6-terra"}, "expectedViolation": "ATTESTATION_REJECT"},
+    {"name": "unavailable-attestation-with-observed-process-rejected", "baseCase": "matching-child-attestation", "mutation": {"operation": "replace", "pointer": "/disposition", "value": "UNAVAILABLE"}, "expectedViolation": "ATTESTATION_REJECT"}
+  ],
+  "errorCodeCategoryCases": [
+    {"code": "TURN_BINDING_EXPIRED", "category": "STALE"},
+    {"code": "TURN_BINDING_OWNERSHIP_MISMATCH", "category": "INVALID"},
+    {"code": "ROUTE_STALE", "category": "STALE"},
+    {"code": "ACCOUNT_CONTEXT_CHANGED", "category": "STALE"},
+    {"code": "CHILD_ATTESTATION_STALE", "category": "STALE"},
+    {"code": "ADAPTIVE_ACTIVATION_UNCOMMITTED", "category": "UNAVAILABLE"},
+    {"code": "ACCOUNT_EVIDENCE_UNAVAILABLE", "category": "UNAVAILABLE"},
+    {"code": "ACCOUNT_EVIDENCE_QUEUE_FULL", "category": "UNAVAILABLE"},
+    {"code": "ROUTING_PAIR_UNAVAILABLE", "category": "UNAVAILABLE"},
+    {"code": "CONTROLLER_UNAVAILABLE", "category": "UNAVAILABLE"},
+    {"code": "REQUEST_DEADLINE_EXCEEDED", "category": "UNAVAILABLE"},
+    {"code": "INVALID_REQUEST", "category": "INVALID"},
+    {"code": "IDEMPOTENCY_CONFLICT", "category": "CONFLICT"},
+    {"code": "CURSOR_INVALID", "category": "INVALID"},
+    {"code": "ROUTE_OWNERSHIP_MISMATCH", "category": "INVALID"},
+    {"code": "INTERNAL_ERROR", "category": "INTERNAL"}
+  ],
+  "semanticChecks": [
+    "public-method-set-exact",
+    "owner-binding-context-identical",
+    "request-deadlines-bounded",
+    "wait-cursor-and-page-closed",
+    "cancel-idempotent",
+    "start-request-before-admission",
+    "sqlite-effect-linked-to-result",
+    "ordinary-stale-unavailable-structured",
+    "requested-observed-attestation-identical-on-match",
+    "every-method-has-request-response-negative-vector"
+  ]
+}

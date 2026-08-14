@@ -28,14 +28,37 @@ RUNTIME_PLAN = HOME / "coding/projects/codex-settings/docs/plans/codex-autonomou
 FD_DOCTOR = REPO / "scripts/codex_fd_doctor.sh"
 HIGHFD_TEMPLATE = REPO / "scripts/codex-highfd"
 HOOK_POLICY = REPO / "scripts/autonomous_policy.py"
+DOCS_NAVIGATION_VALIDATOR = REPO / "scripts/validate_docs_navigation.py"
+DOCS_NAVIGATION_CONTRACTS = REPO / "scripts/docs_navigation_contracts.py"
 HIGHFD_WRAPPER = HOME / ".local/bin/codex-highfd"
 INSTALLED_FD_DOCTOR = HOME / ".local/libexec/codex_fd_doctor.sh"
+ENTRYPOINT_JOURNAL = (
+    CODEX_HOME
+    / "install-manifests"
+    / "codex-entrypoint-v1.journal.json"
+)
 CHATGPT_RESOURCES = Path("/Applications/ChatGPT.app/Contents/Resources")
 DEFAULT_WAVE_SIZE = 6
 MAX_BASE_THREADS = 20
 PUBLIC_THREAD_CAP_KEY = "max_concurrent_threads_per_session"
 LEGACY_THREAD_CAP_KEY = "max_threads"
 HIGH_FD_LIMIT = 4096
+ENTRYPOINT_ALIASES_BYTES = (
+    b"alias codex='CODEX_SMART_ENABLED=1 "
+    b"$HOME/.local/bin/codex-highfd'\n"
+    b"alias codex-native='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd'\n"
+    b"alias codexs='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --profile standard'\n"
+    b"alias codexro='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --profile safe-readonly'\n"
+    b"alias codexwide='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --profile wide-readers'\n"
+    b"alias codexfa='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --profile full-access'\n"
+    b"alias codexfd='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --fd-doctor'\n"
+)
 EXPECTED_BASE_AGENT_LIMITS = {
     PUBLIC_THREAD_CAP_KEY: MAX_BASE_THREADS,
     "max_depth": 1,
@@ -114,6 +137,7 @@ def main() -> int:
         check_consilium_runtime,
         check_aliases,
         check_rollback,
+        check_docs_navigation,
         check_repo_scripts,
     ]
     failures: list[str] = []
@@ -675,7 +699,11 @@ def check_fd_guardrails() -> None:
     for path in (FD_DOCTOR, HIGHFD_TEMPLATE, HIGHFD_WRAPPER, INSTALLED_FD_DOCTOR):
         assert path.exists(), f"missing FD guardrail: {path}"
         assert os.access(path, os.X_OK), f"FD guardrail is not executable: {path}"
-    assert HIGHFD_TEMPLATE.read_bytes() == HIGHFD_WRAPPER.read_bytes(), "installed codex-highfd differs from tracked template"
+    highfd_failures = tracked_highfd_hash_failures(
+        installed_path=HIGHFD_WRAPPER,
+        tracked_path=HIGHFD_TEMPLATE,
+    )
+    assert not highfd_failures, "; ".join(highfd_failures)
     assert FD_DOCTOR.read_bytes() == INSTALLED_FD_DOCTOR.read_bytes(), "installed FD doctor differs from tracked source"
 
     ok = run_fd_doctor(DEFAULT_WAVE_SIZE, soft_limit=HIGH_FD_LIMIT, fd_count=32)
@@ -714,12 +742,67 @@ def check_consilium_runtime() -> None:
 
 
 def check_aliases() -> None:
-    aliases = (CODEX_HOME / "codex-autonomous-aliases.zsh").read_text(encoding="utf-8")
+    alias_path = CODEX_HOME / "codex-autonomous-aliases.zsh"
+    failures = exact_entrypoint_alias_failures(alias_path)
+    failures.extend(reconciler_journal_failures(ENTRYPOINT_JOURNAL))
+    assert not failures, "; ".join(failures)
     zshrc = (HOME / ".zshrc").read_text(encoding="utf-8")
-    for alias in ("codex", "codexs", "codexro", "codexwide", "codexfa", "codexfd"):
-        assert f"alias {alias}=" in aliases, f"missing alias: {alias}"
-    assert "wide-readers-16" not in aliases, "wide-readers-16 must not have a shell alias"
     assert "codex-autonomous-aliases.zsh" in zshrc, "~/.zshrc does not source alias file"
+
+
+def exact_entrypoint_alias_failures(path: Path) -> list[str]:
+    if not path.is_file():
+        return [f"missing managed alias file: {path}"]
+    if path.read_bytes() != ENTRYPOINT_ALIASES_BYTES:
+        return [
+            f"{path} must contain the exact managed bytes for smart/native aliases"
+        ]
+    return []
+
+
+def tracked_highfd_hash_failures(
+    *,
+    installed_path: Path,
+    tracked_path: Path,
+) -> list[str]:
+    failures: list[str] = []
+    if not tracked_path.is_file():
+        failures.append(f"missing tracked codex-highfd: {tracked_path}")
+    if not installed_path.is_file():
+        failures.append(f"missing installed codex-highfd: {installed_path}")
+    if failures:
+        return failures
+    installed_digest = hashlib.sha256(installed_path.read_bytes()).hexdigest()
+    tracked_digest = hashlib.sha256(tracked_path.read_bytes()).hexdigest()
+    if installed_digest != tracked_digest:
+        failures.append(
+            f"{installed_path} does not match the current tracked codex-highfd hash"
+        )
+    return failures
+
+
+def reconciler_journal_failures(path: Path) -> list[str]:
+    if os.path.lexists(path):
+        return [f"pending reconciler journal must be absent: {path}"]
+    return []
+
+
+def entrypoint_contract_failures(
+    *,
+    aliases_path: Path,
+    installed_highfd_path: Path,
+    tracked_highfd_path: Path,
+    journal_path: Path,
+) -> list[str]:
+    failures = exact_entrypoint_alias_failures(aliases_path)
+    failures.extend(
+        tracked_highfd_hash_failures(
+            installed_path=installed_highfd_path,
+            tracked_path=tracked_highfd_path,
+        )
+    )
+    failures.extend(reconciler_journal_failures(journal_path))
+    return failures
 
 
 def check_rollback() -> None:
@@ -798,11 +881,42 @@ def check_runtime_rollback_apply(script: Path) -> None:
         assert consilium.read_text(encoding="utf-8") == "backup consilium skill\n"
 
 
+def check_docs_navigation() -> None:
+    module_name = "codex_docs_navigation_validator"
+    try:
+        spec = importlib.util.spec_from_file_location(
+            module_name,
+            DOCS_NAVIGATION_VALIDATOR,
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeError(
+                "could not create the documentation validator loader"
+            )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+        issues = module.validate_repository(REPO)
+    except Exception as exc:
+        raise AssertionError(
+            "documentation navigation validation failed: "
+            f"{exc}"
+        ) from exc
+    finally:
+        sys.modules.pop(module_name, None)
+    assert not issues, (
+        "documentation navigation validation failed:\n- "
+        + "\n- ".join(issue.render() for issue in issues)
+    )
+
+
 def check_repo_scripts() -> None:
     for path in (
         REPO / "scripts/codex_batch_queue.py",
         REPO / "scripts/codex_autonomous_rollback.py",
         HOOK_POLICY,
+        DOCS_NAVIGATION_CONTRACTS,
+        DOCS_NAVIGATION_VALIDATOR,
+        REPO / "scripts/reconcile_codex_entrypoint.py",
         REPO / "scripts/validate_autonomous_workflow.py",
     ):
         assert path.exists(), f"missing script: {path}"

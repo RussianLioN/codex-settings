@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/protocol-vector-suite-v2.schema.json",
+  "title": "protocol-vector-suite-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "protocol",
+    "positiveCases",
+    "negativeCases",
+    "attestationPositiveCases",
+    "attestationNegativeCases",
+    "errorCodeCategoryCases",
+    "semanticChecks"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "contractVersion": {"const": "codex-protocol-vector-suite-v2"},
+    "protocol": {"enum": ["controller-protocol-v2", "smart-turn-protocol-v2"]},
+    "positiveCases": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 64,
+      "items": {"$ref": "#/$defs/positiveCase"}
+    },
+    "negativeCases": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 64,
+      "items": {"$ref": "#/$defs/negativeCase"}
+    },
+    "attestationPositiveCases": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {"$ref": "#/$defs/attestationPositiveCase"}
+    },
+    "attestationNegativeCases": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {"$ref": "#/$defs/attestationNegativeCase"}
+    },
+    "errorCodeCategoryCases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/errorCodeCategoryCase"}
+    },
+    "semanticChecks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"protocol": {"const": "controller-protocol-v2"}},
+        "required": ["protocol"]
+      },
+      "then": {
+        "properties": {
+          "positiveCases": {
+            "minItems": 24,
+            "items": {
+              "$ref": "#/$defs/positiveCase",
+              "properties": {"message": {"$ref": "controller-protocol-v2.schema.json"}}
+            }
+          },
+          "attestationPositiveCases": {"maxItems": 0},
+          "attestationNegativeCases": {"maxItems": 0},
+          "errorCodeCategoryCases": {"minItems": 14, "maxItems": 14}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"protocol": {"const": "smart-turn-protocol-v2"}},
+        "required": ["protocol"]
+      },
+      "then": {
+        "properties": {
+          "positiveCases": {
+            "minItems": 13,
+            "items": {
+              "$ref": "#/$defs/positiveCase",
+              "properties": {"message": {"$ref": "smart-turn-protocol-v2.schema.json"}}
+            }
+          },
+          "attestationPositiveCases": {"minItems": 1},
+          "attestationNegativeCases": {"minItems": 2},
+          "errorCodeCategoryCases": {"minItems": 16, "maxItems": 16}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "positiveCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "method", "direction", "message"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
+        "method": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        "direction": {"enum": ["request", "response"]},
+        "message": {"type": "object"}
+      }
+    },
+    "negativeCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "method", "direction", "baseCase", "mutation", "expectedViolation"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
+        "method": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+        "direction": {"enum": ["request", "response"]},
+        "baseCase": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
+        "mutation": {"$ref": "#/$defs/mutation"},
+        "expectedViolation": {
+          "enum": [
+            "SCHEMA_REJECT",
+            "OWNERSHIP_REJECT",
+            "DEADLINE_REJECT",
+            "IDEMPOTENCY_REJECT",
+            "STATE_ORDER_REJECT",
+            "CURSOR_REJECT",
+            "ATTESTATION_REJECT"
+          ]
+        }
+      }
+    },
+    "mutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "pointer"],
+      "properties": {
+        "operation": {"enum": ["add", "replace", "remove"]},
+        "pointer": {"type": "string", "pattern": "^(/([^/~]|~0|~1)*)+$", "maxLength": 512},
+        "value": {}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"operation": {"enum": ["add", "replace"]}}, "required": ["operation"]},
+          "then": {"required": ["value"]}
+        },
+        {
+          "if": {"properties": {"operation": {"const": "remove"}}, "required": ["operation"]},
+          "then": {"not": {"required": ["value"]}}
+        }
+      ]
+    },
+    "attestationPositiveCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "attestation"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
+        "attestation": {"$ref": "child-attestation-v2.schema.json"}
+      }
+    },
+    "attestationNegativeCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "baseCase", "mutation", "expectedViolation"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
+        "baseCase": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,127}$"},
+        "mutation": {"$ref": "#/$defs/mutation"},
+        "expectedViolation": {"const": "ATTESTATION_REJECT"}
+      }
+    },
+    "errorCodeCategoryCase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "category"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,127}$"},
+        "category": {"enum": ["STALE", "UNAVAILABLE", "INVALID", "CONFLICT", "INTERNAL"]}
+      }
+    }
+  }
+}

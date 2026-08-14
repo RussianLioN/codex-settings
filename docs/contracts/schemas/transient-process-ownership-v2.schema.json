@@ -1,0 +1,262 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/transient-process-ownership-v2.schema.json",
+  "title": "Transient process ownership v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "recordKind",
+    "leaseId",
+    "processLabel",
+    "pid",
+    "processGroupId",
+    "sessionId",
+    "processStartMarker",
+    "context",
+    "state",
+    "cleanupObligation",
+    "recordFingerprint"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "recordKind": {"const": "transient-process-ownership-v2"},
+    "leaseId": {"$ref": "#/$defs/leaseId"},
+    "processLabel": {"$ref": "#/$defs/serviceName"},
+    "pid": {"$ref": "#/$defs/positiveInteger"},
+    "processGroupId": {"$ref": "#/$defs/positiveInteger"},
+    "sessionId": {"$ref": "#/$defs/positiveInteger"},
+    "processStartMarker": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^[^\\u0000]+$"
+    },
+    "context": {
+      "oneOf": [
+        {"$ref": "#/$defs/candidateContext"},
+        {"$ref": "#/$defs/installerContext"}
+      ]
+    },
+    "state": {"enum": ["OWNED", "CLEANUP_REQUIRED"]},
+    "cleanupObligation": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/cleanupObligation"}
+      ]
+    },
+    "recordFingerprint": {"$ref": "#/$defs/sha256"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"state": {"const": "OWNED"}}},
+      "then": {"properties": {"cleanupObligation": {"type": "null"}}},
+      "else": {
+        "properties": {
+          "cleanupObligation": {"$ref": "#/$defs/cleanupObligation"}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "positiveInteger": {"type": "integer", "minimum": 1},
+    "nullablePositiveInteger": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/positiveInteger"}
+      ]
+    },
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "leaseId": {
+      "type": "string",
+      "pattern": "^transient-[0-9a-f]{32}$"
+    },
+    "operationId": {
+      "type": "string",
+      "pattern": "^op2_[0-9a-f]{32}$"
+    },
+    "candidateId": {
+      "type": "string",
+      "pattern": "^cand2_[0-9a-f]{32}$"
+    },
+    "controllerStartId": {
+      "type": "string",
+      "pattern": "^cs2_[0-9a-f]{32}$"
+    },
+    "invocationId": {
+      "type": "string",
+      "pattern": "^inv2_[0-9a-f]{32}$"
+    },
+    "serviceName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "candidateContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "contextKind",
+        "operationId",
+        "candidateId",
+        "controllerStartId",
+        "actionFingerprint",
+        "dispatchReceiptFingerprint"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 2},
+        "contextKind": {"const": "candidate-dispatch-v2"},
+        "operationId": {"$ref": "#/$defs/operationId"},
+        "candidateId": {"$ref": "#/$defs/candidateId"},
+        "controllerStartId": {"$ref": "#/$defs/controllerStartId"},
+        "actionFingerprint": {"$ref": "#/$defs/sha256"},
+        "dispatchReceiptFingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "installerContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "contextKind",
+        "processLabel",
+        "operation",
+        "phase",
+        "invocationId"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 2},
+        "contextKind": {"const": "installer-transient-v2"},
+        "processLabel": {"$ref": "#/$defs/serviceName"},
+        "operation": {"$ref": "#/$defs/serviceName"},
+        "phase": {"$ref": "#/$defs/serviceName"},
+        "invocationId": {"$ref": "#/$defs/invocationId"}
+      }
+    },
+    "processIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pid", "processGroupId", "sessionId", "startMarker"],
+      "properties": {
+        "pid": {"$ref": "#/$defs/positiveInteger"},
+        "processGroupId": {"$ref": "#/$defs/positiveInteger"},
+        "sessionId": {"$ref": "#/$defs/positiveInteger"},
+        "startMarker": {"type": "string", "minLength": 1, "maxLength": 4096}
+      }
+    },
+    "deadlineProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "proofType",
+        "operation",
+        "phase",
+        "timeoutCode",
+        "deadlineKind",
+        "configuredTimeoutNanoseconds",
+        "elapsedMonotonicNanoseconds",
+        "deadlineExceeded"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 2},
+        "proofType": {"const": "operation-deadline-v2"},
+        "operation": {"type": "string", "minLength": 1},
+        "phase": {"type": "string", "minLength": 1},
+        "timeoutCode": {"type": "string", "minLength": 1},
+        "deadlineKind": {"enum": ["operation", "phase"]},
+        "configuredTimeoutNanoseconds": {"$ref": "#/$defs/positiveInteger"},
+        "elapsedMonotonicNanoseconds": {"type": "integer", "minimum": 0},
+        "deadlineExceeded": {"const": true}
+      }
+    },
+    "cleanupObligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "obligationType",
+        "obligationId",
+        "status",
+        "operation",
+        "phase",
+        "processLabel",
+        "pid",
+        "processGroupId",
+        "reasonCode",
+        "attempt",
+        "termSent",
+        "contSent",
+        "preContSent",
+        "postContSent",
+        "termErrorErrno",
+        "contErrorErrno",
+        "preContErrorErrno",
+        "postContErrorErrno",
+        "observedAlive",
+        "nextAction",
+        "automaticSignalAuthorized",
+        "continuationAllowed",
+        "expectedProcessIdentity",
+        "observedProcessIdentity",
+        "identityFailureCode",
+        "deadlineProof"
+      ],
+      "properties": {
+        "schemaVersion": {"const": 2},
+        "obligationType": {"const": "transient-process-group-cleanup-v2"},
+        "obligationId": {"$ref": "#/$defs/leaseId"},
+        "status": {"const": "pending"},
+        "operation": {"type": "string", "minLength": 1},
+        "phase": {"type": "string", "minLength": 1},
+        "processLabel": {"type": "string", "minLength": 1},
+        "pid": {"$ref": "#/$defs/positiveInteger"},
+        "processGroupId": {"$ref": "#/$defs/positiveInteger"},
+        "reasonCode": {"type": "string", "minLength": 1},
+        "attempt": {"$ref": "#/$defs/positiveInteger"},
+        "termSent": {"type": "boolean"},
+        "contSent": {"type": "boolean"},
+        "preContSent": {"type": "boolean"},
+        "postContSent": {"type": "boolean"},
+        "termErrorErrno": {"$ref": "#/$defs/nullablePositiveInteger"},
+        "contErrorErrno": {"$ref": "#/$defs/nullablePositiveInteger"},
+        "preContErrorErrno": {"$ref": "#/$defs/nullablePositiveInteger"},
+        "postContErrorErrno": {"$ref": "#/$defs/nullablePositiveInteger"},
+        "observedAlive": {"type": "boolean"},
+        "nextAction": {
+          "enum": [
+            "reconcile-identity-and-retry-term-cont",
+            "reconcile-identity-without-repeat-signals"
+          ]
+        },
+        "automaticSignalAuthorized": {"const": false},
+        "continuationAllowed": {"const": false},
+        "expectedProcessIdentity": {"$ref": "#/$defs/processIdentity"},
+        "observedProcessIdentity": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/processIdentity"}
+          ]
+        },
+        "identityFailureCode": {
+          "enum": [
+            null,
+            "PROCESS_IDENTITY_UNAVAILABLE",
+            "PROCESS_IDENTITY_UNAVAILABLE_AFTER_TERM",
+            "PROCESS_IDENTITY_MISMATCH",
+            "PROCESS_IDENTITY_CHANGED_AFTER_TERM",
+            "PROCESS_IDENTITY_PRESENT_AFTER_EXIT"
+          ]
+        },
+        "deadlineProof": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/deadlineProof"}
+          ]
+        }
+      }
+    }
+  }
+}

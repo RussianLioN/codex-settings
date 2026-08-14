@@ -1,0 +1,18 @@
+{
+  "name": "codex-settings-adaptive",
+  "description": "Локальный каталог адаптивной маршрутизации субагентов Codex.",
+  "owner": {
+    "name": "Codex Settings"
+  },
+  "plugins": [
+    {
+      "name": "codex-smart-subagents",
+      "description": "Адаптивный выбор модели и уровня рассуждения для подзадач.",
+      "version": "0.2.0",
+      "source": "./plugins/codex-smart-subagents",
+      "author": {
+        "name": "Codex Settings"
+      }
+    }
+  ]
+}

@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "codex-context-bundle-vector-v1",
+  "positiveCases": [
+    {
+      "name": "two-materialized-contexts-within-budget",
+      "value": {
+        "schemaVersion": 1,
+        "contractVersion": "codex-context-bundle-v1",
+        "bundleId": "bundle-two",
+        "maxBytes": 64,
+        "totalBytes": 10,
+        "entries": [
+          {
+            "contextRefId": "request",
+            "kind": "task-request",
+            "required": true,
+            "sourceEvidenceRefs": [
+              {
+                "evidenceRefId": "request",
+                "evidenceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            ],
+            "sha256": "0ebb429fa86d481c2630fac53db1c91cffed5d4d41d1021c179444eb67e7ee0b",
+            "byteLength": 4,
+            "content": "task"
+          },
+          {
+            "contextRefId": "policy",
+            "kind": "policy-excerpt",
+            "required": true,
+            "sourceEvidenceRefs": [
+              {
+                "evidenceRefId": "policy",
+                "evidenceSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              }
+            ],
+            "sha256": "823412d1eacb67956220e532959f0104603057c88704863ca38e7cd188fda812",
+            "byteLength": 6,
+            "content": "policy"
+          }
+        ]
+      }
+    },
+    {
+      "name": "exact-context-budget",
+      "value": {
+        "schemaVersion": 1,
+        "contractVersion": "codex-context-bundle-v1",
+        "bundleId": "bundle-exact",
+        "maxBytes": 10,
+        "totalBytes": 10,
+        "entries": [
+          {
+            "contextRefId": "validation",
+            "kind": "validation-result",
+            "required": false,
+            "sourceEvidenceRefs": [
+              {
+                "evidenceRefId": "validation",
+                "evidenceSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+              }
+            ],
+            "sha256": "98c41dcd20b86b86830ec0794559835614458ceaae0f0ec77a3ed1cd3a1f7d55",
+            "byteLength": 10,
+            "content": "validation"
+          }
+        ]
+      }
+    }
+  ],
+  "mutations": [
+    {
+      "name": "entry-byte-length-drift",
+      "baseCase": "two-materialized-contexts-within-budget",
+      "path": "/entries/0/byteLength",
+      "value": 3,
+      "expectedError": "CONTEXT_ENTRY_BYTE_LENGTH_MISMATCH"
+    },
+    {
+      "name": "total-byte-length-drift",
+      "baseCase": "two-materialized-contexts-within-budget",
+      "path": "/totalBytes",
+      "value": 9,
+      "expectedError": "CONTEXT_TOTAL_BYTES_MISMATCH"
+    },
+    {
+      "name": "bundle-over-budget",
+      "baseCase": "two-materialized-contexts-within-budget",
+      "path": "/maxBytes",
+      "value": 9,
+      "expectedError": "CONTEXT_BUDGET_EXCEEDED"
+    },
+    {
+      "name": "entry-digest-drift",
+      "baseCase": "two-materialized-contexts-within-budget",
+      "path": "/entries/0/sha256",
+      "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "expectedError": "CONTEXT_DIGEST_MISMATCH"
+    },
+    {
+      "name": "duplicate-context-ref-id",
+      "baseCase": "two-materialized-contexts-within-budget",
+      "path": "/entries/1/contextRefId",
+      "value": "request",
+      "expectedError": "DUPLICATE_CONTEXT_REF_ID"
+    },
+    {
+      "name": "stale-source-evidence",
+      "baseCase": "two-materialized-contexts-within-budget",
+      "path": "/entries/0/sourceEvidenceRefs/0/evidenceSha256",
+      "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "expectedError": "CONTEXT_SOURCE_STALE"
+    },
+    {
+      "name": "unresolved-source-evidence",
+      "baseCase": "two-materialized-contexts-within-budget",
+      "path": "/entries/0/sourceEvidenceRefs/0/evidenceRefId",
+      "value": "missing",
+      "expectedError": "CONTEXT_SOURCE_UNRESOLVED"
+    }
+  ],
+  "evidenceSnapshots": {
+    "two-materialized-contexts-within-budget": [
+      {
+        "evidenceRefId": "request",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      {
+        "evidenceRefId": "policy",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+    ],
+    "exact-context-budget": [
+      {
+        "evidenceRefId": "validation",
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    ]
+  }
+}

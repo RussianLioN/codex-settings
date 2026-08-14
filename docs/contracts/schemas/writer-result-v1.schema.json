@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/writer-result-v1.schema.json",
+  "title": "writer-result-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "validationState", "artifactId"],
+  "properties": {
+    "summary": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "validationState": {"type": "string", "const": "not_applicable"},
+    "artifactId": {"type": "string", "const": ""}
+  }
+}

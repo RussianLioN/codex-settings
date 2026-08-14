@@ -1,0 +1,33 @@
+{
+  "name": "codex-smart-subagents",
+  "version": "0.2.0",
+  "description": "Локальная адаптивная маршрутизация проверяемых подзадач во внешние процессы Codex.",
+  "author": {
+    "name": "Codex Settings"
+  },
+  "keywords": [
+    "codex",
+    "subagents",
+    "routing",
+    "models",
+    "reasoning"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Умные субагенты Codex",
+    "shortDescription": "Адаптивный выбор модели и рассуждения для подзадач",
+    "longDescription": "Расширение связывает корневой диалог с локальным контроллером, который планирует проверяемые подзадачи, выбирает модель, уровень рассуждения и минимальный профиль прав.",
+    "developerName": "Codex Settings",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Раздели сложную задачу на проверяемые подзадачи.",
+      "Подбери модель и уровень рассуждения для каждой подзадачи."
+    ]
+  }
+}

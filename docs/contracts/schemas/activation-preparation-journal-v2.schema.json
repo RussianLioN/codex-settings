@@ -1,0 +1,328 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/activation-preparation-journal-v2.schema.json",
+  "title": "activation-preparation-journal-v2",
+  "description": "Закрытый долговечный журнал подготовки неактивной активации и пустого inode базы до открытия основного журнала жизненного цикла.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "journalKind", "installationId", "operationId", "phase", "definitionFingerprint", "definition", "intentBoundary", "steps", "contentGeneration", "createdAt", "updatedAt", "frozenAt", "frozenJournalFingerprint", "desired", "journalFingerprint"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "journalKind": {"const": "activation-preparation"},
+    "installationId": {"$ref": "#/$defs/installationId"},
+    "operationId": {"$ref": "#/$defs/operationId"},
+    "phase": {"enum": ["PREPARING", "PREPARATION_FROZEN"]},
+    "definitionFingerprint": {"$ref": "#/$defs/sha256"},
+    "definition": {"$ref": "#/$defs/definition"},
+    "intentBoundary": {"$ref": "#/$defs/intentBoundary"},
+    "steps": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 3,
+      "prefixItems": [
+        {"$ref": "#/$defs/activationTreeStep"},
+        {"$ref": "#/$defs/databaseInodeStep"},
+        {"$ref": "#/$defs/preparedManifestStep"}
+      ],
+      "items": false
+    },
+    "contentGeneration": {"$ref": "#/$defs/safeInteger"},
+    "createdAt": {"$ref": "#/$defs/timestamp"},
+    "updatedAt": {"$ref": "#/$defs/timestamp"},
+    "frozenAt": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/timestamp"}]},
+    "frozenJournalFingerprint": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+    "desired": {"oneOf": [{"type": "null"}, {"$ref": "operation-journal-v2.schema.json#/$defs/stateBundle"}]},
+    "journalFingerprint": {"$ref": "#/$defs/sha256"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"phase": {"const": "PREPARING"}}},
+      "then": {
+        "properties": {
+          "frozenAt": {"type": "null"},
+          "frozenJournalFingerprint": {"type": "null"},
+          "desired": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"phase": {"const": "PREPARATION_FROZEN"}}},
+      "then": {
+        "properties": {
+          "steps": {
+            "prefixItems": [
+              {"$ref": "#/$defs/completedActivationTreeStep"},
+              {"$ref": "#/$defs/completedDatabaseInodeStep"},
+              {"$ref": "#/$defs/completedPreparedManifestStep"}
+            ]
+          },
+          "frozenAt": {"$ref": "#/$defs/timestamp"},
+          "frozenJournalFingerprint": {"$ref": "#/$defs/sha256"},
+          "desired": {"$ref": "operation-journal-v2.schema.json#/$defs/stateBundle"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"definition": {"required": ["preparedManifestLogical"]}}},
+      "then": {"properties": {"steps": {"minItems": 3, "maxItems": 3}}},
+      "else": {"properties": {"steps": {"minItems": 2, "maxItems": 2}}}
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "safeInteger": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "absolutePath": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "mode": {"type": "string", "pattern": "^0[0-7]{3}$"},
+    "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"},
+    "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"},
+    "databaseId": {"type": "string", "pattern": "^db2_[0-9a-f]{32}$"},
+    "activationId": {"type": "string", "pattern": "^act2_[0-9a-f]{64}$"},
+    "projection": {"$ref": "lifecycle-projection-v2.schema.json"},
+    "fileProjection": {
+      "allOf": [
+        {"$ref": "#/$defs/projection"},
+        {"properties": {"schemaId": {"const": "file-object-v2"}}}
+      ]
+    },
+    "treeProjection": {
+      "allOf": [
+        {"$ref": "#/$defs/projection"},
+        {"properties": {"schemaId": {"const": "tree-object-v2"}}}
+      ]
+    },
+    "directoryBindingProjection": {
+      "allOf": [
+        {"$ref": "#/$defs/projection"},
+        {"properties": {"schemaId": {"const": "directory-binding-v2"}}}
+      ]
+    },
+    "activationIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceRoot", "codexHome", "codexBinary", "stateHome", "socketPath", "controllerLockPath", "installationId", "operationId", "databaseId", "activationBindingNonce", "activationId", "activationFingerprint", "controllerIdentity", "compatibilityFingerprint", "routingPolicyFingerprint", "bundledCatalogFingerprint", "schemaFingerprint", "schemaArtifactSha256", "activationDir", "snapshotPath", "databasePath", "bundledCatalogPath", "identity", "activationDocument", "sourceLocator", "snapshotLocator", "bundledCatalog", "interfaceEvidence", "completedAt", "activationIntentFingerprint"],
+      "properties": {
+        "sourceRoot": {"$ref": "#/$defs/absolutePath"},
+        "codexHome": {"$ref": "#/$defs/absolutePath"},
+        "codexBinary": {"$ref": "#/$defs/absolutePath"},
+        "stateHome": {"$ref": "#/$defs/absolutePath"},
+        "socketPath": {"$ref": "#/$defs/absolutePath"},
+        "controllerLockPath": {"$ref": "#/$defs/absolutePath"},
+        "installationId": {"$ref": "#/$defs/installationId"},
+        "operationId": {"$ref": "#/$defs/operationId"},
+        "databaseId": {"$ref": "#/$defs/databaseId"},
+        "activationBindingNonce": {"$ref": "#/$defs/sha256"},
+        "activationId": {"$ref": "#/$defs/activationId"},
+        "activationFingerprint": {"$ref": "#/$defs/sha256"},
+        "controllerIdentity": {"$ref": "#/$defs/sha256"},
+        "compatibilityFingerprint": {"$ref": "#/$defs/sha256"},
+        "routingPolicyFingerprint": {"$ref": "#/$defs/sha256"},
+        "bundledCatalogFingerprint": {"$ref": "#/$defs/sha256"},
+        "schemaFingerprint": {"$ref": "#/$defs/sha256"},
+        "schemaArtifactSha256": {"$ref": "#/$defs/sha256"},
+        "activationDir": {"$ref": "#/$defs/absolutePath"},
+        "snapshotPath": {"$ref": "#/$defs/absolutePath"},
+        "databasePath": {"$ref": "#/$defs/absolutePath"},
+        "bundledCatalogPath": {"$ref": "#/$defs/absolutePath"},
+        "identity": {"$ref": "#/$defs/activationIdentity"},
+        "activationDocument": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "activationId", "activationFingerprint", "identity"],
+          "properties": {
+            "schemaVersion": {"const": 2},
+            "activationId": {"$ref": "#/$defs/activationId"},
+            "activationFingerprint": {"$ref": "#/$defs/sha256"},
+            "identity": {"$ref": "#/$defs/activationIdentity"}
+          }
+        },
+        "sourceLocator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["lexicalPath", "resolvedPathAtCapture", "argv0Policy", "sourceObservedSha256"],
+          "properties": {
+            "lexicalPath": {"$ref": "#/$defs/absolutePath"},
+            "resolvedPathAtCapture": {"$ref": "#/$defs/absolutePath"},
+            "argv0Policy": {"const": "lexical"},
+            "sourceObservedSha256": {"$ref": "#/$defs/sha256"}
+          }
+        },
+        "snapshotLocator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["absolutePath", "sha256"],
+          "properties": {
+            "absolutePath": {"$ref": "#/$defs/absolutePath"},
+            "sha256": {"$ref": "#/$defs/sha256"}
+          }
+        },
+        "bundledCatalog": {"type": "object", "minProperties": 1, "maxProperties": 128},
+        "interfaceEvidence": {
+          "type": "object",
+          "required": ["schemaVersion", "compatibilityFingerprint"],
+          "properties": {
+            "schemaVersion": {"const": 1},
+            "compatibilityFingerprint": {"$ref": "#/$defs/sha256"}
+          }
+        },
+        "completedAt": {"$ref": "#/$defs/timestamp"},
+        "activationIntentFingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "activationIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "generationId", "release", "pluginId", "database", "codexSnapshot", "compatibilityFingerprint", "routingPolicyFingerprint", "bundledCatalogFingerprint", "minimumGatewayVersion", "marketplaceTreeSha256", "generationTreeSha256"],
+      "properties": {
+        "schemaVersion": {"const": 2},
+        "generationId": {"type": "string", "pattern": "^gen2_[0-9a-f]{64}$"},
+        "release": {"const": "0.2.0"},
+        "pluginId": {"const": "codex-smart-subagents"},
+        "database": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["databaseId", "absolutePath", "schemaVersion", "schemaFingerprint", "schemaArtifactSha256", "activationBindingNonce"],
+          "properties": {
+            "databaseId": {"$ref": "#/$defs/databaseId"},
+            "absolutePath": {"$ref": "#/$defs/absolutePath"},
+            "schemaVersion": {"const": 2},
+            "schemaFingerprint": {"$ref": "#/$defs/sha256"},
+            "schemaArtifactSha256": {"$ref": "#/$defs/sha256"},
+            "activationBindingNonce": {"$ref": "#/$defs/sha256"}
+          }
+        },
+        "codexSnapshot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["absolutePath", "sha256"],
+          "properties": {
+            "absolutePath": {"$ref": "#/$defs/absolutePath"},
+            "sha256": {"$ref": "#/$defs/sha256"}
+          }
+        },
+        "compatibilityFingerprint": {"$ref": "#/$defs/sha256"},
+        "routingPolicyFingerprint": {"$ref": "#/$defs/sha256"},
+        "bundledCatalogFingerprint": {"$ref": "#/$defs/sha256"},
+        "minimumGatewayVersion": {"const": "0.2.0"},
+        "marketplaceTreeSha256": {"$ref": "#/$defs/sha256"},
+        "generationTreeSha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "logicalObject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "objectType", "mode", "contentSha256", "logicalFingerprint"],
+      "properties": {
+        "path": {"$ref": "#/$defs/absolutePath"},
+        "objectType": {"enum": ["directory", "regular-file"]},
+        "mode": {"$ref": "#/$defs/mode"},
+        "contentSha256": {"$ref": "#/$defs/sha256"},
+        "logicalFingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["journalPath", "receiptPath", "lockPath", "activationIntent", "desiredSeed", "snapshotFile", "activationTreeLogical", "activationFileLogical", "databaseEmptyFileLogical"],
+      "properties": {
+        "journalPath": {"$ref": "#/$defs/absolutePath"},
+        "receiptPath": {"$ref": "#/$defs/absolutePath"},
+        "lockPath": {"$ref": "#/$defs/absolutePath"},
+        "activationIntent": {"$ref": "#/$defs/activationIntent"},
+        "desiredSeed": {"$ref": "operation-journal-v2.schema.json#/$defs/stateBundle"},
+        "snapshotFile": {"$ref": "#/$defs/fileProjection"},
+        "activationTreeLogical": {"$ref": "#/$defs/logicalObject"},
+        "activationFileLogical": {"$ref": "#/$defs/logicalObject"},
+        "databaseEmptyFileLogical": {"$ref": "#/$defs/logicalObject"},
+        "preparedManifestLogical": {"$ref": "#/$defs/logicalObject"},
+        "transitionProofSnapshot": {"$ref": "activation-transition-proof-snapshot-v2.schema.json"}
+      },
+      "dependentRequired": {
+        "preparedManifestLogical": ["transitionProofSnapshot"],
+        "transitionProofSnapshot": ["preparedManifestLogical"]
+      }
+    },
+    "intentBoundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "state", "activationIntentFingerprint", "desiredSeedFingerprint", "completedAt"],
+      "properties": {
+        "kind": {"const": "preparation_intent"},
+        "state": {"const": "COMPLETED"},
+        "activationIntentFingerprint": {"$ref": "#/$defs/sha256"},
+        "desiredSeedFingerprint": {"$ref": "#/$defs/sha256"},
+        "completedAt": {"$ref": "#/$defs/timestamp"}
+      }
+    },
+    "stepBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stepId", "ordinal", "kind", "state", "expectedLogical", "observedPhysical", "observedCompanions", "intentAt", "completedAt", "stepFingerprint"],
+      "properties": {
+        "stepId": {"type": "string", "pattern": "^pst2_[0-9a-f]{32}$"},
+        "ordinal": {"enum": [1, 2, 3]},
+        "kind": {"enum": ["activation_tree", "database_empty_file", "prepared_manifest_file"]},
+        "state": {"enum": ["PLANNED", "INTENT_DURABLE", "COMPLETED"]},
+        "expectedLogical": {"$ref": "#/$defs/logicalObject"},
+        "observedPhysical": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/projection"}]},
+        "observedCompanions": {"type": "array", "maxItems": 1, "items": {"$ref": "#/$defs/projection"}},
+        "intentAt": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/timestamp"}]},
+        "completedAt": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/timestamp"}]},
+        "stepFingerprint": {"$ref": "#/$defs/sha256"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"state": {"const": "PLANNED"}}},
+          "then": {"properties": {"observedPhysical": {"type": "null"}, "observedCompanions": {"maxItems": 0}, "intentAt": {"type": "null"}, "completedAt": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"state": {"const": "INTENT_DURABLE"}}},
+          "then": {"properties": {"observedPhysical": {"type": "null"}, "observedCompanions": {"maxItems": 0}, "intentAt": {"$ref": "#/$defs/timestamp"}, "completedAt": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"state": {"const": "COMPLETED"}}},
+          "then": {"properties": {"intentAt": {"$ref": "#/$defs/timestamp"}, "completedAt": {"$ref": "#/$defs/timestamp"}}}
+        }
+      ]
+    },
+    "activationTreeStep": {
+      "allOf": [
+        {"$ref": "#/$defs/stepBase"},
+        {"properties": {"ordinal": {"const": 1}, "kind": {"const": "activation_tree"}}},
+        {
+          "if": {"properties": {"state": {"const": "COMPLETED"}}},
+          "then": {"properties": {"observedPhysical": {"$ref": "#/$defs/treeProjection"}, "observedCompanions": {"minItems": 1, "maxItems": 1, "items": {"$ref": "#/$defs/fileProjection"}}}}
+        }
+      ]
+    },
+    "databaseInodeStep": {
+      "allOf": [
+        {"$ref": "#/$defs/stepBase"},
+        {"properties": {"ordinal": {"const": 2}, "kind": {"const": "database_empty_file"}}},
+        {
+          "if": {"properties": {"state": {"const": "COMPLETED"}}},
+          "then": {"properties": {"observedPhysical": {"$ref": "#/$defs/fileProjection"}, "observedCompanions": {"maxItems": 0}}}
+        }
+      ]
+    },
+    "preparedManifestStep": {
+      "allOf": [
+        {"$ref": "#/$defs/stepBase"},
+        {"properties": {"ordinal": {"const": 3}, "kind": {"const": "prepared_manifest_file"}}},
+        {
+          "if": {"properties": {"state": {"const": "COMPLETED"}}},
+          "then": {"properties": {"observedPhysical": {"$ref": "#/$defs/fileProjection"}, "observedCompanions": {"minItems": 1, "maxItems": 1, "items": {"$ref": "#/$defs/directoryBindingProjection"}}}}
+        }
+      ]
+    },
+    "completedActivationTreeStep": {
+      "allOf": [{"$ref": "#/$defs/activationTreeStep"}, {"properties": {"state": {"const": "COMPLETED"}}}]
+    },
+    "completedDatabaseInodeStep": {
+      "allOf": [{"$ref": "#/$defs/databaseInodeStep"}, {"properties": {"state": {"const": "COMPLETED"}}}]
+    },
+    "completedPreparedManifestStep": {
+      "allOf": [{"$ref": "#/$defs/preparedManifestStep"}, {"properties": {"state": {"const": "COMPLETED"}}}]
+    }
+  }
+}

@@ -1,0 +1,151 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "catalogGeneration": {
+      "maxLength": 20,
+      "minLength": 0,
+      "type": "string"
+    },
+    "clarificationQuestions": {
+      "items": {
+        "maxLength": 500,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 3,
+      "minItems": 0,
+      "type": "array"
+    },
+    "code": {
+      "maxLength": 64,
+      "minLength": 1,
+      "type": "string"
+    },
+    "expiresAt": {
+      "maxLength": 64,
+      "minLength": 0,
+      "type": "string"
+    },
+    "message": {
+      "maxLength": 1000,
+      "minLength": 0,
+      "type": "string"
+    },
+    "nodeDecisions": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "clientNodeId": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "disposition": {
+            "enum": [
+              "direct",
+              "delegate",
+              "clarify"
+            ],
+            "maxLength": 4096,
+            "minLength": 0,
+            "type": "string"
+          },
+          "permissionProfileId": {
+            "maxLength": 64,
+            "minLength": 3,
+            "type": "string"
+          },
+          "reasonCode": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "reasoningEffort": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "maxLength": 4096,
+            "minLength": 0,
+            "type": "string"
+          },
+          "selectedModel": {
+            "enum": [
+              "gpt-5.6-luna",
+              "gpt-5.6-terra",
+              "gpt-5.6-sol"
+            ],
+            "maxLength": 4096,
+            "minLength": 0,
+            "type": "string"
+          }
+        },
+        "required": [
+          "clientNodeId",
+          "disposition",
+          "selectedModel",
+          "reasoningEffort",
+          "permissionProfileId",
+          "reasonCode"
+        ],
+        "type": "object"
+      },
+      "maxItems": 20,
+      "minItems": 0,
+      "type": "array"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "overallDisposition": {
+      "enum": [
+        "direct",
+        "delegate",
+        "clarify",
+        "error"
+      ],
+      "maxLength": 4096,
+      "minLength": 0,
+      "type": "string"
+    },
+    "routeGeneration": {
+      "maximum": 2147483647,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "routeId": {
+      "maxLength": 47,
+      "minLength": 0,
+      "type": "string"
+    },
+    "schemaVersion": {
+      "enum": [
+        "1"
+      ],
+      "maxLength": 4096,
+      "minLength": 0,
+      "type": "string"
+    },
+    "startable": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "ok",
+    "code",
+    "message",
+    "routeId",
+    "routeGeneration",
+    "expiresAt",
+    "startable",
+    "overallDisposition",
+    "nodeDecisions",
+    "clarificationQuestions",
+    "catalogGeneration"
+  ],
+  "type": "object"
+}

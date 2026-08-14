@@ -1,0 +1,679 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/config-requirements-vector-recipe-v1.schema.json",
+  "title": "config-requirements-vector-recipe-v1",
+  "description": "Точный исполнимый набор рецептов предельных векторов управляемых требований",
+  "type": "object",
+  "const": {
+    "schemaVersion": 1,
+    "contractVersion": "codex-config-requirements-vector-recipes-v1",
+    "treeMetricContract": {
+      "version": "json-value-tree-v1",
+      "nodeCountFormula": "container=1+sum(childNodes); scalar=1",
+      "depthFormula": "root=1; nonemptyContainer=1+max(childDepth); emptyContainer=1; scalar=1",
+      "objectMemberNameNodeWeight": 0,
+      "rootDepth": 1,
+      "traversal": "iterative-stack-independent-of-recipe-generator"
+    },
+    "treeMetricCases": [
+      {
+        "name": "null-scalar",
+        "value": null,
+        "expectedNodes": 1,
+        "expectedDepth": 1
+      },
+      {
+        "name": "empty-array",
+        "value": [],
+        "expectedNodes": 1,
+        "expectedDepth": 1
+      },
+      {
+        "name": "empty-object",
+        "value": {},
+        "expectedNodes": 1,
+        "expectedDepth": 1
+      },
+      {
+        "name": "one-object-value",
+        "value": {"a": null},
+        "expectedNodes": 2,
+        "expectedDepth": 2
+      },
+      {
+        "name": "object-with-two-array-values",
+        "value": {"a": [null, true]},
+        "expectedNodes": 4,
+        "expectedDepth": 3
+      }
+    ],
+    "recipes": [
+      {
+        "name": "port-lower",
+        "class": "numeric-boundary",
+        "kind": "replace-integer",
+        "seed": {
+          "network": {
+            "httpPort": 0
+          }
+        },
+        "targetPointer": "/network/httpPort",
+        "mutableParameter": "value",
+        "atLimit": 0,
+        "overLimit": -1,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "0be827d842884198f8523bfc8e3656018c5040371083a6f7721cf6810e53c690",
+        "overLimitSha256": "5e5fadd2ebab3a41f26327a50be1925d7bc93e2e2a23a8fe020cf995bb3fe2d8"
+      },
+      {
+        "name": "port-upper",
+        "class": "numeric-boundary",
+        "kind": "replace-integer",
+        "seed": {
+          "network": {
+            "httpPort": 0
+          }
+        },
+        "targetPointer": "/network/httpPort",
+        "mutableParameter": "value",
+        "atLimit": 65535,
+        "overLimit": 65536,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "8fd902ec212fc80b519e344d717492a94188d17a102c0e6226537f3f7ea830d1",
+        "overLimitSha256": "6670a9149a2146d0110d3ad38d61211f38394cc22587f197a4dd9f102a75aac5"
+      },
+      {
+        "name": "safe-integer-lower",
+        "class": "numeric-boundary",
+        "kind": "replace-integer",
+        "seed": {
+          "hooks": {
+            "PermissionRequest": [],
+            "PostCompact": [],
+            "PostToolUse": [],
+            "PreCompact": [],
+            "PreToolUse": [],
+            "SessionStart": [],
+            "Stop": [
+              {
+                "hooks": [
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a",
+                    "timeoutSec": 0
+                  }
+                ]
+              }
+            ],
+            "SubagentStart": [],
+            "SubagentStop": [],
+            "UserPromptSubmit": []
+          }
+        },
+        "targetPointer": "/hooks/Stop/0/hooks/0/timeoutSec",
+        "mutableParameter": "value",
+        "atLimit": 0,
+        "overLimit": -1,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "47ae378bd65391df02e07e1db2a5f7908b70e2418276d3c4166c35248e2e7ca5",
+        "overLimitSha256": "a24c07c93ed1333850150f32792668551cd43781447c3d945ced8e7dede549fa"
+      },
+      {
+        "name": "safe-integer-upper",
+        "class": "numeric-boundary",
+        "kind": "replace-integer",
+        "seed": {
+          "hooks": {
+            "PermissionRequest": [],
+            "PostCompact": [],
+            "PostToolUse": [],
+            "PreCompact": [],
+            "PreToolUse": [],
+            "SessionStart": [],
+            "Stop": [
+              {
+                "hooks": [
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a",
+                    "timeoutSec": 0
+                  }
+                ]
+              }
+            ],
+            "SubagentStart": [],
+            "SubagentStop": [],
+            "UserPromptSubmit": []
+          }
+        },
+        "targetPointer": "/hooks/Stop/0/hooks/0/timeoutSec",
+        "mutableParameter": "value",
+        "atLimit": "9007199254740991",
+        "overLimit": "9007199254740992",
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "94a9fbe14627bfb81c82d12528cd3095712741a5d16b4d6294ec1f28b20b68fb",
+        "overLimitSha256": "8b20276bc296c3ced90d428ce71b303f3790ee59dbc6205f631b4f55536904b6"
+      },
+      {
+        "name": "bounded-string-lower",
+        "class": "string-boundary",
+        "kind": "replace-ascii-string",
+        "seed": {
+          "defaultPermissions": "x"
+        },
+        "targetPointer": "/defaultPermissions",
+        "mutableParameter": "characterCount",
+        "atLimit": 1,
+        "overLimit": 0,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "0a9d829e43177c77a3d6076d6580c129bf58ad409ca083b89ad97c72196bf27a",
+        "overLimitSha256": "9ce0053ff5830a510f54067d2af1c67dad4e9f57b52c04797b8c9fdc216325b5"
+      },
+      {
+        "name": "bounded-string-upper",
+        "class": "string-boundary",
+        "kind": "replace-ascii-string",
+        "seed": {
+          "defaultPermissions": "x"
+        },
+        "targetPointer": "/defaultPermissions",
+        "mutableParameter": "characterCount",
+        "atLimit": 4096,
+        "overLimit": 4097,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "7f057f130a8ed9fca67a9fad5a67625c39319c86dce7e69425a1eb9feb47489f",
+        "overLimitSha256": "cb49c4033ad0a37c47b34c4231bbbec6c4b466241528e3cdc1410308792f05ee"
+      },
+      {
+        "name": "command-string-lower",
+        "class": "string-boundary",
+        "kind": "replace-ascii-string",
+        "seed": {
+          "hooks": {
+            "PermissionRequest": [],
+            "PostCompact": [],
+            "PostToolUse": [],
+            "PreCompact": [],
+            "PreToolUse": [],
+            "SessionStart": [],
+            "Stop": [
+              {
+                "hooks": [
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  }
+                ]
+              }
+            ],
+            "SubagentStart": [],
+            "SubagentStop": [],
+            "UserPromptSubmit": []
+          }
+        },
+        "targetPointer": "/hooks/Stop/0/hooks/0/command",
+        "mutableParameter": "characterCount",
+        "atLimit": 1,
+        "overLimit": 0,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "6dd00e684a9d1ec7ebdf8c3cd47abf117828b455946f79607733da0c1312407a",
+        "overLimitSha256": "e0b7f0ba7a0dc9feeb07eff17105d45b0c51546142807088e88d93d5762cf5b1"
+      },
+      {
+        "name": "command-string-upper",
+        "class": "string-boundary",
+        "kind": "replace-ascii-string",
+        "seed": {
+          "hooks": {
+            "PermissionRequest": [],
+            "PostCompact": [],
+            "PostToolUse": [],
+            "PreCompact": [],
+            "PreToolUse": [],
+            "SessionStart": [],
+            "Stop": [
+              {
+                "hooks": [
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  }
+                ]
+              }
+            ],
+            "SubagentStart": [],
+            "SubagentStop": [],
+            "UserPromptSubmit": []
+          }
+        },
+        "targetPointer": "/hooks/Stop/0/hooks/0/command",
+        "mutableParameter": "characterCount",
+        "atLimit": 65536,
+        "overLimit": 65537,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "cb540a2c62af9d77361210617a2c6137b52571490f4a7ed0bc5368e2c9d99859",
+        "overLimitSha256": "f5cca823375c0236b349c640f14cc0b6e6f0e3e0a83c9ca42e4b7fe6c6cc5c59"
+      },
+      {
+        "name": "multibyte-byte-boundary",
+        "class": "string-boundary",
+        "kind": "replace-utf8-string",
+        "seed": {
+          "defaultPermissions": "x"
+        },
+        "targetPointer": "/defaultPermissions",
+        "mutableParameter": "utf8ByteCount",
+        "atLimit": 4096,
+        "overLimit": 4097,
+        "atLimitExpected": "accepted",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "684a7b1f3ad037d1e48e4395509b1ca2d6ba76be1b7bb7b4314299c566f41743",
+        "overLimitSha256": "5fdcf52b13368f86e2c4c4b8f929d4c8d4e0ba21e826909c09dfb8525a7b93a2"
+      },
+      {
+        "name": "map-name-lower",
+        "class": "string-boundary",
+        "kind": "rename-single-property",
+        "seed": {
+          "allowedPermissionProfiles": {
+            "x": true
+          }
+        },
+        "targetPointer": "/allowedPermissionProfiles",
+        "mutableParameter": "propertyNameLength",
+        "atLimit": 1,
+        "overLimit": 0,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "fc4237a9e260008c1ee2b86a82008ddae96a07498dfa449ca6f6e2ddd96b4308",
+        "overLimitSha256": "baf9ac2d45f1eb61ff7622ed726f9c8f28f06069824d9d8156824473fe0640a2"
+      },
+      {
+        "name": "map-name-upper",
+        "class": "string-boundary",
+        "kind": "rename-single-property",
+        "seed": {
+          "allowedPermissionProfiles": {
+            "x": true
+          }
+        },
+        "targetPointer": "/allowedPermissionProfiles",
+        "mutableParameter": "propertyNameLength",
+        "atLimit": 4096,
+        "overLimit": 4097,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "cc82ad96f67cde8bd413c51c3baec80d1a2206847f3321abc77c14e5e3890f45",
+        "overLimitSha256": "be52e34f4083591b0e2ebc739fa63c2758ab05044d06469920912f49fc2384a3"
+      },
+      {
+        "name": "map-value-unknown",
+        "class": "unknown",
+        "kind": "replace-map-value",
+        "seed": {
+          "network": {
+            "domains": {
+              "example.test": "allow"
+            }
+          }
+        },
+        "targetPointer": "/network/domains/example.test",
+        "mutableParameter": "value",
+        "atLimit": "allow",
+        "overLimit": "future",
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "c1b559c46c8ef3a8e39f9399d2d16e56654731e65287369902896b5e709cb815",
+        "overLimitSha256": "eb23df46ddf309b84b418f04e4993ef0f75d44bcae0b965b73e5ba48b14214dc"
+      },
+      {
+        "name": "string-set-capacity",
+        "class": "capacity",
+        "kind": "populate-indexed-array",
+        "seed": {
+          "network": {
+            "allowedDomains": []
+          }
+        },
+        "targetPointer": "/network/allowedDomains",
+        "mutableParameter": "itemCount",
+        "atLimit": 2048,
+        "overLimit": 2049,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "a80b722f2910e4b323b3d831bc32f2c9123878325cc0d3eff70239d02e9a1ad1",
+        "overLimitSha256": "0dccb7fa53c7c983ecc981563dd25427d1855902fa9c69fd6b9cdabdbecfd803"
+      },
+      {
+        "name": "permission-map-capacity",
+        "class": "capacity",
+        "kind": "populate-indexed-object",
+        "seed": {
+          "allowedPermissionProfiles": {}
+        },
+        "targetPointer": "/allowedPermissionProfiles",
+        "mutableParameter": "propertyCount",
+        "atLimit": 2048,
+        "overLimit": 2049,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "2f9c931c5786e8f9cc09a7b7f9dc6d5496fd0e02f0b28e33acac5eca68793ef9",
+        "overLimitSha256": "4eee1771bab1354b93a44559c53e379fab3c68f9ee916c2a2891c02ee44e82e4"
+      },
+      {
+        "name": "hook-groups-capacity",
+        "class": "capacity",
+        "kind": "populate-hook-groups",
+        "seed": {
+          "hooks": {
+            "PermissionRequest": [],
+            "PostCompact": [],
+            "PostToolUse": [],
+            "PreCompact": [],
+            "PreToolUse": [],
+            "SessionStart": [],
+            "Stop": [],
+            "SubagentStart": [],
+            "SubagentStop": [],
+            "UserPromptSubmit": []
+          }
+        },
+        "targetPointer": "/hooks/Stop",
+        "mutableParameter": "groupCount",
+        "atLimit": 256,
+        "overLimit": 257,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "849d632e157e220264ab412375e4a59b78063066f2bc6a5a23766188c25a9425",
+        "overLimitSha256": "b708c494f6a116ebde2ac76dd2ca9de1cb35cd2e5bc250ea3882b78383856292"
+      },
+      {
+        "name": "hook-handlers-capacity",
+        "class": "capacity",
+        "kind": "populate-hook-handlers",
+        "seed": {
+          "hooks": {
+            "PermissionRequest": [],
+            "PostCompact": [],
+            "PostToolUse": [],
+            "PreCompact": [],
+            "PreToolUse": [],
+            "SessionStart": [],
+            "Stop": [
+              {
+                "hooks": [
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  }
+                ]
+              }
+            ],
+            "SubagentStart": [],
+            "SubagentStop": [],
+            "UserPromptSubmit": []
+          }
+        },
+        "targetPointer": "/hooks/Stop/0/hooks",
+        "mutableParameter": "handlerCount",
+        "atLimit": 256,
+        "overLimit": 257,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "ab4c3ccbc28fb16e9bf97dd0c39844693d5c901ae419f7634e538be60b9e157f",
+        "overLimitSha256": "f1c7c222023015e96854f9bbe0a0558739c40ff5aeec8ad7f226fd0fa84c9820"
+      },
+      {
+        "name": "raw-document-bytes",
+        "class": "guard",
+        "kind": "append-raw-spaces",
+        "seed": "{\"requirements\":{}}",
+        "targetPointer": "",
+        "mutableParameter": "rawByteCount",
+        "atLimit": 1048576,
+        "overLimit": 1048577,
+        "atLimitExpected": "accepted",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "c98b375a7282fa7590ec151e7a2a63a8f935f45124f7e62362f8cae179ce6a2b",
+        "overLimitSha256": "8a5ba620ec1d78739b205c12498148f388dbced1c1d22466ac616ff16bce2be5"
+      },
+      {
+        "name": "normalized-document-bytes",
+        "class": "guard",
+        "kind": "solve-normalized-canonical-padding",
+        "seed": {
+          "allowedApprovalPolicies": [
+            {
+              "granular": {
+                "mcp_elicitations": false,
+                "rules": false,
+                "sandbox_approval": false
+              }
+            }
+          ],
+          "hooks": {
+            "PermissionRequest": [],
+            "PostCompact": [],
+            "PostToolUse": [],
+            "PreCompact": [],
+            "PreToolUse": [],
+            "SessionStart": [],
+            "Stop": [
+              {
+                "hooks": [
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  },
+                  {
+                    "type": "command",
+                    "async": false,
+                    "command": "a"
+                  }
+                ]
+              }
+            ],
+            "SubagentStart": [],
+            "SubagentStop": [],
+            "UserPromptSubmit": []
+          }
+        },
+        "targetPointer": "/hooks/Stop/0/hooks",
+        "mutableParameter": "canonicalByteCount",
+        "atLimit": 1048576,
+        "overLimit": 1048577,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "00cc865211624cd7cc3c3f5670b3367a80fe5a7aa3674127abc4c0324efc3624",
+        "overLimitSha256": "774a8765a5d6dd8fc86be8952d263514d78b1dbfaa4435d10cf2a1f69bd8d3cd"
+      },
+      {
+        "name": "raw-tree-nodes",
+        "class": "guard",
+        "kind": "populate-raw-nodes",
+        "seed": {
+          "requirements": {
+            "future": []
+          }
+        },
+        "targetPointer": "/requirements/future",
+        "mutableParameter": "nodeCount",
+        "atLimit": 4096,
+        "overLimit": 4097,
+        "atLimitExpected": "guard-valid-then-unsupported",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "5bdd1b88841d0fb6a07265eac6937a6b3ca4035cd352dc84b2d28386840439a9",
+        "overLimitSha256": "4ed13eff5be59d906769ed0940a9cbd44c46b72a96d19957ecf4135e30d0f57a"
+      },
+      {
+        "name": "normalized-tree-nodes",
+        "class": "guard",
+        "kind": "populate-two-indexed-objects",
+        "seed": {
+          "allowedApprovalPolicies": [
+            {
+              "granular": {
+                "mcp_elicitations": false,
+                "rules": false,
+                "sandbox_approval": false
+              }
+            }
+          ],
+          "allowedPermissionProfiles": {},
+          "featureRequirements": {}
+        },
+        "targetPointer": "",
+        "mutableParameter": "nodeCount",
+        "atLimit": 4096,
+        "overLimit": 4097,
+        "atLimitExpected": "schema-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "45c3b2056c5c2e1ee1d829e2786a4a78fdb151330026ff7db6da753f03f5cae3",
+        "overLimitSha256": "73f568d20e9c3994f719e3cf5cee44dc0f9bca85888bc5190e1d7191baf4677b"
+      },
+      {
+        "name": "raw-tree-depth",
+        "class": "guard",
+        "kind": "wrap-depth",
+        "seed": {
+          "requirements": {
+            "future": null
+          }
+        },
+        "targetPointer": "/requirements/future",
+        "mutableParameter": "depth",
+        "atLimit": 16,
+        "overLimit": 17,
+        "atLimitExpected": "guard-valid-then-unsupported",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "4a37f2fa17f30af99775ca5a05a4325e8ecc760895bdf2b350bb6c0631fc336b",
+        "overLimitSha256": "0874b71d41ac22890704352c335e3c93d7a1e8a6ae604358c60cb0bd52182ab3"
+      },
+      {
+        "name": "finite-enum-deduplication",
+        "class": "deduplication",
+        "kind": "append-array-value",
+        "seed": {
+          "allowedSandboxModes": [
+            "read-only"
+          ]
+        },
+        "targetPointer": "/allowedSandboxModes",
+        "mutableParameter": "value",
+        "atLimit": "workspace-write",
+        "overLimit": "read-only",
+        "atLimitExpected": "normalization-valid",
+        "overLimitExpected": "normalized-same",
+        "atLimitSha256": "b50a68f640ca527f37ee05d276ac86428ee2db9d0311693a66614e6afebd2c72",
+        "overLimitSha256": "b31db9a0b4c166775bb37cbc2c06267d0f82c6d59709fcefbfb361def275af78"
+      },
+      {
+        "name": "finite-enum-unknown",
+        "class": "unknown",
+        "kind": "append-array-value",
+        "seed": {
+          "allowedSandboxModes": [
+            "read-only"
+          ]
+        },
+        "targetPointer": "/allowedSandboxModes",
+        "mutableParameter": "value",
+        "atLimit": "workspace-write",
+        "overLimit": "future-sandbox",
+        "atLimitExpected": "normalization-valid",
+        "overLimitExpected": "malformed",
+        "atLimitSha256": "b50a68f640ca527f37ee05d276ac86428ee2db9d0311693a66614e6afebd2c72",
+        "overLimitSha256": "2b3a34ec66e1f073aabb2d95d29227314e0097fcaf4eef0d3c3ee69218d9f5e0"
+      }
+    ]
+  }
+}

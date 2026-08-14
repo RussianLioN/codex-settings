@@ -1,0 +1,55 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "accepted": {
+      "type": "boolean"
+    },
+    "code": {
+      "maxLength": 64,
+      "minLength": 1,
+      "type": "string"
+    },
+    "message": {
+      "maxLength": 1000,
+      "minLength": 0,
+      "type": "string"
+    },
+    "newState": {
+      "maxLength": 32,
+      "minLength": 1,
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "previousState": {
+      "maxLength": 32,
+      "minLength": 1,
+      "type": "string"
+    },
+    "routeId": {
+      "maxLength": 47,
+      "minLength": 0,
+      "type": "string"
+    },
+    "schemaVersion": {
+      "enum": [
+        "1"
+      ],
+      "maxLength": 4096,
+      "minLength": 0,
+      "type": "string"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "ok",
+    "code",
+    "message",
+    "routeId",
+    "previousState",
+    "newState",
+    "accepted"
+  ],
+  "type": "object"
+}

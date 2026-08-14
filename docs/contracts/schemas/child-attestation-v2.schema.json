@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/child-attestation-v2.schema.json",
+  "title": "child-attestation-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "attestationId",
+    "routeId",
+    "nodeId",
+    "startRequestId",
+    "evidenceJobId",
+    "admissionId",
+    "attemptId",
+    "requested",
+    "observed",
+    "disposition",
+    "problem",
+    "observedAt",
+    "attestationFingerprint",
+    "extensions"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "contractVersion": {"const": "codex-child-attestation-v2"},
+    "attestationId": {"type": "string", "pattern": "^ca2_[0-9a-f]{32}$"},
+    "routeId": {"type": "string", "pattern": "^route2_[0-9a-f]{32}$"},
+    "nodeId": {"type": "string", "pattern": "^node2_[0-9a-f]{32}$"},
+    "startRequestId": {"type": "string", "pattern": "^sr2_[0-9a-f]{32}$"},
+    "evidenceJobId": {"type": "string", "pattern": "^aej2_[0-9a-f]{32}$"},
+    "admissionId": {"type": "string", "pattern": "^adm2_[0-9a-f]{32}$"},
+    "attemptId": {"type": "string", "pattern": "^att2_[0-9a-f]{32}$"},
+    "requested": {"$ref": "#/$defs/launchIdentity"},
+    "observed": {
+      "oneOf": [
+        {"$ref": "#/$defs/observedLaunchIdentity"},
+        {"type": "null"}
+      ]
+    },
+    "disposition": {"enum": ["MATCH", "STALE", "UNAVAILABLE"]},
+    "problem": {
+      "oneOf": [
+        {"$ref": "#/$defs/attestationProblem"},
+        {"type": "null"}
+      ]
+    },
+    "observedAt": {"type": "string", "format": "date-time"},
+    "attestationFingerprint": {"$ref": "#/$defs/sha256"},
+    "extensions": {"type": "object", "maxProperties": 32}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"disposition": {"const": "MATCH"}},
+        "required": ["disposition"]
+      },
+      "then": {
+        "properties": {
+          "observed": {"$ref": "#/$defs/observedLaunchIdentity"},
+          "problem": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"disposition": {"const": "STALE"}},
+        "required": ["disposition"]
+      },
+      "then": {
+        "properties": {
+          "observed": {"$ref": "#/$defs/observedLaunchIdentity"},
+          "problem": {
+            "$ref": "#/$defs/attestationProblem",
+            "properties": {"category": {"const": "STALE"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"disposition": {"const": "UNAVAILABLE"}},
+        "required": ["disposition"]
+      },
+      "then": {
+        "properties": {
+          "observed": {"type": "null"},
+          "problem": {
+            "$ref": "#/$defs/attestationProblem",
+            "properties": {"category": {"const": "UNAVAILABLE"}}
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "modelPair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "reasoningEffort"],
+      "properties": {
+        "model": {"enum": ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]},
+        "reasoningEffort": {"enum": ["low", "medium", "high", "xhigh", "max"]}
+      },
+      "oneOf": [
+        {"properties": {"model": {"const": "gpt-5.6-luna"}, "reasoningEffort": {"const": "low"}}},
+        {"properties": {"model": {"const": "gpt-5.6-luna"}, "reasoningEffort": {"const": "medium"}}},
+        {"properties": {"model": {"const": "gpt-5.6-terra"}, "reasoningEffort": {"const": "medium"}}},
+        {"properties": {"model": {"const": "gpt-5.6-terra"}, "reasoningEffort": {"const": "high"}}},
+        {"properties": {"model": {"const": "gpt-5.6-sol"}, "reasoningEffort": {"const": "high"}}},
+        {"properties": {"model": {"const": "gpt-5.6-sol"}, "reasoningEffort": {"const": "xhigh"}}},
+        {"properties": {"model": {"const": "gpt-5.6-sol"}, "reasoningEffort": {"const": "max"}}}
+      ]
+    },
+    "launchIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pair",
+        "permissionProfileId",
+        "argvFingerprint",
+        "snapshotIdentityFingerprint",
+        "compatibilityFingerprint",
+        "accountContextFingerprint"
+      ],
+      "properties": {
+        "pair": {"$ref": "#/$defs/modelPair"},
+        "permissionProfileId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+        "argvFingerprint": {"$ref": "#/$defs/sha256"},
+        "snapshotIdentityFingerprint": {"$ref": "#/$defs/sha256"},
+        "compatibilityFingerprint": {"$ref": "#/$defs/sha256"},
+        "accountContextFingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "observedLaunchIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pair",
+        "permissionProfileId",
+        "argvFingerprint",
+        "snapshotIdentityFingerprint",
+        "compatibilityFingerprint",
+        "accountContextFingerprint",
+        "pid",
+        "processStartMarker",
+        "codexBinarySha256"
+      ],
+      "properties": {
+        "pair": {"$ref": "#/$defs/modelPair"},
+        "permissionProfileId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+        "argvFingerprint": {"$ref": "#/$defs/sha256"},
+        "snapshotIdentityFingerprint": {"$ref": "#/$defs/sha256"},
+        "compatibilityFingerprint": {"$ref": "#/$defs/sha256"},
+        "accountContextFingerprint": {"$ref": "#/$defs/sha256"},
+        "pid": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "processStartMarker": {"type": "string", "minLength": 1, "maxLength": 256},
+        "codexBinarySha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "attestationProblem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "code", "message", "retryable"],
+      "properties": {
+        "category": {"enum": ["STALE", "UNAVAILABLE"]},
+        "code": {
+          "enum": [
+            "CHILD_PAIR_CHANGED",
+            "CHILD_REASONING_CHANGED",
+            "CHILD_PERMISSION_PROFILE_CHANGED",
+            "CHILD_SNAPSHOT_CHANGED",
+            "CHILD_ACCOUNT_CONTEXT_CHANGED",
+            "CHILD_ATTESTATION_UNAVAILABLE"
+          ]
+        },
+        "message": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "retryable": {"type": "boolean"}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "category": {"const": "STALE"},
+            "code": {"enum": ["CHILD_PAIR_CHANGED", "CHILD_REASONING_CHANGED", "CHILD_PERMISSION_PROFILE_CHANGED", "CHILD_SNAPSHOT_CHANGED", "CHILD_ACCOUNT_CONTEXT_CHANGED"]}
+          }
+        },
+        {
+          "properties": {
+            "category": {"const": "UNAVAILABLE"},
+            "code": {"const": "CHILD_ATTESTATION_UNAVAILABLE"}
+          }
+        }
+      ]
+    }
+  }
+}

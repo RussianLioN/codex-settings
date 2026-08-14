@@ -1,0 +1,383 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "catalogGeneration": {
+      "maxLength": 20,
+      "minLength": 20,
+      "pattern": "^cg1_[a-f0-9]{16}$",
+      "type": "string"
+    },
+    "lineage": {
+      "additionalProperties": false,
+      "properties": {
+        "generation": {
+          "maximum": 2,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "parentNodeId": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{2,63}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "generation",
+        "parentNodeId"
+      ],
+      "type": "object"
+    },
+    "nodes": {
+      "items": {
+        "additionalProperties": false,
+        "description": "Один ограниченный узел графа. Допустим не более чем один implementer; он обязан быть конечным узлом и транзитивно зависеть от всех остальных.",
+        "properties": {
+          "artifactProfileId": {
+            "maxLength": 64,
+            "minLength": 3,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{2,63}$",
+            "type": "string"
+          },
+          "assessment": {
+            "additionalProperties": false,
+            "description": "Независимая оценка узла по определениям факторов; модель и уровень рассуждения не задавай — их выбирает контроллер.",
+            "properties": {
+              "complexity": {
+                "additionalProperties": false,
+                "description": "Факторы выбора уровня модели. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                "properties": {
+                  "ambiguity": {
+                    "description": "Неопределённость требований и вариантов. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                    "maximum": 2,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "breadth": {
+                    "description": "Ширина затрагиваемых частей и файлов. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                    "maximum": 2,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "crossDomain": {
+                    "description": "Число и различие предметных областей. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                    "maximum": 2,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "dependencyDepth": {
+                    "description": "Глубина зависимых шагов и состояний. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                    "maximum": 2,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "harm": {
+                    "description": "Возможный ущерб от ошибочного решения. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                    "maximum": 2,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "novelty": {
+                    "description": "Новизна решения и нехватка известных образцов. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                    "maximum": 2,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "ambiguity",
+                  "dependencyDepth",
+                  "breadth",
+                  "novelty",
+                  "harm",
+                  "crossDomain"
+                ],
+                "type": "object"
+              },
+              "delegation": {
+                "additionalProperties": false,
+                "description": "Факторы решения о передаче задачи. Используй интервалы, когда оценка неопределённа.",
+                "properties": {
+                  "o": {
+                    "additionalProperties": false,
+                    "description": "Накладные расходы, задержка и цена координации. Задай интервал min..max; min не больше max. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                    "properties": {
+                      "max": {
+                        "description": "Верхняя граница оценки. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                        "maximum": 2,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "min": {
+                        "description": "Нижняя граница оценки. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                        "maximum": 2,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "min",
+                      "max"
+                    ],
+                    "type": "object"
+                  },
+                  "p": {
+                    "additionalProperties": false,
+                    "description": "Польза независимого или параллельного выполнения. Задай интервал min..max; min не больше max. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                    "properties": {
+                      "max": {
+                        "description": "Верхняя граница оценки. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                        "maximum": 2,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "min": {
+                        "description": "Нижняя граница оценки. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                        "maximum": 2,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "min",
+                      "max"
+                    ],
+                    "type": "object"
+                  },
+                  "q": {
+                    "additionalProperties": false,
+                    "description": "Ожидаемый прирост качества от отдельного дочернего агента. Задай интервал min..max; min не больше max. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                    "properties": {
+                      "max": {
+                        "description": "Верхняя граница оценки. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                        "maximum": 2,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "min": {
+                        "description": "Нижняя граница оценки. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                        "maximum": 2,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "min",
+                      "max"
+                    ],
+                    "type": "object"
+                  },
+                  "v": {
+                    "additionalProperties": false,
+                    "description": "Проверяемость результата объективными доказательствами. Задай интервал min..max; min не больше max. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                    "properties": {
+                      "max": {
+                        "description": "Верхняя граница оценки. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                        "maximum": 2,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "min": {
+                        "description": "Нижняя граница оценки. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                        "maximum": 2,
+                        "minimum": 0,
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "min",
+                      "max"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "q",
+                  "p",
+                  "v",
+                  "o"
+                ],
+                "type": "object"
+              },
+              "reasoning": {
+                "additionalProperties": false,
+                "description": "Факторы выбора глубины рассуждения. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                "properties": {
+                  "evidence": {
+                    "description": "Объём, разрозненность и противоречивость доказательств. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                    "maximum": 2,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "harm": {
+                    "description": "Цена ошибки рассуждения. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                    "maximum": 2,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "verification": {
+                    "description": "Трудность проверки вывода и результата. Шкала: 0 — низко, 1 — средне, 2 — высоко.",
+                    "maximum": 2,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "evidence",
+                  "verification",
+                  "harm"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "delegation",
+              "complexity",
+              "reasoning"
+            ],
+            "type": "object"
+          },
+          "clarificationQuestion": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "clientNodeId": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{2,63}$",
+            "type": "string"
+          },
+          "contextRefs": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]{2,63}$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 0,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "dependencyIds": {
+            "description": "Идентификаторы узлов, результаты которых нужны до запуска этого узла.",
+            "items": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[A-Za-z][A-Za-z0-9_-]{2,63}$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 0,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "hardBan": {
+            "enum": [
+              "direct",
+              "clarify"
+            ],
+            "maxLength": 4096,
+            "minLength": 0,
+            "type": "string"
+          },
+          "mission": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "riskFlags": {
+            "items": {
+              "enum": [
+                "security",
+                "architecture",
+                "public_contract",
+                "risky_migration",
+                "irreversible",
+                "critical_incident",
+                "writer_final_validation"
+              ],
+              "maxLength": 32,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 7,
+            "minItems": 0,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "role": {
+            "description": "Назначение узла: исследование, диагностика, реализация, проверка или аудит риска.",
+            "enum": [
+              "researcher",
+              "diagnostician",
+              "implementer",
+              "validator",
+              "risk_auditor"
+            ],
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "scopeId": {
+            "maxLength": 64,
+            "minLength": 3,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{2,63}$",
+            "type": "string"
+          },
+          "validationProfileId": {
+            "maxLength": 64,
+            "minLength": 3,
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{2,63}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "clientNodeId",
+          "mission",
+          "role",
+          "dependencyIds",
+          "contextRefs",
+          "scopeId",
+          "artifactProfileId",
+          "validationProfileId",
+          "assessment",
+          "riskFlags"
+        ],
+        "type": "object"
+      },
+      "maxItems": 20,
+      "minItems": 1,
+      "type": "array"
+    },
+    "requestKey": {
+      "maxLength": 128,
+      "minLength": 8,
+      "pattern": "^[A-Za-z0-9._:-]+$",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "enum": [
+        "1"
+      ],
+      "maxLength": 4096,
+      "minLength": 0,
+      "type": "string"
+    },
+    "turnBinding": {
+      "maxLength": 47,
+      "minLength": 47,
+      "pattern": "^tb1_[A-Za-z0-9_-]{43}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "turnBinding",
+    "requestKey",
+    "catalogGeneration",
+    "nodes"
+  ],
+  "type": "object"
+}

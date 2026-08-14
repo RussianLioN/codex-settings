@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/installation-uninstall-receipt-v2.schema.json",
+  "title": "installation-uninstall-receipt-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "receiptKind", "installationId", "operationId", "frozenJournalFingerprint", "dataRetentionMode", "retainedData", "removedState", "restoredOriginalBackup", "absenceProof", "receiptFingerprint", "completedAt"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "receiptKind": {"const": "installation-uninstall"},
+    "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"},
+    "operationId": {"type": "string", "pattern": "^op2_[0-9a-f]{32}$"},
+    "frozenJournalFingerprint": {"$ref": "#/$defs/sha256"},
+    "dataRetentionMode": {"const": "retain-data"},
+    "retainedData": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["databaseBinding", "backupsRoot", "quarantineRoot", "recoveryEntrypoint"],
+      "properties": {
+        "databaseBinding": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "database-binding-v2"}}},
+        "backupsRoot": {"type": "string", "pattern": "^/"},
+        "quarantineRoot": {"type": "string", "pattern": "^/"},
+        "recoveryEntrypoint": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "file-object-v2"}}}
+      }
+    },
+    "removedState": {"$ref": "operation-journal-v2.schema.json#/$defs/stateBundle"},
+    "restoredOriginalBackup": {
+      "oneOf": [
+        {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "file-object-v2"}}},
+        {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "absence-proof-v2"}}}
+      ]
+    },
+    "absenceProof": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "absence-proof-v2"}}},
+    "receiptFingerprint": {"$ref": "#/$defs/sha256"},
+    "completedAt": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {"sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

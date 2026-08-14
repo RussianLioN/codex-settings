@@ -12,10 +12,26 @@ from types import ModuleType
 
 ROOT = Path(__file__).resolve().parents[2]
 VALIDATOR = ROOT / "scripts" / "validate_autonomous_workflow.py"
+TARGET_ALIASES = (
+    b"alias codex='CODEX_SMART_ENABLED=1 "
+    b"$HOME/.local/bin/codex-highfd'\n"
+    b"alias codex-native='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd'\n"
+    b"alias codexs='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --profile standard'\n"
+    b"alias codexro='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --profile safe-readonly'\n"
+    b"alias codexwide='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --profile wide-readers'\n"
+    b"alias codexfa='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --profile full-access'\n"
+    b"alias codexfd='CODEX_SMART_ENABLED=0 CODEX_SMART_REQUIRED=0 "
+    b"$HOME/.local/bin/codex-highfd --fd-doctor'\n"
+)
 
 
 def load_validator() -> ModuleType:
-    name = "autonomous_workflow_resource_contract_under_test"
+    name = "autonomous_workflow_contract_under_test"
     spec = importlib.util.spec_from_file_location(name, VALIDATOR)
     if spec is None or spec.loader is None:
         raise AssertionError(f"cannot load validator: {VALIDATOR}")
@@ -25,10 +41,105 @@ def load_validator() -> ModuleType:
     return module
 
 
+class AutonomousWorkflowEntrypointContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.validator = load_validator()
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory(
+            dir="/tmp",
+            prefix="autonomous-workflow-entrypoint-",
+        )
+        self.root = Path(self.temporary.name)
+        self.aliases = self.root / "codex-autonomous-aliases.zsh"
+        self.installed_highfd = self.root / "installed-codex-highfd"
+        self.tracked_highfd = self.root / "tracked-codex-highfd"
+        self.journal = self.root / "codex-entrypoint-v1.journal.json"
+        self.aliases.write_bytes(TARGET_ALIASES)
+        self.tracked_highfd.write_bytes(b"tracked highfd\n")
+        self.installed_highfd.write_bytes(self.tracked_highfd.read_bytes())
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def _failures(self) -> list[str]:
+        return self.validator.entrypoint_contract_failures(
+            aliases_path=self.aliases,
+            installed_highfd_path=self.installed_highfd,
+            tracked_highfd_path=self.tracked_highfd,
+            journal_path=self.journal,
+        )
+
+    def test_exact_managed_entrypoint_contract_is_healthy(self) -> None:
+        self.assertEqual(TARGET_ALIASES, self.validator.ENTRYPOINT_ALIASES_BYTES)
+        self.assertEqual([], self._failures())
+
+    def test_alias_contract_rejects_one_byte_drift_and_legacy_substrings(
+        self,
+    ) -> None:
+        self.aliases.write_bytes(
+            b"# tolerated-looking prefix\n" + TARGET_ALIASES
+        )
+
+        failures = self._failures()
+
+        self.assertTrue(
+            any("exact managed bytes" in failure for failure in failures),
+            failures,
+        )
+
+    def test_highfd_contract_accepts_only_current_tracked_bytes(self) -> None:
+        self.installed_highfd.write_bytes(b"supported legacy highfd\n")
+
+        failures = self._failures()
+
+        self.assertTrue(
+            any("tracked codex-highfd hash" in failure for failure in failures),
+            failures,
+        )
+
+    def test_healthy_contract_rejects_a_pending_reconciler_journal(self) -> None:
+        self.journal.write_text("{}\n", encoding="utf-8")
+
+        failures = self._failures()
+
+        self.assertTrue(
+            any("reconciler journal" in failure for failure in failures),
+            failures,
+        )
+
+    def test_contract_reports_missing_files_without_using_real_home(self) -> None:
+        self.aliases.unlink()
+        self.installed_highfd.unlink()
+
+        failures = self._failures()
+
+        self.assertTrue(
+            any(str(self.aliases) in failure for failure in failures),
+            failures,
+        )
+        self.assertTrue(
+            any(str(self.installed_highfd) in failure for failure in failures),
+            failures,
+        )
+
 class AutonomousWorkflowResourceLimitTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.validator = load_validator()
+
+    def parse_fd_doctor_output(
+        self,
+        completed: subprocess.CompletedProcess[str],
+    ) -> dict[str, str]:
+        fields: dict[str, str] = {}
+        for line in completed.stdout.splitlines():
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            fields[key] = value
+        return fields
 
     def test_base_config_rejects_missing_public_thread_cap_and_legacy_limits(
         self,
@@ -100,14 +211,20 @@ class AutonomousWorkflowResourceLimitTests(unittest.TestCase):
 
     def test_fd_doctor_accepts_sufficient_fd_and_process_headroom(self) -> None:
         completed = self.run_fd_doctor(6)
+        fields = self.parse_fd_doctor_output(completed)
 
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
-        self.assertIn("status=OK", completed.stdout)
-        self.assertIn("launchd_fd_soft_limit=4096", completed.stdout)
-        self.assertIn("user_process_soft_limit=2666", completed.stdout)
-        self.assertIn("user_process_count=100", completed.stdout)
-        self.assertIn("process_headroom=2566", completed.stdout)
-        self.assertIn("required_process_headroom=248", completed.stdout)
+        self.assertEqual("OK", fields["status"])
+        self.assertEqual("4096", fields["launchd_fd_soft_limit"])
+        self.assertEqual("100", fields["user_process_count"])
+        self.assertEqual(
+            int(fields["user_process_soft_limit"]) - int(fields["user_process_count"]),
+            int(fields["process_headroom"]),
+        )
+        self.assertGreaterEqual(
+            int(fields["process_headroom"]),
+            int(fields["required_process_headroom"]),
+        )
 
     def test_fd_doctor_blocks_when_process_headroom_is_too_low(self) -> None:
         completed = self.run_fd_doctor(
@@ -150,11 +267,18 @@ class AutonomousWorkflowResourceLimitTests(unittest.TestCase):
             CODEX_FD_DOCTOR_LAUNCHD_SOFT_LIMIT="256",
             CODEX_FD_DOCTOR_LAUNCHD_MAXPROC_SOFT_LIMIT="2666",
         )
+        fields = self.parse_fd_doctor_output(completed)
 
         self.assertEqual(1, completed.returncode, completed.stdout + completed.stderr)
-        self.assertIn("soft_limit_below_1024", completed.stdout)
-        self.assertIn("launchd_fd_soft_limit=256", completed.stdout)
-        self.assertIn("user_process_soft_limit=2666", completed.stdout)
+        self.assertEqual("WARN", fields["status"])
+        self.assertEqual("256", fields["launchd_fd_soft_limit"])
+        self.assertEqual(
+            min(
+                int(fields["launchd_process_limit"]),
+                int(fields["kern_maxprocperuid"]),
+            ),
+            int(fields["user_process_soft_limit"]),
+        )
         self.assertNotIn("process_headroom_below", completed.stdout)
 
     def test_fd_doctor_accepts_safe_public_cap_with_toml_comment(self) -> None:
@@ -266,7 +390,6 @@ enabled = true
         ]
         failures = self.validator.managed_hook_contract_failures(wrong_timeout, policy_path)
         self.assertTrue(any("SessionEnd managed hook timeout must be 3" in failure for failure in failures), failures)
-
 
 if __name__ == "__main__":
     unittest.main()

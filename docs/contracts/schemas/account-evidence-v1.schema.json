@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/account-evidence-v1.schema.json",
+  "title": "account-evidence-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "subject",
+    "codexHome",
+    "requirements",
+    "availablePairs",
+    "compatibilityFingerprint",
+    "requirementsFingerprint",
+    "accountCatalogFingerprint",
+    "accountContextFingerprint",
+    "collection",
+    "recordFingerprint"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "contractVersion": {
+      "const": "codex-account-v1"
+    },
+    "subject": {
+      "$ref": "#/$defs/subjectReference"
+    },
+    "codexHome": {
+      "$ref": "#/$defs/path"
+    },
+    "requirements": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "config-requirements-normalized-v1.schema.json#/$defs/configRequirements"
+        }
+      ]
+    },
+    "availablePairs": {
+      "type": "array",
+      "maxItems": 800,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/modelPair"
+      }
+    },
+    "compatibilityFingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "requirementsFingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "accountCatalogFingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "accountContextFingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "collection": {
+      "$ref": "#/$defs/collection"
+    },
+    "recordFingerprint": {
+      "$ref": "#/$defs/sha256"
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "finishedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "extensions": {
+      "type": "object",
+      "maxProperties": 128
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^/"
+    },
+    "subjectReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshotPath",
+        "snapshotSha256",
+        "subjectFingerprint"
+      ],
+      "properties": {
+        "snapshotPath": {
+          "$ref": "#/$defs/path"
+        },
+        "snapshotSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "subjectFingerprint": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "modelPair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "reasoningEffort"
+      ],
+      "properties": {
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "reasoningEffort": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        }
+      }
+    },
+    "rootReferences": {
+      "const": {
+        "executablePath": "#/subject/snapshotPath",
+        "subjectFingerprint": "#/subject/subjectFingerprint",
+        "compatibilityFingerprint": "#/compatibilityFingerprint",
+        "requirementsResult": "#/requirementsFingerprint",
+        "catalogResult": "#/accountCatalogFingerprint"
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "CODEX_HOME",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "NO_COLOR",
+        "PATH",
+        "TMPDIR"
+      ],
+      "properties": {
+        "CODEX_HOME": {
+          "$ref": "#/$defs/path"
+        },
+        "HOME": {
+          "$ref": "#/$defs/path"
+        },
+        "LANG": {
+          "const": "C"
+        },
+        "LC_ALL": {
+          "const": "C"
+        },
+        "NO_COLOR": {
+          "const": "1"
+        },
+        "PATH": {
+          "const": "/usr/bin:/bin:/usr/sbin:/sbin"
+        },
+        "TMPDIR": {
+          "$ref": "#/$defs/path"
+        }
+      }
+    },
+    "processBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ordinal",
+        "stage",
+        "resultFingerprintRef",
+        "processFingerprint"
+      ],
+      "properties": {
+        "ordinal": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "stage": {
+          "enum": [
+            "requirements-a",
+            "catalog-a",
+            "requirements-b",
+            "catalog-b",
+            "requirements-c"
+          ]
+        },
+        "resultFingerprintRef": {
+          "enum": [
+            "#/requirementsFingerprint",
+            "#/accountCatalogFingerprint"
+          ]
+        },
+        "processFingerprint": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "requirementsA": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ordinal": {
+              "const": 1
+            },
+            "stage": {
+              "const": "requirements-a"
+            },
+            "resultFingerprintRef": {
+              "const": "#/requirementsFingerprint"
+            }
+          }
+        }
+      ]
+    },
+    "catalogA": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ordinal": {
+              "const": 2
+            },
+            "stage": {
+              "const": "catalog-a"
+            },
+            "resultFingerprintRef": {
+              "const": "#/accountCatalogFingerprint"
+            }
+          }
+        }
+      ]
+    },
+    "requirementsB": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ordinal": {
+              "const": 3
+            },
+            "stage": {
+              "const": "requirements-b"
+            },
+            "resultFingerprintRef": {
+              "const": "#/requirementsFingerprint"
+            }
+          }
+        }
+      ]
+    },
+    "catalogB": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ordinal": {
+              "const": 4
+            },
+            "stage": {
+              "const": "catalog-b"
+            },
+            "resultFingerprintRef": {
+              "const": "#/accountCatalogFingerprint"
+            }
+          }
+        }
+      ]
+    },
+    "requirementsC": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/processBase"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ordinal": {
+              "const": 5
+            },
+            "stage": {
+              "const": "requirements-c"
+            },
+            "resultFingerprintRef": {
+              "const": "#/requirementsFingerprint"
+            }
+          }
+        }
+      ]
+    },
+    "collection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootReferences",
+        "argv",
+        "environment",
+        "environmentFingerprint",
+        "processes",
+        "collectionFingerprint"
+      ],
+      "properties": {
+        "rootReferences": {
+          "$ref": "#/$defs/rootReferences"
+        },
+        "argv": {
+          "const": [
+            "app-server",
+            "--strict-config",
+            "--listen",
+            "stdio://"
+          ]
+        },
+        "environment": {
+          "$ref": "#/$defs/environment"
+        },
+        "environmentFingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "processes": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/requirementsA"
+            },
+            {
+              "$ref": "#/$defs/catalogA"
+            },
+            {
+              "$ref": "#/$defs/requirementsB"
+            },
+            {
+              "$ref": "#/$defs/catalogB"
+            },
+            {
+              "$ref": "#/$defs/requirementsC"
+            }
+          ],
+          "items": false
+        },
+        "collectionFingerprint": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

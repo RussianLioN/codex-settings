@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codex-settings.local/schemas/cleanup-journal-v2.schema.json",
+  "title": "cleanup-journal-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "cleanupId", "installationId", "baseCommitReceipt", "phase", "cleanupPlan", "protectedObjects", "objects", "steps", "terminalDeleteIntent", "createdAt", "updatedAt", "journalFingerprint"],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "cleanupId": {"type": "string", "pattern": "^cl2_[0-9a-f]{32}$"},
+    "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"},
+    "baseCommitReceipt": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "receipt-object-v2"}, "value": {"properties": {"receiptKind": {"const": "activation-commit"}}}}},
+    "phase": {"enum": ["PLANNED", "APPLYING", "FAILED", "TERMINAL_FROZEN"]},
+    "cleanupPlan": {"$ref": "#/$defs/cleanupPlan"},
+    "protectedObjects": {"type": "array", "maxItems": 256, "items": {"$ref": "lifecycle-projection-v2.schema.json"}},
+    "objects": {
+      "type": "array",
+      "maxItems": 127,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["objectId", "kind", "before", "expectedAbsence", "state"],
+        "properties": {
+          "objectId": {"type": "string", "pattern": "^co2_[0-9a-f]{32}$"},
+          "kind": {"enum": ["activation", "database", "codex-snapshot", "smoke-tree", "evidence", "receipt"]},
+          "before": {"$ref": "lifecycle-projection-v2.schema.json"},
+          "expectedAbsence": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "absence-proof-v2"}}},
+          "state": {"enum": ["PLANNED", "INTENT_DURABLE", "DELETED", "PROTECTED", "AMBIGUOUS"]}
+        }
+      }
+    },
+    "steps": {"type": "array", "maxItems": 128, "items": {"$ref": "operation-step-v2.schema.json", "properties": {"recordCarrier": {"enum": ["JOURNAL_MUTABLE", "JOURNAL_ATOMIC_BOUNDARY"]}}}},
+    "terminalDeleteIntent": {"$ref": "#/$defs/nullableTerminalDeleteIntent"},
+    "createdAt": {"type": "string", "format": "date-time"},
+    "updatedAt": {"type": "string", "format": "date-time"},
+    "journalFingerprint": {"$ref": "#/$defs/sha256"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"phase": {"const": "TERMINAL_FROZEN"}}, "required": ["phase"]},
+      "then": {
+        "properties": {
+          "terminalDeleteIntent": {"$ref": "#/$defs/terminalDeleteIntent"},
+          "steps": {
+            "contains": {
+              "properties": {
+                "kind": {"const": "terminal_journal_freeze"},
+                "state": {"const": "COMPLETED"},
+                "recordCarrier": {"const": "JOURNAL_ATOMIC_BOUNDARY"}
+              },
+              "required": ["kind", "state", "recordCarrier"]
+            },
+            "minContains": 1,
+            "maxContains": 1
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "terminalDeleteIntent": {"type": "null"},
+          "steps": {
+            "not": {
+              "contains": {
+                "properties": {"kind": {"const": "terminal_journal_freeze"}},
+                "required": ["kind"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "cleanupPlan": {
+      "type": "object", "additionalProperties": false,
+      "required": ["planId", "selectionSource", "objectOrderIds", "terminalStepKind", "firstIncompleteOrdinal", "planDefinitionFingerprint"],
+      "properties": {
+        "planId": {"type": "string", "pattern": "^pl2_[0-9a-f]{32}$"},
+        "selectionSource": {"const": "BASE_COMMIT_RECEIPT_AND_OWNED_OBJECT_DISCOVERY_BEFORE_FIRST_EFFECT"},
+        "objectOrderIds": {"type": "array", "maxItems": 127, "uniqueItems": true, "items": {"type": "string", "pattern": "^co2_[0-9a-f]{32}$"}},
+        "terminalStepKind": {"const": "terminal_journal_freeze"},
+        "firstIncompleteOrdinal": {"type": "integer", "minimum": 0, "maximum": 128},
+        "planDefinitionFingerprint": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "terminalDeleteIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["terminalKind", "receiptKind", "receiptPath", "terminalStateFingerprint", "completedStepIds", "postFreezeActionKinds", "receiptPayloadIntent", "tombstonePayloadIntent", "journalAbsenceTarget", "frozenAt"],
+      "properties": {
+        "terminalKind": {"const": "CLEANUP"},
+        "receiptKind": {"const": "cleanup"},
+        "receiptPath": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^/"},
+        "terminalStateFingerprint": {"$ref": "#/$defs/sha256"},
+        "completedStepIds": {"type": "array", "maxItems": 128, "uniqueItems": true, "items": {"type": "string", "pattern": "^st2_[0-9a-f]{32}$"}},
+        "postFreezeActionKinds": {"const": ["cleanup_receipt_publish", "cleanup_journal_close"]},
+        "receiptPayloadIntent": {
+          "type": "object", "additionalProperties": false,
+          "required": ["payloadKind", "cleanupId", "installationId", "baseCommitReceipt", "removedObjects", "absenceProof", "completedAt"],
+          "properties": {
+            "payloadKind": {"const": "cleanup"},
+            "cleanupId": {"type": "string", "pattern": "^cl2_[0-9a-f]{32}$"},
+            "installationId": {"type": "string", "pattern": "^ins2_[0-9a-f]{32}$"},
+            "baseCommitReceipt": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "receipt-object-v2"}, "value": {"properties": {"receiptKind": {"const": "activation-commit"}}}}},
+            "removedObjects": {"type": "array", "maxItems": 127, "items": {"$ref": "lifecycle-projection-v2.schema.json"}},
+            "absenceProof": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "absence-proof-v2"}}},
+            "completedAt": {"type": "string", "format": "date-time"}
+          }
+        },
+        "tombstonePayloadIntent": {"type": "null"},
+        "journalAbsenceTarget": {"$ref": "lifecycle-projection-v2.schema.json", "properties": {"schemaId": {"const": "absence-proof-v2"}}},
+        "frozenAt": {"type": "string", "format": "date-time"}
+      }
+    },
+    "nullableTerminalDeleteIntent": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/terminalDeleteIntent"}]}
+  }
+}
