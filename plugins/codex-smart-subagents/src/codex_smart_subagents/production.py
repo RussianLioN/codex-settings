@@ -178,11 +178,11 @@ class LiveChildRunnerFactory:
         work_request: ChildWorkRequest,
         _runtime: object,
     ) -> ChildRunner:
-        git_head = work_request.repository / ".git" / "HEAD"
+        git_control_file = _git_control_probe_file(work_request.repository)
         relative = _first_snapshot_file(snapshot.root)
         if relative is None:
             snapshot_file = snapshot.root
-            source_file = git_head
+            source_file = git_control_file
         else:
             snapshot_file = snapshot.root / relative
             source_file = work_request.repository / relative
@@ -192,7 +192,7 @@ class LiveChildRunnerFactory:
             snapshot_read_file=snapshot_file,
             snapshot_write_file=snapshot_file,
             secret_read_file=auth_file,
-            source_git_read_file=git_head,
+            source_git_read_file=git_control_file,
             controller_database_read_file=self.store.path,
             source_worktree_write_file=source_file,
             controller_socket=self.controller_socket,
@@ -764,6 +764,19 @@ def _first_snapshot_file(root: Path) -> Path | None:
         if candidate.is_file() and not candidate.is_symlink():
             return candidate.relative_to(root)
     return None
+
+
+def _git_control_probe_file(repository: Path) -> Path:
+    git_path = repository / ".git"
+    try:
+        metadata = git_path.lstat()
+    except OSError:
+        return git_path
+    if stat.S_ISREG(metadata.st_mode):
+        return git_path
+    if stat.S_ISDIR(metadata.st_mode):
+        return git_path / "HEAD"
+    return git_path
 
 
 def _required_auth_file(codex_home: Path) -> Path:

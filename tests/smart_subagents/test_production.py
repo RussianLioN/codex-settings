@@ -361,6 +361,10 @@ class ProductionCompositionTests(unittest.TestCase):
         self.assertEqual(snapshot.root.resolve(), targets.snapshot_write_file)
         self.assertEqual(
             (repository / ".git" / "HEAD").resolve(),
+            targets.source_git_read_file,
+        )
+        self.assertEqual(
+            (repository / ".git" / "HEAD").resolve(),
             targets.source_worktree_write_file,
         )
 
@@ -409,9 +413,82 @@ class ProductionCompositionTests(unittest.TestCase):
             targets.snapshot_write_file,
         )
         self.assertEqual(
+            (repository / ".git" / "HEAD").resolve(),
+            targets.source_git_read_file,
+        )
+        self.assertEqual(
             (repository / "nested" / "readme.txt").resolve(),
             targets.source_worktree_write_file,
         )
+
+    def test_live_child_runner_uses_git_file_for_empty_linked_worktree(
+        self,
+    ) -> None:
+        primary, linked = self._real_linked_worktree()
+        del primary
+        snapshot = self._snapshot_result("linked-empty-snapshot", files=())
+        profile = PermissionProfileDefinition.reader(
+            name="adaptive_reader",
+            snapshot_root=snapshot.root,
+        )
+        captured: list[dict[str, object]] = []
+
+        class CapturingCanary:
+            def __init__(self, **kwargs: object) -> None:
+                captured.append(kwargs)
+
+        listener = self._controller_listener()
+        try:
+            with mock.patch(
+                "codex_smart_subagents.production.LivePermissionCanary",
+                CapturingCanary,
+            ):
+                runner = self._runner_factory(listener)(
+                    profile,
+                    snapshot,
+                    self._work_request(linked),
+                    object(),
+                )
+        finally:
+            listener.close()
+
+        self.assertIsNotNone(runner)
+        self.assertEqual(1, len(captured))
+        targets = captured[0]["targets"]
+        self.assertEqual(snapshot.root.resolve(), targets.snapshot_read_file)
+        self.assertEqual(snapshot.root.resolve(), targets.snapshot_write_file)
+        self.assertEqual((linked / ".git").resolve(), targets.source_git_read_file)
+        self.assertEqual(
+            (linked / ".git").resolve(),
+            targets.source_worktree_write_file,
+        )
+
+    def test_live_child_runner_rejects_unsafe_git_control_probe(self) -> None:
+        repository = self.root / "unsafe-git-link"
+        repository.mkdir()
+        target = self.root / "unsafe-git-target"
+        target.mkdir()
+        (target / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        (repository / ".git").symlink_to(target, target_is_directory=True)
+        snapshot = self._snapshot_result("unsafe-empty-snapshot", files=())
+        profile = PermissionProfileDefinition.reader(
+            name="adaptive_reader",
+            snapshot_root=snapshot.root,
+        )
+        listener = self._controller_listener()
+        try:
+            with self.assertRaisesRegex(
+                ValueError,
+                "source_git_read_file must be an absolute non-symlink file",
+            ):
+                self._runner_factory(listener)(
+                    profile,
+                    snapshot,
+                    self._work_request(repository),
+                    object(),
+                )
+        finally:
+            listener.close()
 
     def test_builds_controller_executor_and_closes_owned_socket(self) -> None:
         runtime = build_production_runtime(self.config)
@@ -476,6 +553,44 @@ class ProductionCompositionTests(unittest.TestCase):
         listener.bind(os.fspath(path))
         listener.listen(1)
         return listener
+
+    def _git_no_hooks(self, repository: Path, *arguments: str) -> str:
+        return subprocess.run(
+            [
+                "/usr/bin/git",
+                "-C",
+                str(repository),
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "commit.gpgsign=false",
+                *arguments,
+            ],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        ).stdout.strip()
+
+    def _real_linked_worktree(self) -> tuple[Path, Path]:
+        primary = self.root / "real-primary"
+        linked = self.root / "real-linked"
+        primary.mkdir()
+        self._git_no_hooks(primary, "init", "-q")
+        self._git_no_hooks(primary, "config", "user.name", "Codex Test")
+        self._git_no_hooks(primary, "config", "user.email", "codex@example.invalid")
+        self._git_no_hooks(primary, "commit", "--allow-empty", "-qm", "empty")
+        self._git_no_hooks(
+            primary,
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "linked-empty",
+            str(linked),
+        )
+        self.assertTrue((linked / ".git").is_file())
+        return primary, linked
 
     def _source_repository(
         self,
