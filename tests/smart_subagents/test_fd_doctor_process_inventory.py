@@ -18,6 +18,7 @@ NODE_REPL = "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
 class FdDoctorProcessInventoryTests(unittest.TestCase):
     def base_environment(self) -> dict[str, str]:
         environment = os.environ.copy()
+        environment.pop("CODEX_HOME", None)
         environment.update(
             {
                 "CODEX_FD_DOCTOR_SOFT_LIMIT": "4096",
@@ -42,13 +43,16 @@ class FdDoctorProcessInventoryTests(unittest.TestCase):
         environment: dict[str, str],
         *args: str,
     ) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [str(FD_DOCTOR), "--wave-size", "6", *args],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=environment,
-        )
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="fd-doctor-codex-home-") as temporary:
+            isolated_environment = dict(environment)
+            isolated_environment.setdefault("CODEX_HOME", temporary)
+            return subprocess.run(
+                [str(FD_DOCTOR), "--wave-size", "6", *args],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=isolated_environment,
+            )
 
     def write_trusted_wide_wave_inputs(self, root: Path, *, wave_size: int = 19) -> tuple[Path, Path, Path]:
         skill = root / "consilium-skill.md"
