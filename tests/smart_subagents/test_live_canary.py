@@ -7,6 +7,7 @@ import re
 import shlex
 import socket
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -35,6 +36,7 @@ from codex_smart_subagents.live_canary import (  # noqa: E402
     StrictAppServerClient,
     SubprocessExecutor,
     _StrictJsonLineReader,
+    _SANDBOX_PROBE,
     expected_model_refresh_timeout_stderr,
     _read_app_server_response,
     _validate_initialize_result,
@@ -949,6 +951,66 @@ class LivePermissionCanaryTests(unittest.TestCase):
                 for command in self.executor.commands
             )
         )
+
+    def test_sandbox_probe_executes_snapshot_directory_branch_with_real_ruby(
+        self,
+    ) -> None:
+        ruby = Path("/usr/bin/ruby")
+        if not ruby.exists():
+            self.skipTest("/usr/bin/ruby is unavailable")
+
+        protected_snapshot = self.base / "empty-snapshot-0500"
+        protected_snapshot.mkdir(mode=0o700)
+        protected_snapshot.chmod(0o500)
+        writable_snapshot = self.base / "empty-snapshot-0700"
+        writable_snapshot.mkdir(mode=0o700)
+        loopback_probe = socket.socket(socket.AF_INET)
+        loopback_probe.bind(("127.0.0.1", 0))
+        loopback_port = loopback_probe.getsockname()[1]
+        loopback_probe.close()
+
+        def run_probe(snapshot: Path) -> dict[str, object]:
+            payload = {
+                "snapshot_read": str(snapshot),
+                "snapshot_write": str(snapshot),
+                "secret_read": str(self.secret),
+                "source_git_read": str(self.source_git),
+                "controller_database_read": str(self.database),
+                "source_write": str(self.source),
+                "external_address": "192.0.2.1",
+                "dns_address": "192.0.2.1",
+                "udp_port": loopback_port,
+                "loopback_port": loopback_port,
+                "controller_socket": str(self.controller_socket),
+            }
+            completed = subprocess.run(
+                [
+                    str(ruby),
+                    "--disable-gems",
+                    "-rjson",
+                    "-rsocket",
+                    "-e",
+                    _SANDBOX_PROBE,
+                    json.dumps(payload, sort_keys=True),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+                timeout=5,
+            )
+            output = completed.stdout.decode("utf-8").strip()
+            self.assertTrue(output.startswith(SANDBOX_RESULT_PREFIX), output)
+            return json.loads(output[len(SANDBOX_RESULT_PREFIX) :])
+
+        protected_result = run_probe(protected_snapshot)
+        self.assertTrue(protected_result["snapshot_read_allowed"])
+        self.assertTrue(protected_result["snapshot_write_denied"])
+        self.assertEqual([], list(protected_snapshot.glob(".codex-permission-canary-*")))
+
+        writable_result = run_probe(writable_snapshot)
+        self.assertTrue(writable_result["snapshot_read_allowed"])
+        self.assertFalse(writable_result["snapshot_write_denied"])
+        self.assertEqual([], list(writable_snapshot.glob(".codex-permission-canary-*")))
 
     def test_legacy_sandbox_or_managed_hash_mismatch_fails_before_processes(
         self,
