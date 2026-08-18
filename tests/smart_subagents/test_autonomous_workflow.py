@@ -60,33 +60,35 @@ class AutonomousWorkflowResourceLimitTests(unittest.TestCase):
         wave_size: int,
         **overrides: str,
     ) -> subprocess.CompletedProcess[str]:
-        environment = os.environ.copy()
-        environment.update(
-            {
-                "CODEX_FD_DOCTOR_SOFT_LIMIT": "4096",
-                "CODEX_FD_DOCTOR_HARD_LIMIT": "unlimited",
-                "CODEX_FD_DOCTOR_LAUNCHD_FD_SOFT_LIMIT": "4096",
-                "CODEX_FD_DOCTOR_CODEX_FD_COUNT": "32",
-                "CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT": "2",
-                "CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT": "2",
-                "CODEX_FD_DOCTOR_ORPHAN_NODE_REPL_COUNT": "0",
-                "CODEX_FD_DOCTOR_STALE_NODE_REPL_COUNT": "0",
-                "CODEX_FD_DOCTOR_MCP_COMMAND": "/bin/sh",
-                "CODEX_FD_DOCTOR_AGENT_THREAD_CAP": "20",
-                "CODEX_FD_DOCTOR_USER_PROCESS_SOFT_LIMIT": "4096",
-                "CODEX_FD_DOCTOR_LAUNCHD_MAXPROC_SOFT_LIMIT": "2666",
-                "CODEX_FD_DOCTOR_USER_PROCESS_COUNT": "100",
-                "CODEX_FD_DOCTOR_TEST_MODE": "1",
-            }
-        )
-        environment.update(overrides)
-        return subprocess.run(
-            [str(self.validator.FD_DOCTOR), "--wave-size", str(wave_size)],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=environment,
-        )
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="fd-doctor-isolated-home-") as root:
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "CODEX_HOME": str(Path(root) / ".codex"),
+                    "CODEX_FD_DOCTOR_SOFT_LIMIT": "4096",
+                    "CODEX_FD_DOCTOR_HARD_LIMIT": "unlimited",
+                    "CODEX_FD_DOCTOR_LAUNCHD_FD_SOFT_LIMIT": "4096",
+                    "CODEX_FD_DOCTOR_CODEX_FD_COUNT": "32",
+                    "CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT": "2",
+                    "CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT": "2",
+                    "CODEX_FD_DOCTOR_ORPHAN_NODE_REPL_COUNT": "0",
+                    "CODEX_FD_DOCTOR_STALE_NODE_REPL_COUNT": "0",
+                    "CODEX_FD_DOCTOR_MCP_COMMAND": "/bin/sh",
+                    "CODEX_FD_DOCTOR_AGENT_THREAD_CAP": "20",
+                    "CODEX_FD_DOCTOR_USER_PROCESS_SOFT_LIMIT": "4096",
+                    "CODEX_FD_DOCTOR_LAUNCHD_MAXPROC_SOFT_LIMIT": "2666",
+                    "CODEX_FD_DOCTOR_USER_PROCESS_COUNT": "100",
+                    "CODEX_FD_DOCTOR_TEST_MODE": "1",
+                }
+            )
+            environment.update(overrides)
+            return subprocess.run(
+                [str(self.validator.FD_DOCTOR), "--wave-size", str(wave_size)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=environment,
+            )
 
     def test_fd_doctor_leaves_profile_thread_cap_to_config_validator(self) -> None:
         completed = self.run_fd_doctor(

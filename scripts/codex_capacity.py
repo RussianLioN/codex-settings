@@ -1909,10 +1909,8 @@ def prepare_wave(
     exact_nineteen_required = (
         requested_wave_size > DEFAULT_CAPACITY
         and bool(trust["trusted"])
-        and (
-            requested_wave_size != 19
-            or wide_wave_skill_id != "consilium"
-        )
+        and wide_wave_skill_id == "consilium"
+        and requested_wave_size != 19
     )
     if exact_nineteen_required:
         trust["reason"] = "wide_wave_requires_exact_nineteen"
