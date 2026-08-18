@@ -63,6 +63,51 @@ if [[ ! "$wave_size" =~ ^[1-9][0-9]*$ ]] || (( wave_size > MAX_WAVE_SIZE )); the
   exit 2
 fi
 
+temporary_override_active() {
+  local codex_home=${CODEX_HOME:-$HOME/.codex}
+  local state_path="$codex_home/state/temporary-guardrails-override.json"
+  [[ -f "$state_path" && ! -L "$state_path" ]] || return 1
+  python3 - "$codex_home" "$state_path" <<'PY'
+import hashlib
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+
+codex_home = Path(sys.argv[1]).expanduser().resolve(strict=False)
+state_path = Path(sys.argv[2])
+try:
+    state_stat = state_path.stat()
+    if state_stat.st_uid != os.getuid() or stat.S_IMODE(state_stat.st_mode) != 0o600:
+        raise ValueError
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    if payload.get("version") != 1 or payload.get("status") != "enabled":
+        raise ValueError
+    entries = payload.get("targets")
+    if not isinstance(entries, list) or {entry.get("name") for entry in entries if isinstance(entry, dict)} != {"config.toml", "hooks.json", "AGENTS.md"}:
+        raise ValueError
+    for entry in entries:
+        target = codex_home / entry["name"]
+        if target.is_symlink() or not target.is_file():
+            raise ValueError
+        if hashlib.sha256(target.read_bytes()).hexdigest() != entry.get("disabled_sha256"):
+            raise ValueError
+except (OSError, ValueError, TypeError, json.JSONDecodeError):
+    raise SystemExit(1)
+PY
+}
+
+if temporary_override_active; then
+  print -- "status=OK"
+  print -- "wave_size=$wave_size"
+  print -- "allowed_wave_size=$wave_size"
+  print -- "capacity_decision=ALLOW"
+  print -- "temporary_guardrails_override=enabled"
+  print -- "reasons=temporary_guardrails_override_enabled"
+  exit 0
+fi
+
 soft_limit=${CODEX_FD_DOCTOR_SOFT_LIMIT:-$(ulimit -Sn)}
 hard_limit=${CODEX_FD_DOCTOR_HARD_LIMIT:-$(ulimit -Hn)}
 launchd_fd_soft_limit=${CODEX_FD_DOCTOR_LAUNCHD_FD_SOFT_LIMIT:-${CODEX_FD_DOCTOR_LAUNCHD_SOFT_LIMIT:-$(launchctl limit maxfiles 2>/dev/null | awk 'NR == 1 { print $2 }')}}

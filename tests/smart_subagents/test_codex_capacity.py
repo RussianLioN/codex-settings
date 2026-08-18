@@ -118,21 +118,28 @@ class CodexCapacityTests(unittest.TestCase):
         path.write_text(json.dumps(snapshot), encoding="utf-8")
         return path
 
-    def write_trusted_wide_wave_inputs(self, *, wave_size: int = 8) -> tuple[Path, Path, Path]:
-        skill = self.root / "consilium-skill.md"
-        skill.write_text("---\nname: consilium\n---\n", encoding="utf-8")
-        registry = self.root / "consilium-registry.json"
+    def write_trusted_wide_wave_inputs(
+        self,
+        *,
+        wave_size: int = 8,
+        skill_id: str = "consilium",
+        max_live_wave: int = 19,
+        fallback: str = "6+6+6+1",
+    ) -> tuple[Path, Path, Path]:
+        skill = self.root / f"{skill_id}-skill.md"
+        skill.write_text(f"---\nname: {skill_id}\n---\n", encoding="utf-8")
+        registry = self.root / f"{skill_id}-registry.json"
         registry.write_text(
             json.dumps(
                 {
                     "schema_version": 1,
                     "trusted_skills": [
                         {
-                            "skill_id": "consilium",
+                            "skill_id": skill_id,
                             "sha256": hashlib.sha256(skill.read_bytes()).hexdigest(),
-                            "max_live_wave": 19,
+                            "max_live_wave": max_live_wave,
                             "execution_kind": "flat-trusted-wide-wave",
-                            "fallback": "6+6+6+1",
+                            "fallback": fallback,
                         }
                     ],
                 }
@@ -141,12 +148,12 @@ class CodexCapacityTests(unittest.TestCase):
         )
         repo = self.root / "repo"
         repo.mkdir(exist_ok=True)
-        manifest = self.root / "consilium-manifest.json"
+        manifest = self.root / f"{skill_id}-manifest.json"
         manifest.write_text(
             json.dumps(
                 {
                     "schema_version": 1,
-                    "skill_id": "consilium",
+                    "skill_id": skill_id,
                     "wave_size": wave_size,
                     "repository_root": str(repo),
                     "base_commit": "1318542fb00df4eaef4fc4e8abfa8cd99e656bb3",
@@ -1439,6 +1446,45 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertEqual("BLOCK", result["capacity_decision"], result)
         self.assertEqual(0, result["allowed_wave_size"])
         self.assertEqual("wide_wave_requires_exact_nineteen", result["wide_wave_trust_reason"])
+
+    def test_prepare_wave_allows_trusted_lean_and_expert_wave_sizes(self) -> None:
+        snapshot = self.write_observer_snapshot()
+        observer_state_dir = self.root / "dynamic-observer"
+        self.write_dynamic_green_observer_state(observer_state_dir, effective_capacity=20)
+        test_env = dict(self.env, CODEX_CAPACITY_TEST_MODE="1")
+
+        for skill_id, wave_size, fallback in (
+            ("consilium-lean", 7, "chunks<=6"),
+            ("expert-consilium", 13, "6+6+1"),
+        ):
+            with self.subTest(skill_id=skill_id):
+                skill, registry, manifest = self.write_trusted_wide_wave_inputs(
+                    wave_size=wave_size,
+                    skill_id=skill_id,
+                    max_live_wave=20 if skill_id == "consilium-lean" else 13,
+                    fallback=fallback,
+                )
+                result = self.read_cli_json(
+                    "prepare-wave",
+                    "--wave-size",
+                    str(wave_size),
+                    "--observer-snapshot-json",
+                    str(snapshot),
+                    "--observer-state-dir",
+                    str(observer_state_dir),
+                    "--wide-wave-skill-id",
+                    skill_id,
+                    "--wide-wave-skill-file",
+                    str(skill),
+                    "--wide-wave-manifest",
+                    str(manifest),
+                    "--wide-wave-trusted-registry",
+                    str(registry),
+                    env=test_env,
+                )
+
+                self.assertEqual("ALLOW", result["capacity_decision"], result)
+                self.assertEqual(wave_size, result["allowed_wave_size"])
 
     def test_prepare_wave_validator_uses_exact_requested_wave_size(self) -> None:
         snapshot = self.write_observer_snapshot()
