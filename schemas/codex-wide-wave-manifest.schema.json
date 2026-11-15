@@ -14,9 +14,12 @@
   "properties": {
     "schema_version": {"type": "integer", "const": 1},
     "skill_id": {"type": "string", "minLength": 1},
-    "wave_size": {"type": "integer", "minimum": 1, "maximum": 20},
+    "wave_size": {"type": "integer", "minimum": 1, "maximum": 19},
     "repository_root": {"type": "string", "minLength": 1},
-    "base_commit": {"type": "string", "pattern": "^[0-9a-f]{7,64}$"},
+    "base_commit": {
+      "description": "Commit ID, or null for a read-only panel outside a Git repository.",
+      "anyOf": [{"type": "string", "pattern": "^[0-9a-f]{7,64}$"}, {"type": "null"}]
+    },
     "participants": {
       "type": "array",
       "minItems": 1,
@@ -35,5 +38,12 @@
         }
       }
     }
-  }
+  },
+  "allOf": [{
+    "if": {"required": ["base_commit"], "properties": {"base_commit": {"type": "null"}}},
+    "then": {"properties": {"participants": {"items": {"properties": {
+      "access": {"const": "read-only"},
+      "owned_write_scope": {"maxItems": 0}
+    }}}}}
+  }]
 }

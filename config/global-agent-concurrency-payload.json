@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "template": {
+    "source": "config/global-agent-concurrency.md",
+    "sha256": "2d1507701ca9142d1ba272cffa5a8bdedba649d68bbeb47d3ed2d740b1925e7b"
+  },
+  "files": [
+    {
+      "source": "config/skills/parallel-review-wave/SKILL.md",
+      "target_root": "codex_home",
+      "target": "skills/parallel-review-wave/SKILL.md",
+      "backends": [
+        "fd-doctor",
+        "native"
+      ],
+      "sha256": "47fdfc3451cc4ecebb74ff807b92cb26ca5035dccce4eae2d029647e211866c3"
+    },
+    {
+      "source": "config/trusted-wide-wave-skills.json",
+      "target_root": "codex_home",
+      "target": "config/trusted-wide-wave-skills.json",
+      "backends": [
+        "fd-doctor",
+        "native"
+      ],
+      "sha256": "850dfae62f9d9a67c5462f0accd5ae1a274d08427c6ab840d98f194b55b4314f"
+    },
+    {
+      "source": "scripts/validate_wide_wave_manifest.py",
+      "target_root": "local_libexec",
+      "target": "validate_wide_wave_manifest.py",
+      "backends": [
+        "fd-doctor",
+        "native"
+      ],
+      "sha256": "6f86f3216b7f9dadb0c46e30c4f2cdbc4e81a892988ea35e5b9e598af298658c"
+    },
+    {
+      "source": "scripts/codex-highfd",
+      "target_root": "local_bin",
+      "target": "codex-highfd",
+      "backends": [
+        "fd-doctor"
+      ],
+      "sha256": "a04efa493f60cc4a31cfe443aecfc8d02e804422aeb976cfc3cc7aa4602a8e57"
+    },
+    {
+      "source": "scripts/codex_fd_doctor.sh",
+      "target_root": "local_libexec",
+      "target": "codex_fd_doctor.sh",
+      "backends": [
+        "fd-doctor"
+      ],
+      "sha256": "7d47673052b913c572cb381376cd6590a80a2be88c3d6869159ba2a16f7265e3"
+    },
+    {
+      "source": "scripts/codex_process_inventory.py",
+      "target_root": "local_libexec",
+      "target": "codex_process_inventory.py",
+      "backends": [
+        "fd-doctor"
+      ],
+      "sha256": "299a692cbf1a9ced7a256c56673ba3e95c6e0b902f089086180d197964967516"
+    },
+    {
+      "source": "scripts/codex_capacity_observer.py",
+      "target_root": "local_libexec",
+      "target": "codex_capacity_observer.py",
+      "backends": [
+        "fd-doctor"
+      ],
+      "sha256": "16089b56c6daebd26f18358d0ff2e78ca84e2d61ead3bbeccedb3c0be2b58e76"
+    },
+    {
+      "source": "scripts/codex_capacity.py",
+      "target_root": "local_libexec",
+      "target": "codex_capacity.py",
+      "backends": [
+        "fd-doctor"
+      ],
+      "sha256": "fd090b6d9dc720714b005e1e228b683fa472c5730ea3388d8165e4d16d1c45ca"
+    }
+  ]
+}

@@ -3,22 +3,41 @@
   "trusted_skills": [
     {
       "skill_id": "consilium",
-      "sha256": "98dc2531865512f8628326d03ed8152bb2d896909eb6353ff200b3a798799264",
+      "sha256": "22e1befd16eef7a765fbef16794f261e99a90775b33090d203faf9765466bd26",
       "max_live_wave": 19,
       "execution_kind": "flat-trusted-wide-wave",
-      "fallback": "6+6+6+1"
+      "fallback": "6+6+6+1",
+      "compatible_sha256": [
+        "329265c53642e93253acab7eb99e30a8528e55fceb7c336647ef5e146dde5978",
+        "98dc2531865512f8628326d03ed8152bb2d896909eb6353ff200b3a798799264"
+      ]
     },
     {
       "skill_id": "expert-consilium",
-      "sha256": "0d98d933edad48fefb175587265810b4c6051bb50a82a8b60b5ebef8b183220c",
+      "sha256": "4d44f83a544f2b2aca7c3eb720b3b2d45d12dbd28df119ccb6ba850ce157d14e",
       "max_live_wave": 13,
       "execution_kind": "flat-trusted-wide-wave",
-      "fallback": "6+6+1"
+      "fallback": "6+6+1",
+      "compatible_sha256": [
+        "333e870e41be3cd03e749816804f7264c224b701312d6aa76025758f8edb3046",
+        "0d98d933edad48fefb175587265810b4c6051bb50a82a8b60b5ebef8b183220c"
+      ]
     },
     {
       "skill_id": "consilium-lean",
-      "sha256": "aa3fdc73d332faed449dbb7478f2655dffdbcd16330a26f7452457b8c046330c",
-      "max_live_wave": 20,
+      "sha256": "e311abd564444620a2ef4dabbd0e07e31a46502f5ee8c5df514aa17a9d5a98eb",
+      "max_live_wave": 19,
+      "execution_kind": "flat-trusted-wide-wave",
+      "fallback": "chunks<=6",
+      "compatible_sha256": [
+        "babb1f9c7148cc8b3af52bf68089635e798bfb9fb64fdd2c9829a2adcf7650f9",
+        "aa3fdc73d332faed449dbb7478f2655dffdbcd16330a26f7452457b8c046330c"
+      ]
+    },
+    {
+      "skill_id": "parallel-review-wave",
+      "sha256": "47fdfc3451cc4ecebb74ff807b92cb26ca5035dccce4eae2d029647e211866c3",
+      "max_live_wave": 19,
       "execution_kind": "flat-trusted-wide-wave",
       "fallback": "chunks<=6"
     }

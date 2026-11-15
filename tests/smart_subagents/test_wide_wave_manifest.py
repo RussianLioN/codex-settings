@@ -100,6 +100,63 @@ class WideWaveManifestTests(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("status=OK", completed.stdout)
 
+    def unversioned_readers(self) -> None:
+        self.write_manifest(base_commit=None, wave_size=19, participants=[
+            {"id": f"reader-{i}", "access": "read-only", "owned_write_scope": []}
+            for i in range(19)
+        ])
+
+    def test_accepts_unversioned_read_only_panel_without_creating_git(self) -> None:
+        self.unversioned_readers()
+        completed = self.run_validator("--expected-wave-size", "19")
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertFalse((self.repo / ".git").exists())
+
+    def test_unversioned_panel_forbids_writers(self) -> None:
+        for access in ("workspace-write", "danger-full-access"):
+            with self.subTest(access=access):
+                participants = [dict(p) for p in self.default_participants]
+                participants[-1]["access"] = access
+                self.write_manifest(base_commit=None, participants=participants)
+                completed = self.run_validator()
+                self.assertEqual(2, completed.returncode)
+                self.assertIn("unversioned_requires_read_only", completed.stdout)
+
+    def test_unversioned_panel_rejects_git_markers_in_root_or_parent(self) -> None:
+        self.unversioned_readers()
+        for marker in (self.repo / ".git", self.root / ".git"):
+            with self.subTest(marker=marker.name, parent=marker.parent.name):
+                marker.write_text("gitdir: /unavailable/worktree\n", encoding="utf-8")
+                completed = self.run_validator()
+                self.assertEqual(2, completed.returncode)
+                self.assertIn("base_commit_required_for_git_project", completed.stdout)
+                marker.unlink()
+
+    def test_unversioned_panel_preserves_skill_hash_check(self) -> None:
+        self.unversioned_readers()
+        self.skill.write_bytes(self.skill.read_bytes() + b"changed")
+        completed = self.run_validator()
+        self.assertEqual(2, completed.returncode)
+        self.assertIn("skill_hash_mismatch", completed.stdout)
+
+    def test_parallel_review_wave_accepts_seven_through_nineteen(self) -> None:
+        entry = {
+            "skill_id": "parallel-review-wave",
+            "sha256": hashlib.sha256(self.skill.read_bytes()).hexdigest(),
+            "max_live_wave": 19,
+            "execution_kind": "flat-trusted-wide-wave",
+            "fallback": "chunks<=6",
+        }
+        self.write_registry(entry)
+        for size in (7, 8, 19):
+            with self.subTest(size=size):
+                self.write_manifest(skill_id="parallel-review-wave", wave_size=size, participants=[
+                    {"id": f"reader-{i}", "access": "read-only", "owned_write_scope": []}
+                    for i in range(size)
+                ])
+                result = self.run_validator("--skill-id", "parallel-review-wave", "--expected-wave-size", str(size))
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
     def test_blocks_unknown_skill(self) -> None:
         self.write_registry()
 
@@ -131,6 +188,49 @@ class WideWaveManifestTests(unittest.TestCase):
 
         self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("skill_hash_mismatch", completed.stdout)
+
+    def test_accepts_explicit_compatible_skill_hash_for_existing_sessions(self) -> None:
+        registry = json.loads(self.registry.read_text(encoding="utf-8"))
+        entry = registry["trusted_skills"][0]
+        entry["compatible_sha256"] = [entry["sha256"]]
+        entry["sha256"] = hashlib.sha256(b"new skill release").hexdigest()
+        self.write_registry(entry)
+
+        completed = self.run_validator()
+
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+
+    def test_compatible_hash_does_not_accept_modified_skill(self) -> None:
+        registry = json.loads(self.registry.read_text(encoding="utf-8"))
+        entry = registry["trusted_skills"][0]
+        entry["compatible_sha256"] = [entry["sha256"]]
+        entry["sha256"] = hashlib.sha256(b"new skill release").hexdigest()
+        self.write_registry(entry)
+        self.skill.write_bytes(self.skill.read_bytes() + b"mutated-byte\n")
+
+        completed = self.run_validator()
+
+        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("skill_hash_mismatch", completed.stdout)
+
+    def test_rejects_malformed_compatible_hashes_even_when_primary_matches(self) -> None:
+        for compatible in ("*", ["*"], ["z" * 64], [None]):
+            with self.subTest(compatible=compatible):
+                self.write_registry(
+                    {
+                        "skill_id": "consilium",
+                        "sha256": hashlib.sha256(self.skill.read_bytes()).hexdigest(),
+                        "compatible_sha256": compatible,
+                        "max_live_wave": 19,
+                        "execution_kind": "flat-trusted-wide-wave",
+                        "fallback": "6+6+6+1",
+                    }
+                )
+
+                completed = self.run_validator()
+
+                self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+                self.assertIn("trusted_compatible_sha256_invalid", completed.stdout)
 
     def test_blocks_consilium_wave_above_trusted_maximum(self) -> None:
         self.write_manifest(
@@ -229,6 +329,17 @@ class WideWaveManifestTests(unittest.TestCase):
         completed = self.run_validator()
         self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("write_scope_escapes_repository", completed.stdout)
+
+    def test_rejects_windows_scope_spellings_and_mixed_separator_overlap(self) -> None:
+        for scope in (r"..\outside", r"C:\outside", "C:outside", r"\\host\share",
+                      "//host/share", r"src\shared.py", "src/../outside", "/outside"):
+            with self.subTest(scope=scope):
+                self.write_manifest(wave_size=2, participants=[
+                    {"id": "writer-1", "access": "workspace-write", "owned_write_scope": ["src/shared.py"]},
+                    {"id": "writer-2", "access": "workspace-write", "owned_write_scope": [scope]},
+                ])
+                result = self.run_validator()
+                self.assertEqual(2, result.returncode, result.stdout + result.stderr)
 
     def test_rejects_duplicate_and_nested_write_scopes(self) -> None:
         for scopes in (["src/a", "src/a"], ["src", "src/a"]):

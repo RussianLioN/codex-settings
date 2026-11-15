@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import time
 import subprocess
 import tempfile
 import unittest
@@ -16,6 +18,22 @@ NODE_REPL = "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl
 
 
 class FdDoctorProcessInventoryTests(unittest.TestCase):
+    def test_six_wave_success_does_not_claim_a_six_thread_session_limit(self) -> None:
+        environment = self.base_environment()
+        environment["CODEX_FD_DOCTOR_AGENT_THREAD_CAP"] = "19"
+        environment["CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT"] = "1"
+        environment["CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT"] = "0"
+        completed = self.run_doctor(environment)
+
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        fields = dict(line.split("=", 1) for line in completed.stdout.splitlines() if "=" in line)
+        self.assertEqual("6", fields["allowed_wave_size"])
+        self.assertEqual("6", fields.get("requested_wave_size"))
+        self.assertEqual("requested_wave", fields.get("admission_result_scope"))
+        self.assertEqual("not_evaluated", fields.get("larger_wave_admission"))
+        self.assertEqual("19", fields["agent_thread_cap"])
+        self.assertEqual("19", fields["max_agent_threads"])
+
     def base_environment(self) -> dict[str, str]:
         environment = os.environ.copy()
         environment.pop("CODEX_HOME", None)
@@ -268,6 +286,71 @@ class FdDoctorProcessInventoryTests(unittest.TestCase):
         self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("process_inventory_unavailable", completed.stdout)
 
+    def test_active_doctor_blocks_but_sigkill_releases_kernel_lock(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="fd-doctor-lock-") as root:
+            root_path = Path(root)
+            lock_path = root_path / "doctor.flock"
+            ready = root_path / "ready"
+            inventory = root_path / "inventory.py"
+            inventory.write_text(
+                "from pathlib import Path\nimport time\n"
+                + f"Path({str(ready)!r}).write_text('ready')\n"
+                + "time.sleep(30)\n", encoding="utf-8",
+            )
+            environment = self.base_environment()
+            environment["CODEX_FD_DOCTOR_LOCK_PATH"] = str(lock_path)
+            holder_environment = dict(environment)
+            for key in ("CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT", "CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT",
+                        "CODEX_FD_DOCTOR_ORPHAN_NODE_REPL_COUNT", "CODEX_FD_DOCTOR_STALE_NODE_REPL_COUNT",
+                        "CODEX_FD_DOCTOR_USER_PROCESS_COUNT"):
+                holder_environment.pop(key, None)
+            holder_environment["CODEX_FD_DOCTOR_PROCESS_INVENTORY"] = str(inventory)
+            holder_environment["CODEX_HOME"] = str(root_path / "codex-home")
+            holder = subprocess.Popen(["zsh", str(FD_DOCTOR), "--wave-size", "6"],
+                                      env=holder_environment, stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL, start_new_session=True)
+            try:
+                deadline = time.monotonic() + 5
+                while not ready.exists() and time.monotonic() < deadline and holder.poll() is None:
+                    time.sleep(0.01)
+                self.assertTrue(ready.exists(), "doctor did not reach inventory while holding its lock")
+                active = self.run_doctor(environment)
+                self.assertEqual(2, active.returncode, active.stdout + active.stderr)
+                self.assertIn("fd_doctor_already_running", active.stdout)
+                inode = lock_path.stat().st_ino
+                holder.kill()
+                holder.wait(timeout=5)
+                recovered = self.run_doctor(environment)
+                self.assertEqual(0, recovered.returncode, recovered.stdout + recovered.stderr)
+                self.assertEqual(inode, lock_path.stat().st_ino)
+                repeated = self.run_doctor(environment)
+                self.assertEqual(0, repeated.returncode, repeated.stdout + repeated.stderr)
+            finally:
+                if holder.poll() is None:
+                    holder.kill()
+                    holder.wait(timeout=5)
+                # The inventory subprocess deliberately remains alive during recovery.
+                # fcntl ownership is not inherited from the killed doctor.
+                try:
+                    os.killpg(holder.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def test_invalid_lock_paths_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="fd-doctor-lock-") as root:
+            directory = Path(root) / "legacy.lock"
+            directory.mkdir()
+            target = Path(root) / "target"
+            target.write_text("")
+            link = Path(root) / "link"
+            link.symlink_to(target)
+            for lock_path in (directory, link):
+                environment = self.base_environment()
+                environment["CODEX_FD_DOCTOR_LOCK_PATH"] = str(lock_path)
+                completed = self.run_doctor(environment)
+                self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+                self.assertIn("fd_doctor_lock_unavailable", completed.stdout)
+
     def test_process_count_overrides_are_ignored_outside_test_mode(self) -> None:
         environment = self.base_environment()
         environment.pop("CODEX_FD_DOCTOR_TEST_MODE")
@@ -316,7 +399,7 @@ class FdDoctorProcessInventoryTests(unittest.TestCase):
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("agent_thread_cap=not_configured", completed.stdout)
 
-    def test_trusted_wide_wave_preserves_partial_capacity_as_warn(self) -> None:
+    def test_trusted_wide_wave_ignores_machine_capacity(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp", prefix="fd-doctor-wide-") as temporary:
             root = Path(temporary)
             skill, registry, manifest = self.write_trusted_wide_wave_inputs(root)
@@ -346,13 +429,13 @@ class FdDoctorProcessInventoryTests(unittest.TestCase):
                 str(manifest),
             )
 
-        self.assertEqual(1, completed.returncode, completed.stdout + completed.stderr)
-        self.assertIn("status=WARN", completed.stdout)
-        self.assertIn("wave_size=19", completed.stdout)
-        self.assertIn("allowed_wave_size=6", completed.stdout)
-        self.assertIn("capacity_decision=WARN", completed.stdout)
+        self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+        self.assertIn("status=OK", completed.stdout)
+        self.assertIn("allowed_wave_size=19", completed.stdout)
+        self.assertIn("capacity_decision=ALLOW", completed.stdout)
+        self.assertIn("admission_scope=session", completed.stdout)
 
-    def test_trusted_wide_wave_allows_nineteen_only_at_full_capacity(self) -> None:
+    def test_trusted_wide_wave_allows_nineteen_at_full_capacity(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp", prefix="fd-doctor-wide-") as temporary:
             root = Path(temporary)
             skill, registry, manifest = self.write_trusted_wide_wave_inputs(root)
@@ -424,6 +507,62 @@ class FdDoctorProcessInventoryTests(unittest.TestCase):
         self.assertIn("capacity_decision=WARN", completed.stdout)
         self.assertIn("orphan_candidate_node_repl_processes", completed.stdout)
 
+    def test_session_cannot_admit_twenty_simultaneous_subagents(self) -> None:
+        completed = self.run_doctor(self.base_environment(), "--wave-size", "20")
+        self.assertEqual(2, completed.returncode)
+        self.assertIn("wave size must be an integer in 1..19", completed.stderr)
+
+    def test_session_admission_matrix(self) -> None:
+        cases = [
+            ({"external_codex_roots": roots, "codex_root_count": roots + 1}, 19, None, 0)
+            for roots in (0, 7, 40)
+        ] + [
+            ({}, 18, None, 2),
+            ({}, 19, "skill", 2),
+            ({}, 19, "manifest", 2),
+            ({"root_fd_used": 8190}, 19, None, 2),
+            ({"system_fd_used": 65530}, 19, None, 2),
+            ({"user_process_count": 4090}, 19, None, 2),
+            ({"memory_pressure": "critical"}, 19, None, 2),
+            ({"disk_free_bytes": 1}, 19, None, 2),
+            ({"memory_pressure": "warn"}, 19, None, 1),
+            ({"disk_free_bytes": 1}, 6, None, 2),
+        ]
+        for measurements, wave, tamper, expected in cases:
+            with self.subTest(measurements=measurements, wave=wave, tamper=tamper):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    skill, registry, manifest = self.write_trusted_wide_wave_inputs(root, wave_size=wave)
+                    snapshot = self.write_observer_snapshot(root)
+                    payload = json.loads(snapshot.read_text())
+                    payload.update(measurements)
+                    snapshot.write_text(json.dumps(payload))
+                    state = root / "forbidden-state"
+                    state.write_text("not a directory: no database or calibration access")
+                    fake = root / "forbidden-capacity.py"
+                    fake.write_text("raise RuntimeError('capacity must not run')")
+                    environment = self.base_environment()
+                    environment.update({
+                        "CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT": "1",
+                        "CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT": "1",
+                        "CODEX_FD_DOCTOR_TRUSTED_REGISTRY": str(registry),
+                        "CODEX_FD_DOCTOR_CAPACITY_OBSERVER_SNAPSHOT": str(snapshot),
+                        "CODEX_FD_DOCTOR_CAPACITY_OBSERVER_STATE_DIR": str(state),
+                        "CODEX_FD_DOCTOR_CAPACITY_SCRIPT": str(fake),
+                    })
+                    if tamper == "skill":
+                        skill.write_text("tampered")
+                    if tamper == "manifest":
+                        manifest.write_text("{}")
+                    completed = self.run_doctor(environment, "--wave-size", str(wave),
+                        "--skill-id", "consilium", "--skill-file", str(skill), "--manifest", str(manifest))
+                    self.assertEqual(expected, completed.returncode, completed.stdout + completed.stderr)
+                    self.assertIn("admission_scope=session", completed.stdout)
+                    self.assertIn("swapout_bytes_per_minute=unknown", completed.stdout)
+                    allowed = 0 if expected == 2 else 6 if expected == 1 else 19
+                    self.assertIn(f"allowed_wave_size={allowed}\n", completed.stdout)
+                    self.assertEqual("not a directory: no database or calibration access", state.read_text())
+
     def test_non_test_capacity_script_override_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp", prefix="fd-doctor-capacity-override-") as temporary:
             root = Path(temporary)
@@ -468,6 +607,63 @@ class FdDoctorProcessInventoryTests(unittest.TestCase):
             )
 
         self.assertNotIn("fake_capacity_script_used", completed.stdout + completed.stderr)
+
+    def test_unlimited_fd_budget_allows_trusted_nineteen(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            skill, registry, manifest = self.write_trusted_wide_wave_inputs(root)
+            snapshot = self.write_observer_snapshot(root)
+            environment = self.base_environment()
+            environment.update({
+                "CODEX_FD_DOCTOR_SOFT_LIMIT": "unlimited",
+                "CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT": "1",
+                "CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT": "1",
+                "CODEX_FD_DOCTOR_TRUSTED_REGISTRY": str(registry),
+                "CODEX_FD_DOCTOR_CAPACITY_OBSERVER_SNAPSHOT": str(snapshot),
+            })
+
+            completed = self.run_doctor(environment, "--wave-size", "19",
+                "--skill-id", "consilium", "--skill-file", str(skill), "--manifest", str(manifest))
+
+            self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
+            self.assertIn("allowed_wave_size=19\n", completed.stdout)
+            self.assertIn("fd_headroom=unlimited\n", completed.stdout)
+
+    def test_small_skill_bound_wave_validates_trust(self) -> None:
+        for tamper in (None, "skill", "manifest", "partial"):
+            with self.subTest(tamper=tamper), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                skill, registry, manifest = self.write_trusted_wide_wave_inputs(root, wave_size=1)
+                registry_payload = json.loads(registry.read_text())
+                registry_payload["trusted_skills"][0].update(
+                    skill_id="consilium-lean", fallback="chunks<=6"
+                )
+                registry.write_text(json.dumps(registry_payload))
+                manifest_payload = json.loads(manifest.read_text())
+                manifest_payload["skill_id"] = "consilium-lean"
+                manifest.write_text(json.dumps(manifest_payload))
+                snapshot = self.write_observer_snapshot(root)
+                environment = self.base_environment()
+                environment.update({
+                    "CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT": "1",
+                    "CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT": "1",
+                    "CODEX_FD_DOCTOR_TRUSTED_REGISTRY": str(registry),
+                    "CODEX_FD_DOCTOR_CAPACITY_OBSERVER_SNAPSHOT": str(snapshot),
+                })
+                if tamper == "skill":
+                    skill.write_text("tampered")
+                elif tamper == "manifest":
+                    manifest.write_text("{}")
+                arguments = ["--wave-size", "1", "--skill-id", "consilium-lean"]
+                if tamper != "partial":
+                    arguments += ["--skill-file", str(skill), "--manifest", str(manifest)]
+
+                completed = self.run_doctor(environment, *arguments)
+
+                self.assertEqual(0 if tamper is None else 2, completed.returncode,
+                                 completed.stdout + completed.stderr)
+                self.assertIn("allowed_wave_size=" + ("1" if tamper is None else "0"),
+                              completed.stdout)
 
     def test_untrusted_wide_wave_blocks_with_zero_allowed_capacity(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp", prefix="fd-doctor-wide-") as temporary:

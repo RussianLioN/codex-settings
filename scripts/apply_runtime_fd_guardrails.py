@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import os
+import platform
 import re
 import shlex
 import stat
@@ -20,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SAFE_THREAD_CAP = 20
+SAFE_THREAD_CAP = 19
 PUBLIC_THREAD_CAP_KEY = "max_concurrent_threads_per_session"
 LEGACY_AGENT_THREAD_KEY = "max_threads"
 LEGACY_NATIVE_THREAD_KEY = "max_concurrent_threads_per_session"
@@ -74,17 +75,24 @@ SHORT_HOOK_TIMEOUT_SECONDS = 1
 SESSION_END_HOOK_TIMEOUT_SECONDS = 3
 HOOK_TRUST_REVIEW_REQUIRED = "hook_trust_review_required=true"
 HOOK_TRUST_REVIEW_ACTION = "Откройте /hooks и подтвердите изменённые hooks"
-POLICY_BLOCK = f"""{POLICY_START}
-## Ограничение ресурсов субагентов
+CONCURRENCY_POLICY_START = "<!-- BEGIN CODEX AGENT CONCURRENCY -->"
+CONCURRENCY_POLICY_END = "<!-- END CODEX AGENT CONCURRENCY -->"
+SOURCE_CONCURRENCY_POLICY = SOURCE_ROOT / "config" / "global-agent-concurrency.md"
 
-- Одновременно запускай не более 6 живых субагентов; значение 20 является аварийным потолком сеанса, а не размером обычной волны.
-- Перед каждой новой волной выполняй `~/.local/bin/codex-highfd --fd-doctor --wave-size N`; `BLOCK` запрещает новые запуски, а `WARN` разрешает только волну не больше 6.
-- Для доверенной широкой волны 7-20 выполняй `~/.local/bin/codex-highfd --fd-doctor --wave-size N --skill-id ID --skill-file PATH --manifest PATH`; все три параметра доверия обязательны, а любой `WARN` запрещает широкую волну.
-- роли широкой волны не запускают вложенное делегирование; широкая волна является плоским набором участников с заранее заданным манифестом.
-- 20 узлов умного графа маршрутизатора являются аварийным графовым потолком, а не разрешением запускать обычную или недоверенную широкую волну.
-- Назначай один интегратор для общих или генерируемых файлов; остальные пишущие участники получают непересекающиеся области записи.
-- При `Too many open files` или `EMFILE` немедленно прекрати новые запуски, собери уже готовые ответы и заверши либо закрой все доступные дочерние нити до продолжения.
-{POLICY_END}"""
+
+def concurrency_policy(admission_backend: str | None = None) -> str:
+    system = platform.system()
+    if system not in {"Darwin", "Linux", "Windows"}:
+        raise ValueError("unregistered admission platform")
+    backend = admission_backend or ("fd-doctor" if system == "Darwin" else "native")
+    if backend not in {"fd-doctor", "native"}:
+        raise ValueError("unregistered admission backend")
+    if platform.system() == "Darwin" and backend != "fd-doctor":
+        raise ValueError("macOS requires fd-doctor")
+    return SOURCE_CONCURRENCY_POLICY.read_text(encoding="utf-8").strip().replace("{{ADMISSION_BACKEND}}", backend)
+
+
+POLICY_BLOCK = concurrency_policy()
 
 
 def parse_args() -> argparse.Namespace:
@@ -272,22 +280,29 @@ def validate_profile_thread_cap(value: object, profile_name: str) -> int:
     if type(value) is not int:
         raise ValueError(f"{profile_name}: agent thread cap must be an integer")
     if not 1 <= value <= SAFE_THREAD_CAP:
-        raise ValueError(f"{profile_name}: agent thread cap must be in 1..20")
+        raise ValueError(f"{profile_name}: agent thread cap must be in 1..19")
     if value != expected:
         raise ValueError(f"{profile_name}: agent thread cap must be {expected}")
     return value
 
 
-def desired_agents(text: str) -> str:
-    start_count = text.count(POLICY_START)
-    end_count = text.count(POLICY_END)
-    if (start_count, end_count) == (0, 0):
-        return text.rstrip() + "\n\n" + POLICY_BLOCK + "\n"
-    if (start_count, end_count) != (1, 1):
-        raise ValueError("managed AGENTS.md block markers are inconsistent")
-    start = text.index(POLICY_START)
-    end = text.index(POLICY_END, start) + len(POLICY_END)
-    return text[:start] + POLICY_BLOCK + text[end:]
+def desired_agents(text: str, admission_backend: str | None = None) -> str:
+    block = concurrency_policy(admission_backend)
+    for start_marker, end_marker in (
+        (POLICY_START, POLICY_END),
+        (CONCURRENCY_POLICY_START, CONCURRENCY_POLICY_END),
+    ):
+        counts = (text.count(start_marker), text.count(end_marker))
+        if counts == (0, 0):
+            continue
+        if counts != (1, 1):
+            raise ValueError("managed AGENTS.md block markers are inconsistent")
+        start = text.index(start_marker)
+        end = text.index(end_marker)
+        if end < start:
+            raise ValueError("managed AGENTS.md block markers are inconsistent")
+        text = text[:start] + text[end + len(end_marker):]
+    return text.rstrip() + "\n\n" + block + "\n"
 
 
 def desired_hooks_json(text: str, policy_path: Path) -> str:
@@ -462,7 +477,7 @@ def state_issues(
     agents = parsed.get("agents", {})
     multi_agent_v2 = parsed.get("features", {}).get("multi_agent_v2", {})
     if agents.get(PUBLIC_THREAD_CAP_KEY) != SAFE_THREAD_CAP:
-        issues.append("agents_max_concurrent_threads_not_20")
+        issues.append("agents_max_concurrent_threads_not_19")
     if LEGACY_AGENT_THREAD_KEY in agents:
         issues.append("agents_max_threads_legacy_present")
     if LEGACY_NATIVE_THREAD_KEY in multi_agent_v2:

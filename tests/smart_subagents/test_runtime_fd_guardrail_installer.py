@@ -229,7 +229,7 @@ max_depth = 1
 
         self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("status=BLOCK", completed.stdout)
-        self.assertIn("agents_max_concurrent_threads_not_20", completed.stdout)
+        self.assertIn("agents_max_concurrent_threads_not_19", completed.stdout)
         self.assertIn("agents_max_threads_legacy_present", completed.stdout)
         self.assertIn("native_session_thread_cap_legacy_present", completed.stdout)
         self.assertIn("installed_highfd_drifted", completed.stdout)
@@ -425,7 +425,7 @@ max_concurrent_threads_per_session = 1000
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
         repaired_text = self.config.read_text(encoding="utf-8")
         repaired = tomllib.loads(repaired_text)
-        self.assertEqual(20, repaired["agents"]["max_concurrent_threads_per_session"])
+        self.assertEqual(19, repaired["agents"]["max_concurrent_threads_per_session"])
         self.assertNotIn("max_threads", repaired["agents"])
         self.assertTrue(repaired["features"]["multi_agent_v2"]["enabled"])
         self.assertNotIn(
@@ -443,7 +443,7 @@ max_concurrent_threads_per_session = 1000
         self.assertEqual(0, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("status=APPLIED", completed.stdout)
         config = tomllib.loads(self.config.read_text(encoding="utf-8"))
-        self.assertEqual(20, config["agents"]["max_concurrent_threads_per_session"])
+        self.assertEqual(19, config["agents"]["max_concurrent_threads_per_session"])
         self.assertNotIn("max_threads", config["agents"])
         self.assertNotIn(
             "max_concurrent_threads_per_session",
@@ -861,7 +861,7 @@ max_depth = 1
 max_concurrent_threads_per_session = 0
 max_depth = 1
 """,
-                "batch-workers: agent thread cap must be in 1..20",
+                "batch-workers: agent thread cap must be in 1..19",
             ),
         ]
         for index, (profile_name, profile_text, expected_error) in enumerate(scenarios, start=1):

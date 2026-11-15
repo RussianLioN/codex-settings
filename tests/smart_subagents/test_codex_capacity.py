@@ -35,7 +35,7 @@ def load_capacity() -> ModuleType:
 
 def process_acquire_worker(home: str, index: int, start_event, queue) -> None:
     capacity = load_capacity()
-    store = capacity.CapacityStore(home=Path(home), capacity=20)
+    store = capacity.CapacityStore(home=Path(home), capacity=19)
     start_event.wait(10)
     started = time.monotonic()
     result = store.acquire_or_queue(session_id=f"proc-{index}", turn_id="t1", task_name=f"task-{index}")
@@ -1221,10 +1221,10 @@ class CodexCapacityTests(unittest.TestCase):
         )["state"])
 
     def test_64_parallel_clients_create_state_once_without_locked_errors(self) -> None:
-        store = self.manager(limit=20)
+        store = self.manager(limit=19)
 
         def call(index: int) -> tuple[float, dict[str, object]]:
-            local = self.capacity.CapacityStore(home=self.home, capacity=20)
+            local = self.capacity.CapacityStore(home=self.home, capacity=19)
             started = time.monotonic()
             result = local.acquire_or_queue(session_id=f"s{index}", turn_id="t1", task_name=f"task-{index}")
             return time.monotonic() - started, result
@@ -1264,7 +1264,7 @@ class CodexCapacityTests(unittest.TestCase):
         self.assertTrue(all(record["state"] in {"LEASED", "CAPACITY_QUEUED"} for record in records), records)
         self.assertLess(p99, 0.250, records)
         self.assertLessEqual(locked_busy / client_count, 0.001, records)
-        self.assertLessEqual(self.manager(limit=20).snapshot()["active_count"], 20)
+        self.assertLessEqual(self.manager(limit=19).snapshot()["active_count"], 20)
 
     def test_recreated_database_same_path_is_migrated_again(self) -> None:
         store = self.manager(limit=1)
@@ -1461,7 +1461,7 @@ class CodexCapacityTests(unittest.TestCase):
                 skill, registry, manifest = self.write_trusted_wide_wave_inputs(
                     wave_size=wave_size,
                     skill_id=skill_id,
-                    max_live_wave=20 if skill_id == "consilium-lean" else 13,
+                    max_live_wave=19 if skill_id == "consilium-lean" else 13,
                     fallback=fallback,
                 )
                 result = self.read_cli_json(

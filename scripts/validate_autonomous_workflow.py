@@ -657,10 +657,15 @@ def check_skills() -> None:
         text = path.read_text(encoding="utf-8")
         assert f"name: {name}" in text, f"{path} missing name frontmatter"
         assert "description:" in text, f"{path} missing description"
-        assert str(RUNTIME_PLAN) in text, f"{path} does not point to source plan"
+        source_plan = str(RUNTIME_PLAN).replace(str(HOME), "$HOME") if name == "parallel-review-wave" else str(RUNTIME_PLAN)
+        assert source_plan in text, f"{path} does not point to source plan"
     parallel = (CODEX_HOME / "skills/parallel-review-wave/SKILL.md").read_text(encoding="utf-8")
     for required in (
         "default wave size: 6",
+        "agents.max_concurrent_threads_per_session = 19",
+        "Другие вкладки не вычитаются",
+        "OK/19/ALLOW",
+        "Не заменяй его на `consilium-lean`",
         "$HOME/.local/bin/codex-highfd --fd-doctor",
         "FD preflight",
         "close_agent",
@@ -669,6 +674,10 @@ def check_skills() -> None:
         "environment limitation",
     ):
         assert required in parallel, f"parallel-review-wave missing policy marker: {required}"
+    canonical = REPO / "config/skills/parallel-review-wave/SKILL.md"
+    assert canonical.read_bytes() == (CODEX_HOME / "skills/parallel-review-wave/SKILL.md").read_bytes(), (
+        "installed parallel-review-wave differs from tracked source"
+    )
 
 
 def check_fd_guardrails() -> None:
