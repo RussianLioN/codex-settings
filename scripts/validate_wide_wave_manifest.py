@@ -14,7 +14,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 
-MAX_WAVE_SIZE = 20
+MAX_WAVE_SIZE = 19
 WRITE_ACCESSES = {"workspace-write", "danger-full-access"}
 READ_ACCESSES = WRITE_ACCESSES | {"read-only"}
 REQUIRED_TRUST_FIELDS = {
@@ -34,6 +34,7 @@ REQUIRED_MANIFEST_FIELDS = {
 }
 REQUIRED_PARTICIPANT_FIELDS = {"id", "access", "owned_write_scope"}
 TRUSTED_EXECUTION_CONTRACTS = {
+    "parallel-review-wave": ("flat-trusted-wide-wave", "chunks<=6"),
     "consilium": ("flat-trusted-wide-wave", "6+6+6+1"),
     "expert-consilium": ("flat-trusted-wide-wave", "6+6+1"),
     "consilium-lean": ("flat-trusted-wide-wave", "chunks<=6"),
@@ -84,6 +85,22 @@ def trust_entry(registry: Any, skill_id: str, reasons: list[str]) -> dict[str, A
     return matches[0]
 
 
+def is_unversioned_directory(root: Path) -> bool:
+    """Allow an explicit missing commit only outside Git metadata."""
+    if os.environ.get("GIT_DIR") or os.environ.get("GIT_WORK_TREE"):
+        return False
+    try:
+        resolved = root.resolve(strict=True)
+        for directory in (resolved, *resolved.parents):
+            if os.path.lexists(directory / ".git"):
+                return False
+            if (directory / "HEAD").is_file() and (directory / "objects").is_dir():
+                return False
+    except (OSError, RuntimeError):
+        return False
+    return True
+
+
 def validate_manifest_shape(manifest: Any, reasons: list[str]) -> None:
     if not isinstance(manifest, dict):
         reasons.append("manifest_not_object")
@@ -111,7 +128,11 @@ def validate_manifest_shape(manifest: Any, reasons: list[str]) -> None:
         elif not repository_path.is_dir():
             reasons.append("repository_root_missing")
     base_commit = manifest.get("base_commit")
-    if not isinstance(base_commit, str) or not re.fullmatch(r"[0-9a-f]{7,64}", base_commit):
+    unversioned = "base_commit" in manifest and base_commit is None
+    if unversioned:
+        if isinstance(repository_root, str) and repository_root and not is_unversioned_directory(Path(repository_root)):
+            reasons.append("base_commit_required_for_git_project")
+    elif not isinstance(base_commit, str) or not re.fullmatch(r"[0-9a-f]{7,64}", base_commit):
         reasons.append("base_commit_invalid")
     participants = manifest.get("participants")
     if not isinstance(participants, list) or not participants:
@@ -139,6 +160,8 @@ def validate_manifest_shape(manifest: Any, reasons: list[str]) -> None:
         if access not in READ_ACCESSES:
             reasons.append("participant_access_invalid")
         scopes = participant.get("owned_write_scope")
+        if unversioned and (access != "read-only" or scopes != []):
+            reasons.append("unversioned_requires_read_only")
         if not isinstance(scopes, list) or not all(isinstance(scope, str) and scope for scope in scopes):
             reasons.append("owned_write_scope_invalid")
         elif access == "read-only" and scopes:
@@ -205,7 +228,14 @@ def validate_trust(
     if entry is None:
         return
     expected_hash = entry.get("sha256")
-    if not isinstance(expected_hash, str) or len(expected_hash) != 64:
+    compatible_hashes = entry.get("compatible_sha256", [])
+    valid_compatible_hashes = isinstance(compatible_hashes, list) and all(
+        isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value)
+        for value in compatible_hashes
+    )
+    if not valid_compatible_hashes:
+        reasons.append("trusted_compatible_sha256_invalid")
+    if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
         reasons.append("trusted_sha256_invalid")
     else:
         if not os.path.isfile(skill_file):
@@ -214,7 +244,10 @@ def validate_trust(
         else:
             with open(skill_file, "rb") as stream:
                 actual_hash = hashlib.sha256(stream.read()).hexdigest()
-        if actual_hash is not None and actual_hash != expected_hash:
+        accepted_hashes = {expected_hash}
+        if valid_compatible_hashes:
+            accepted_hashes.update(compatible_hashes)
+        if actual_hash is not None and actual_hash not in accepted_hashes:
             reasons.append("skill_hash_mismatch")
     max_live_wave = entry.get("max_live_wave")
     if type(max_live_wave) is not int or max_live_wave < 1 or max_live_wave > MAX_WAVE_SIZE:

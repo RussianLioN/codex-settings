@@ -3,8 +3,8 @@ set -u
 set -o pipefail
 
 DEFAULT_WAVE_SIZE=6
-MAX_WAVE_SIZE=20
-MAX_NATIVE_SESSION_THREADS=20
+MAX_WAVE_SIZE=19
+MAX_NATIVE_SESSION_THREADS=19
 HIGH_FD_LIMIT=4096
 MIN_FD_HEADROOM=64
 BASE_REQUIRED_PROCESS_HEADROOM=128
@@ -63,50 +63,45 @@ if [[ ! "$wave_size" =~ ^[1-9][0-9]*$ ]] || (( wave_size > MAX_WAVE_SIZE )); the
   exit 2
 fi
 
-temporary_override_active() {
-  local codex_home=${CODEX_HOME:-$HOME/.codex}
-  local state_path="$codex_home/state/temporary-guardrails-override.json"
-  [[ -f "$state_path" && ! -L "$state_path" ]] || return 1
-  python3 - "$codex_home" "$state_path" <<'PY'
-import hashlib
-import json
-import os
-import stat
-import sys
-from pathlib import Path
+# Mandatory resource checks cannot be bypassed by a temporary hook override.
 
-codex_home = Path(sys.argv[1]).expanduser().resolve(strict=False)
-state_path = Path(sys.argv[2])
-try:
-    state_stat = state_path.stat()
-    if state_stat.st_uid != os.getuid() or stat.S_IMODE(state_stat.st_mode) != 0o600:
-        raise ValueError
-    payload = json.loads(state_path.read_text(encoding="utf-8"))
-    if payload.get("version") != 1 or payload.get("status") != "enabled":
-        raise ValueError
-    entries = payload.get("targets")
-    if not isinstance(entries, list) or {entry.get("name") for entry in entries if isinstance(entry, dict)} != {"config.toml", "hooks.json", "AGENTS.md"}:
-        raise ValueError
-    for entry in entries:
-        target = codex_home / entry["name"]
-        if target.is_symlink() or not target.is_file():
-            raise ValueError
-        if hashlib.sha256(target.read_bytes()).hexdigest() != entry.get("disabled_sha256"):
-            raise ValueError
-except (OSError, ValueError, TypeError, json.JSONDecodeError):
-    raise SystemExit(1)
-PY
+lock_path=${CODEX_FD_DOCTOR_LOCK_PATH:-${TMPDIR:-/tmp}/codex-fd-doctor-${UID}.lock}
+release_lock() {
+  [[ -n ${lock_owned:-} ]] || return 0
+  rm -f -- "$lock_path/owner.pid"
+  rmdir "$lock_path" 2>/dev/null || true
 }
 
-if temporary_override_active; then
-  print -- "status=OK"
+if ! mkdir -m 700 "$lock_path" 2>/dev/null; then
+  print -- "status=BLOCK"
   print -- "wave_size=$wave_size"
-  print -- "allowed_wave_size=$wave_size"
-  print -- "capacity_decision=ALLOW"
-  print -- "temporary_guardrails_override=enabled"
-  print -- "reasons=temporary_guardrails_override_enabled"
-  exit 0
+  print -- "requested_wave_size=$wave_size"
+  print -- "admission_result_scope=requested_wave"
+  print -- "larger_wave_admission=not_evaluated"
+  print -- "allowed_wave_size=0"
+  print -- "capacity_decision=BLOCK"
+  print -- "admission_scope=session"
+  print -- "default_wave_size=$DEFAULT_WAVE_SIZE"
+  print -- "reasons=fd_doctor_already_running"
+  exit 2
 fi
+lock_owned=1
+if ! print -r -- "$$" > "$lock_path/owner.pid"; then
+  release_lock
+  print -- "status=BLOCK"
+  print -- "wave_size=$wave_size"
+  print -- "requested_wave_size=$wave_size"
+  print -- "admission_result_scope=requested_wave"
+  print -- "larger_wave_admission=not_evaluated"
+  print -- "allowed_wave_size=0"
+  print -- "capacity_decision=BLOCK"
+  print -- "admission_scope=session"
+  print -- "default_wave_size=$DEFAULT_WAVE_SIZE"
+  print -- "reasons=fd_doctor_lock_unavailable"
+  exit 2
+fi
+trap release_lock EXIT
+trap 'exit 130' HUP INT TERM
 
 soft_limit=${CODEX_FD_DOCTOR_SOFT_LIMIT:-$(ulimit -Sn)}
 hard_limit=${CODEX_FD_DOCTOR_HARD_LIMIT:-$(ulimit -Hn)}
@@ -289,6 +284,8 @@ if [[ "$soft_limit" =~ ^[0-9]+$ ]]; then
   elif (( soft_limit < 1024 )); then
     warn "soft_limit_below_1024"
   fi
+elif [[ "$soft_limit" == unlimited ]]; then
+  fd_headroom=unlimited
 else
   fd_headroom=unknown
   if (( wave_size > DEFAULT_WAVE_SIZE )); then
@@ -320,7 +317,7 @@ if [[ "$node_repl_unknown_processes" =~ ^[0-9]+$ ]] && (( node_repl_unknown_proc
   warn "unknown_node_repl_ownership"
 fi
 
-if (( wave_size > DEFAULT_WAVE_SIZE )); then
+if (( wave_size > DEFAULT_WAVE_SIZE )) || [[ -n "$skill_id" || -n "$skill_file" || -n "$manifest" ]]; then
   if [[ -z "$skill_id" || -z "$skill_file" || -z "$manifest" ]]; then
     block "wide_wave_requires_trust_manifest"
   else
@@ -352,50 +349,52 @@ if (( wave_size > DEFAULT_WAVE_SIZE )); then
   fi
 fi
 
-if (( wave_size > DEFAULT_WAVE_SIZE )) && (( wide_wave_manifest_trusted == 1 )); then
-  capacity_script=$script_dir/codex_capacity.py
+# Native admission belongs to this session. Inspect current resources only;
+# never consult capacity stores, calibration, leases, or other sessions' quotas.
+if [[ "$skill_id" == consilium ]] && (( wave_size > DEFAULT_WAVE_SIZE && wave_size != 19 )); then
+  block "strict_consilium_requires_19"
+fi
+if (( wave_size <= DEFAULT_WAVE_SIZE || wide_wave_manifest_trusted == 1 )); then
+  resource_snapshot=""
   if [[ "$test_mode" == 1 ]]; then
-    capacity_script=${CODEX_FD_DOCTOR_CAPACITY_SCRIPT:-$capacity_script}
+    resource_snapshot=${CODEX_FD_DOCTOR_CAPACITY_OBSERVER_SNAPSHOT:-}
   fi
-  if [[ ! -f "$capacity_script" ]]; then
-    block "capacity_preflight_unavailable"
-  else
-    capacity_args=(prepare-wave --wave-size "$wave_size" --wide-wave-skill-id "$skill_id" --wide-wave-skill-file "$skill_file" --wide-wave-manifest "$manifest")
-    if [[ "$test_mode" == 1 ]]; then
-      capacity_args+=(--wide-wave-trusted-registry "$trusted_registry")
-      if [[ -n ${CODEX_FD_DOCTOR_CAPACITY_OBSERVER_SNAPSHOT:-} ]]; then
-        capacity_args+=(--observer-snapshot-json "$CODEX_FD_DOCTOR_CAPACITY_OBSERVER_SNAPSHOT")
-      fi
-      if [[ -n ${CODEX_FD_DOCTOR_CAPACITY_OBSERVER_STATE_DIR:-} ]]; then
-        capacity_args+=(--observer-state-dir "$CODEX_FD_DOCTOR_CAPACITY_OBSERVER_STATE_DIR")
-      fi
-      capacity_output=$(CODEX_CAPACITY_TEST_MODE=1 python3 "$capacity_script" "${capacity_args[@]}" 2>&1)
-    else
-      capacity_output=$(python3 "$capacity_script" "${capacity_args[@]}" 2>&1)
-    fi
-    capacity_exit=$?
-    capacity_allowed=$(print -r -- "$capacity_output" | python3 -c 'import json, sys; value = json.load(sys.stdin).get("allowed_wave_size"); print(value if isinstance(value, int) else "")' 2>/dev/null || true)
-    capacity_result=$(print -r -- "$capacity_output" | python3 -c 'import json, sys; value = json.load(sys.stdin).get("capacity_decision"); print(value if isinstance(value, str) else "")' 2>/dev/null || true)
-    capacity_reasons=$(print -r -- "$capacity_output" | python3 -c 'import json, sys; value = json.load(sys.stdin).get("observer_reasons", []); print(",".join(str(item) for item in value) if isinstance(value, list) else "")' 2>/dev/null || true)
-    if (( capacity_exit != 0 )) || [[ ! "$capacity_allowed" =~ ^[0-9]+$ ]] || [[ ! "$capacity_result" =~ ^(ALLOW|WARN|BLOCK)$ ]]; then
-      block "capacity_preflight_unavailable"
-    else
-      allowed_wave_size=$capacity_allowed
-      capacity_decision=$capacity_result
-      if [[ -n "$capacity_reasons" ]]; then
-        reasons+=("$capacity_reasons")
-      fi
-      case "$capacity_decision" in
-        ALLOW)
-          ;;
-        WARN)
-          warn "capacity_limited_to_${allowed_wave_size}"
-          ;;
-        BLOCK)
-          block "capacity_preflight_blocked"
-          ;;
-      esac
-    fi
+  if [[ "$test_mode" != 1 || -n "$resource_snapshot" || "$wave_size" -gt "$DEFAULT_WAVE_SIZE" ]]; then
+  resource_output=$(python3 - "${0:A:h}" "$resource_snapshot" <<'PY_RESOURCE'
+import json
+import sys
+import time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+try:
+    import codex_capacity_observer as observer
+    raw = (observer.json_loads_strict(Path(sys.argv[2]).read_text(encoding="utf-8"))
+           if sys.argv[2] else observer.collect_snapshot(
+               deadline=time.monotonic() + observer.OBSERVE_TIMEOUT_SECONDS))
+    snapshot = observer.normalize_snapshot(raw)
+    if snapshot.get("_missing"):
+        raise observer.ObservationError("measurement_unavailable:" + ",".join(snapshot["_missing"]))
+    # Zero costs evaluate actual reserves, without a speculative per-agent cost.
+    costs = dict.fromkeys(observer.MIN_COSTS["normal"], 0.0)
+    red, yellow = [], []
+    status = observer.classify_raw_status(
+        snapshot, costs, {"swapout_bytes_per_minute": None}, red, yellow)
+    decision = {"GREEN": "ALLOW", "YELLOW": "WARN", "RED": "BLOCK"}[status]
+    print(decision + "|" + ",".join(red + yellow))
+except Exception:
+    print("BLOCK|resource_measurement_unavailable")
+PY_RESOURCE
+  )
+  resource_decision=${resource_output%%|*}
+  resource_reasons=${resource_output#*|}
+  if [[ -n "$resource_reasons" ]]; then
+    reasons+=("$resource_reasons")
+  fi
+  case "$resource_decision" in
+    ALLOW) ;;
+    WARN) warn "resource_warning_requires_fallback" ;;
+    *) block "resource_preflight_blocked" ;;
+  esac
   fi
 fi
 
@@ -416,8 +415,13 @@ fi
 
 print -- "status=$doctor_status"
 print -- "wave_size=$wave_size"
+print -- "requested_wave_size=$wave_size"
+print -- "admission_result_scope=requested_wave"
+print -- "larger_wave_admission=not_evaluated"
 print -- "allowed_wave_size=$allowed_wave_size"
 print -- "capacity_decision=$capacity_decision"
+print -- "admission_scope=session"
+print -- "swapout_bytes_per_minute=unknown"
 print -- "default_wave_size=$DEFAULT_WAVE_SIZE"
 print -- "agent_thread_cap=$agent_thread_cap"
 print -- "max_agent_threads=$MAX_NATIVE_SESSION_THREADS"
