@@ -36,7 +36,7 @@
     },
     {
       "skill_id": "parallel-review-wave",
-      "sha256": "e1d9ffc8b8ba1d02c583f4ab95713bac75d8d9550f16613a9aacebcf13243dbf",
+      "sha256": "47fdfc3451cc4ecebb74ff807b92cb26ca5035dccce4eae2d029647e211866c3",
       "max_live_wave": 19,
       "execution_kind": "flat-trusted-wide-wave",
       "fallback": "chunks<=6"

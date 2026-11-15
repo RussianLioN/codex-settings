@@ -330,6 +330,17 @@ class WideWaveManifestTests(unittest.TestCase):
         self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("write_scope_escapes_repository", completed.stdout)
 
+    def test_rejects_windows_scope_spellings_and_mixed_separator_overlap(self) -> None:
+        for scope in (r"..\outside", r"C:\outside", "C:outside", r"\\host\share",
+                      "//host/share", r"src\shared.py", "src/../outside", "/outside"):
+            with self.subTest(scope=scope):
+                self.write_manifest(wave_size=2, participants=[
+                    {"id": "writer-1", "access": "workspace-write", "owned_write_scope": ["src/shared.py"]},
+                    {"id": "writer-2", "access": "workspace-write", "owned_write_scope": [scope]},
+                ])
+                result = self.run_validator()
+                self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+
     def test_rejects_duplicate_and_nested_write_scopes(self) -> None:
         for scopes in (["src/a", "src/a"], ["src", "src/a"]):
             with self.subTest(scopes=scopes):

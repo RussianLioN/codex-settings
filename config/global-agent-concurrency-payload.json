@@ -2,7 +2,7 @@
   "schema_version": 1,
   "template": {
     "source": "config/global-agent-concurrency.md",
-    "sha256": "25b744699a71629540c08c978cd8cb4b5b1ed53b13837e75dfaf83caf0b88ccf"
+    "sha256": "2d1507701ca9142d1ba272cffa5a8bdedba649d68bbeb47d3ed2d740b1925e7b"
   },
   "files": [
     {
@@ -13,7 +13,7 @@
         "fd-doctor",
         "native"
       ],
-      "sha256": "e1d9ffc8b8ba1d02c583f4ab95713bac75d8d9550f16613a9aacebcf13243dbf"
+      "sha256": "47fdfc3451cc4ecebb74ff807b92cb26ca5035dccce4eae2d029647e211866c3"
     },
     {
       "source": "config/trusted-wide-wave-skills.json",
@@ -23,7 +23,7 @@
         "fd-doctor",
         "native"
       ],
-      "sha256": "38c7ed30241aab22d34342808a0f8e8165b22d5ef7d9ef9a5846789ed07b0cb9"
+      "sha256": "850dfae62f9d9a67c5462f0accd5ae1a274d08427c6ab840d98f194b55b4314f"
     },
     {
       "source": "scripts/validate_wide_wave_manifest.py",
@@ -33,7 +33,7 @@
         "fd-doctor",
         "native"
       ],
-      "sha256": "c1ee01e30d1a941081c1a13937b2c59aac5854dc3c3816acd7fab96313355839"
+      "sha256": "6f86f3216b7f9dadb0c46e30c4f2cdbc4e81a892988ea35e5b9e598af298658c"
     },
     {
       "source": "scripts/codex-highfd",
@@ -51,7 +51,7 @@
       "backends": [
         "fd-doctor"
       ],
-      "sha256": "fa492388c1366be2b5d97c0e8c6e179aa39f0033643c08332132225ac3f93965"
+      "sha256": "7d47673052b913c572cb381376cd6590a80a2be88c3d6869159ba2a16f7265e3"
     },
     {
       "source": "scripts/codex_process_inventory.py",

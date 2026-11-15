@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import time
 import subprocess
 import tempfile
 import unittest
@@ -284,18 +286,70 @@ class FdDoctorProcessInventoryTests(unittest.TestCase):
         self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
         self.assertIn("process_inventory_unavailable", completed.stdout)
 
-    def test_reentrant_doctor_is_blocked_without_waiting(self) -> None:
+    def test_active_doctor_blocks_but_sigkill_releases_kernel_lock(self) -> None:
         with tempfile.TemporaryDirectory(dir="/tmp", prefix="fd-doctor-lock-") as root:
-            lock_path = Path(root) / "doctor.lock"
-            lock_path.mkdir()
-            (lock_path / "owner.pid").write_text(str(os.getpid()), encoding="utf-8")
+            root_path = Path(root)
+            lock_path = root_path / "doctor.flock"
+            ready = root_path / "ready"
+            inventory = root_path / "inventory.py"
+            inventory.write_text(
+                "from pathlib import Path\nimport time\n"
+                + f"Path({str(ready)!r}).write_text('ready')\n"
+                + "time.sleep(30)\n", encoding="utf-8",
+            )
             environment = self.base_environment()
-            environment.update({"CODEX_FD_DOCTOR_LOCK_PATH": str(lock_path)})
+            environment["CODEX_FD_DOCTOR_LOCK_PATH"] = str(lock_path)
+            holder_environment = dict(environment)
+            for key in ("CODEX_FD_DOCTOR_CODEX_PROCESS_COUNT", "CODEX_FD_DOCTOR_NODE_REPL_PROCESS_COUNT",
+                        "CODEX_FD_DOCTOR_ORPHAN_NODE_REPL_COUNT", "CODEX_FD_DOCTOR_STALE_NODE_REPL_COUNT",
+                        "CODEX_FD_DOCTOR_USER_PROCESS_COUNT"):
+                holder_environment.pop(key, None)
+            holder_environment["CODEX_FD_DOCTOR_PROCESS_INVENTORY"] = str(inventory)
+            holder_environment["CODEX_HOME"] = str(root_path / "codex-home")
+            holder = subprocess.Popen(["zsh", str(FD_DOCTOR), "--wave-size", "6"],
+                                      env=holder_environment, stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.DEVNULL, start_new_session=True)
+            try:
+                deadline = time.monotonic() + 5
+                while not ready.exists() and time.monotonic() < deadline and holder.poll() is None:
+                    time.sleep(0.01)
+                self.assertTrue(ready.exists(), "doctor did not reach inventory while holding its lock")
+                active = self.run_doctor(environment)
+                self.assertEqual(2, active.returncode, active.stdout + active.stderr)
+                self.assertIn("fd_doctor_already_running", active.stdout)
+                inode = lock_path.stat().st_ino
+                holder.kill()
+                holder.wait(timeout=5)
+                recovered = self.run_doctor(environment)
+                self.assertEqual(0, recovered.returncode, recovered.stdout + recovered.stderr)
+                self.assertEqual(inode, lock_path.stat().st_ino)
+                repeated = self.run_doctor(environment)
+                self.assertEqual(0, repeated.returncode, repeated.stdout + repeated.stderr)
+            finally:
+                if holder.poll() is None:
+                    holder.kill()
+                    holder.wait(timeout=5)
+                # The inventory subprocess deliberately remains alive during recovery.
+                # fcntl ownership is not inherited from the killed doctor.
+                try:
+                    os.killpg(holder.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
-            completed = self.run_doctor(environment)
-
-        self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
-        self.assertIn("fd_doctor_already_running", completed.stdout)
+    def test_invalid_lock_paths_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory(dir="/tmp", prefix="fd-doctor-lock-") as root:
+            directory = Path(root) / "legacy.lock"
+            directory.mkdir()
+            target = Path(root) / "target"
+            target.write_text("")
+            link = Path(root) / "link"
+            link.symlink_to(target)
+            for lock_path in (directory, link):
+                environment = self.base_environment()
+                environment["CODEX_FD_DOCTOR_LOCK_PATH"] = str(lock_path)
+                completed = self.run_doctor(environment)
+                self.assertEqual(2, completed.returncode, completed.stdout + completed.stderr)
+                self.assertIn("fd_doctor_lock_unavailable", completed.stdout)
 
     def test_process_count_overrides_are_ignored_outside_test_mode(self) -> None:
         environment = self.base_environment()

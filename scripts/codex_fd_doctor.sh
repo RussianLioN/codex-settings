@@ -65,14 +65,26 @@ fi
 
 # Mandatory resource checks cannot be bypassed by a temporary hook override.
 
-lock_path=${CODEX_FD_DOCTOR_LOCK_PATH:-${TMPDIR:-/tmp}/codex-fd-doctor-${UID}.lock}
-release_lock() {
-  [[ -n ${lock_owned:-} ]] || return 0
-  rm -f -- "$lock_path/owner.pid"
-  rmdir "$lock_path" 2>/dev/null || true
-}
-
-if ! mkdir -m 700 "$lock_path" 2>/dev/null; then
+# fcntl locks belong to the shell process and the kernel releases them on exit,
+# including SIGKILL. Keep the file inode: unlinking it would allow two owners.
+# A new filename leaves legacy mkdir/owner.pid locks outside this protocol.
+lock_path=${CODEX_FD_DOCTOR_LOCK_PATH:-${TMPDIR:-/tmp}/codex-fd-doctor-${UID}.flock}
+lock_failure=fd_doctor_lock_unavailable
+if [[ ! -e "$lock_path" && ! -L "$lock_path" ]]; then
+  (umask 077; setopt noclobber; : > "$lock_path") 2>/dev/null || true
+fi
+if [[ -f "$lock_path" && ! -L "$lock_path" && -O "$lock_path" ]] && zmodload zsh/system; then
+  # Without -e the descriptor closes on exec; child commands cannot retain it.
+  # A positive millisecond timeout distinguishes contention (2) from I/O errors (1).
+  zsystem flock -t 0.001 -f lock_fd "$lock_path" 2>/dev/null
+  lock_result=$?
+  if (( lock_result == 2 )); then
+    lock_failure=fd_doctor_already_running
+  fi
+else
+  lock_result=1
+fi
+if (( lock_result != 0 )); then
   print -- "status=BLOCK"
   print -- "wave_size=$wave_size"
   print -- "requested_wave_size=$wave_size"
@@ -82,25 +94,9 @@ if ! mkdir -m 700 "$lock_path" 2>/dev/null; then
   print -- "capacity_decision=BLOCK"
   print -- "admission_scope=session"
   print -- "default_wave_size=$DEFAULT_WAVE_SIZE"
-  print -- "reasons=fd_doctor_already_running"
+  print -- "reasons=$lock_failure"
   exit 2
 fi
-lock_owned=1
-if ! print -r -- "$$" > "$lock_path/owner.pid"; then
-  release_lock
-  print -- "status=BLOCK"
-  print -- "wave_size=$wave_size"
-  print -- "requested_wave_size=$wave_size"
-  print -- "admission_result_scope=requested_wave"
-  print -- "larger_wave_admission=not_evaluated"
-  print -- "allowed_wave_size=0"
-  print -- "capacity_decision=BLOCK"
-  print -- "admission_scope=session"
-  print -- "default_wave_size=$DEFAULT_WAVE_SIZE"
-  print -- "reasons=fd_doctor_lock_unavailable"
-  exit 2
-fi
-trap release_lock EXIT
 trap 'exit 130' HUP INT TERM
 
 soft_limit=${CODEX_FD_DOCTOR_SOFT_LIMIT:-$(ulimit -Sn)}

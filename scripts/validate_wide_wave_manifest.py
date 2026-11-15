@@ -171,6 +171,11 @@ def validate_manifest_shape(manifest: Any, reasons: list[str]) -> None:
 
 
 def normalized_scope(scope: str, reasons: list[str]) -> tuple[str, ...] | None:
+    # One portable spelling prevents Windows separators/drives from bypassing
+    # traversal and overlap checks performed with PurePosixPath.
+    if "\\" in scope or ":" in scope:
+        reasons.append("write_scope_requires_posix_relative")
+        return None
     path = PurePosixPath(scope)
     if path.is_absolute():
         reasons.append("absolute_write_scope")
